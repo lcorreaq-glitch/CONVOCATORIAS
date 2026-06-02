@@ -54,7 +54,7 @@ export default function PropuestaForm({ open, onOpenChange, convocatoriaId, camp
   const validate = () => {
     const errs = {};
     if (!form.nombre.trim()) errs.nombre = "Obligatorio";
-    campos.forEach((c) => {
+    camposForm.forEach((c) => {
       if (c.obligatorio) {
         const v = form.datos[c.nombre_interno];
         const empty = v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0);
@@ -94,13 +94,16 @@ export default function PropuestaForm({ open, onOpenChange, convocatoriaId, camp
     } finally { setBusy(false); }
   };
 
+  // Filtrar solo campos con uso_propuesta != false (default true para compatibilidad)
+  const camposForm = useMemo(() => campos.filter((c) => c.uso_propuesta !== false), [campos]);
+
   // Agrupar campos por sección visual (4 grupos)
   const grupos = useMemo(() => {
     const territoriales = ["subregion", "municipio"];
     const organizacionales = ["tipo_organizacion", "enfoque_poblacional", "nombre_organizacion", "nit_rut", "id_organismo_comunal", "representante_legal"];
     const propuestaFlds = ["linea", "tematica"];
-    const filtered = (keys) => campos.filter((c) => keys.includes(c.nombre_interno));
-    const otros = campos.filter((c) =>
+    const filtered = (keys) => camposForm.filter((c) => keys.includes(c.nombre_interno));
+    const otros = camposForm.filter((c) =>
       !territoriales.includes(c.nombre_interno) &&
       !organizacionales.includes(c.nombre_interno) &&
       !propuestaFlds.includes(c.nombre_interno)
@@ -111,7 +114,7 @@ export default function PropuestaForm({ open, onOpenChange, convocatoriaId, camp
       { title: "Categorización de la propuesta", items: filtered(propuestaFlds) },
       { title: "Datos administrativos y adicionales", items: otros },
     ].filter((g) => g.items.length > 0);
-  }, [campos]);
+  }, [camposForm]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -171,10 +174,10 @@ export default function PropuestaForm({ open, onOpenChange, convocatoriaId, camp
             </Section>
           ))}
 
-          {campos.length === 0 && (
+          {camposForm.length === 0 && (
             <div className="border border-dashed border-border rounded-lg p-6 text-center text-sm text-muted-foreground">
               <Info className="w-5 h-5 mx-auto mb-2" />
-              Esta convocatoria no tiene campos configurados. Ve a <strong className="text-[#14776A]">Configuración → Campos</strong> para agregarlos.
+              Esta convocatoria no tiene campos configurados para el formulario. Ve a <strong className="text-[#14776A]">Configuración → Campos</strong> y activa el flag <em>"form propuesta"</em>.
             </div>
           )}
         </div>

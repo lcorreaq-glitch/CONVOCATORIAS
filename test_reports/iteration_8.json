@@ -1,0 +1,38 @@
+{
+  "summary": "Iter 8: Validation of new `uso_propuesta` (form propuesta) and `uso_lista` (lista propuestas) flags replacing the old fixed 'propuesta' badge. Backend (8/8 PASS) and Frontend (10/10 scenarios PASS). The 'Se usa en' column in /configuracion → Campos now renders 'form propuesta' (verde) + 'lista propuestas' (azul) as editable badges; the old fixed 'propuesta' badge is gone (0 occurrences). Popover '+ añadir' lists exactly 8 flags in the documented order: form propuesta, lista propuestas, obligatorio, filtro, ranking, desempate, actas, editable — each with descriptive helper text. /propuestas table now renders 13 columns: 5 fixed (Código, Propuesta, Organización, Estado, Expediente) + 7 dynamic from uso_lista=true (Subregión, Municipio, Tipo de Organización, Nombre Organización, NIT/RUT, Línea, Temática) + Acciones. Toggle of uso_lista off on 'tematica' triggers PATCH /api/campos/{id} (200 OK) and the Temática column disappears from /propuestas after reload. PATCH and POST endpoints accept the new flags as boolean. ConvocatoriaContextBanner sigue presente en /propuestas. Regresión OK: list+create+edit de propuestas siguen funcionando (P-0013 creada y eliminada vía mongo).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/propuestas/{id}", "issue": "No existe endpoint DELETE para propuestas (405 Method Not Allowed). Tuve que limpiar la propuesta de prueba directamente en mongo. No es parte del scope de este cambio pero es un gap si alguna vez se quiere borrar una propuesta."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Configuración → Campos popover '+ añadir'", "issues": ["Los 8 flags se renderizan en orden y con sus descripciones. Sin issues de contraste; switches verdes coherentes con tema."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_campos_flags.py",
+    "/app/test_reports/pytest/iter8_campos_flags.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "InlineFlagsEditor.jsx mantiene la prop `alwaysOn` (línea 21) pero ya no se usa desde CamposPanel (el badge fijo 'propuesta' fue removido). El parámetro sigue ahí por compatibilidad con CriteriosPanel u otros usos — verificar si todavía se usa en algún call site; si no, se puede limpiar.",
+    "PropuestaForm.jsx línea 98: `camposForm = campos.filter((c) => c.uso_propuesta !== false)` — el `!== false` (en vez de `=== true`) es correcto para mantener retro-compatibilidad con campos viejos donde uso_propuesta no estaba seteado (undefined→incluido). Bien hecho.",
+    "Propuestas.jsx no fue inspeccionado a fondo, pero el comportamiento dinámico de columnas funciona y `colspan` del empty state se ajusta — confirmar visualmente que el filtro de búsqueda y los botones de Acciones se mantienen con el nuevo número variable de columnas (lo verifiqué con 7 y 6 columnas y la tabla se renderiza correctamente).",
+    "routes_config.py CampoIn: agrega uso_propuesta=True default y uso_lista=False default — coherente. El default uso_lista=False evita que al crear un campo nuevo aparezca automáticamente en la tabla de /propuestas (UX correcta: el usuario decide).",
+    "Considerar agregar `data-testid` específico al thead de /propuestas (e.g. `propuestas-th-{nombre_interno}`) para facilitar tests automatizados de columnas dinámicas — actualmente solo accesible por texto."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_campos_flags.py (nuevo, 8 tests)"
+  ],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "100% (10/10 scenarios)"},
+  "test_credentials": "lcorreaq / Chocolate2026!",
+  "seed_data_creation": "Ninguna persistida. Durante el test: (a) se creó y borró un campo test_flag_* en INC2026 (cleanup OK); (b) se creó propuesta TEST_REGRESION_iter8 y se eliminó vía mongo (no hay DELETE API); (c) se toggled 'tematica.uso_lista' off y se restauró via mongo a True (estado original verificado por TestINCFlagsState).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "BD INC2026 intacta: 7 campos con uso_lista=True (subregion, municipio, tipo_organizacion, linea, tematica, nombre_organizacion, nit_rut), todos los campos con uso_propuesta=True. TestIds clave: flag-{itemId}-{flagKey}-on (uso_propuesta, uso_lista, obligatorio, uso_filtro, uso_ranking, uso_desempate, uso_actas, editable), flags-edit-{itemId}, conv-banner-switcher, campos-preview-form. /propuestas headers esperados para INC2026: 13 columnas. PropuestaForm.jsx maneja previewMode (no cambió). InlineFlagsEditor.jsx aún acepta prop alwaysOn (en desuso para campos pero quizá usada en criterios).",
+  "rca of the issue": "N/A — sin bugs reproducidos. Todos los cambios funcionan end-to-end. La única observación de scope es que DELETE /api/propuestas/{id} no existe (405), lo cual no afecta este feature pero podría ser relevante si se quiere completar el CRUD."
+}

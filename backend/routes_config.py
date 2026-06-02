@@ -187,6 +187,8 @@ class CampoIn(BaseModel):
     uso_reportes: bool = True
     uso_ranking: bool = False
     uso_desempate: bool = False
+    uso_propuesta: bool = True   # Aparece en el formulario de propuesta
+    uso_lista: bool = False      # Aparece como columna en /propuestas
     depende_de: Optional[str] = None
     catalogo_id: Optional[str] = None
     orden: int = 0

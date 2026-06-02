@@ -12,6 +12,14 @@ import { TID } from "@/constants/testIds";
 import PropuestaForm from "./propuestas/PropuestaForm";
 import ConvocatoriaContextBanner from "@/components/ConvocatoriaContextBanner";
 
+function renderCellValue(v, campo) {
+  if (v === null || v === undefined || v === "") return <span className="text-muted-foreground">—</span>;
+  if (Array.isArray(v)) return v.length === 0 ? <span className="text-muted-foreground">—</span> : v.join(", ");
+  if (campo?.tipo === "si_no") return v ? "Sí" : "No";
+  if (campo?.tipo === "url") return <a href={v} target="_blank" rel="noreferrer" className="text-[#0F5E54] hover:underline">abrir</a>;
+  return String(v);
+}
+
 export default function Propuestas() {
   const { activeConvocatoriaId, user } = useAuth();
   const [items, setItems] = useState([]);
@@ -151,47 +159,61 @@ export default function Propuestas() {
         </div>
       </div>
 
-      <div className="border border-border rounded-sm bg-white overflow-x-auto">
-        <table className="w-full dense-table" data-testid={TID.propuestasTable}>
-          <thead>
-            <tr>
-              <th>Código</th><th>Propuesta</th><th>Organización</th><th>Subregión</th><th>Línea</th>
-              <th>Estado</th><th>Expediente</th>
-              {canEdit && <th className="text-right">Acciones</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((p) => (
-              <tr key={p.id} data-testid={`propuesta-row-${p.codigo}`}>
-                <td className="font-mono text-xs">{p.codigo}</td>
-                <td><div className="font-semibold">{p.nombre}</div></td>
-                <td className="text-muted-foreground">{p.organizacion || p.datos?.nombre_organizacion || "—"}</td>
-                <td>{p.datos?.subregion || "—"}</td>
-                <td>{p.datos?.linea || "—"}</td>
-                <td><Badge tone={estadoTone(p.estado)}>{p.estado}</Badge></td>
-                <td>
-                  {p.datos?.link_expediente ? (
-                    <a href={p.datos.link_expediente} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[#0F5E54] hover:underline text-xs">
-                      <ExternalLink className="w-3 h-3" /> Abrir
-                    </a>
-                  ) : <span className="text-muted-foreground text-xs">—</span>}
-                </td>
-                {canEdit && (
-                  <td className="text-right">
-                    <button
-                      onClick={() => { setEditing(p); setFormOpen(true); }}
-                      className="text-[#14776A] hover:text-[#0F5E54] p-1"
-                      data-testid={`prop-edit-${p.codigo}`}
-                      title="Editar propuesta"
-                    ><Pencil className="w-4 h-4 inline" /></button>
-                  </td>
-                )}
-              </tr>
-            ))}
-            {!items.length && <tr><td colSpan={canEdit ? 8 : 7}><EmptyState title="Sin propuestas" hint="Crea una propuesta nueva o usa carga masiva para importar desde Excel." icon={FileStack} /></td></tr>}
-          </tbody>
-        </table>
-      </div>
+      {/* Columnas dinámicas según campos con uso_lista=true (default si no hay ninguno: subregion + linea) */}
+      {(() => {
+        const camposLista = campos.filter((c) => c.uso_lista);
+        const colsConfig = camposLista.length > 0 ? camposLista : campos.filter((c) => ["subregion", "linea"].includes(c.nombre_interno));
+        return (
+          <div className="border border-border rounded-sm bg-white overflow-x-auto">
+            <table className="w-full dense-table" data-testid={TID.propuestasTable}>
+              <thead>
+                <tr>
+                  <th>Código</th>
+                  <th>Propuesta</th>
+                  <th>Organización</th>
+                  {colsConfig.map((c) => <th key={c.id}>{c.nombre_visible}</th>)}
+                  <th>Estado</th>
+                  <th>Expediente</th>
+                  {canEdit && <th className="text-right">Acciones</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((p) => (
+                  <tr key={p.id} data-testid={`propuesta-row-${p.codigo}`}>
+                    <td className="font-mono text-xs">{p.codigo}</td>
+                    <td><div className="font-semibold">{p.nombre}</div></td>
+                    <td className="text-muted-foreground">{p.organizacion || p.datos?.nombre_organizacion || "—"}</td>
+                    {colsConfig.map((c) => (
+                      <td key={c.id} className="text-[12.5px]">
+                        {renderCellValue(p.datos?.[c.nombre_interno], c)}
+                      </td>
+                    ))}
+                    <td><Badge tone={estadoTone(p.estado)}>{p.estado}</Badge></td>
+                    <td>
+                      {p.datos?.link_expediente ? (
+                        <a href={p.datos.link_expediente} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[#0F5E54] hover:underline text-xs">
+                          <ExternalLink className="w-3 h-3" /> Abrir
+                        </a>
+                      ) : <span className="text-muted-foreground text-xs">—</span>}
+                    </td>
+                    {canEdit && (
+                      <td className="text-right">
+                        <button
+                          onClick={() => { setEditing(p); setFormOpen(true); }}
+                          className="text-[#14776A] hover:text-[#0F5E54] p-1"
+                          data-testid={`prop-edit-${p.codigo}`}
+                          title="Editar propuesta"
+                        ><Pencil className="w-4 h-4 inline" /></button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+                {!items.length && <tr><td colSpan={5 + colsConfig.length + (canEdit ? 1 : 0)}><EmptyState title="Sin propuestas" hint="Crea una propuesta nueva o usa carga masiva para importar desde Excel." icon={FileStack} /></td></tr>}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
 
       <PropuestaForm
         open={formOpen}

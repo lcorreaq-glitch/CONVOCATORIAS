@@ -21,6 +21,8 @@ const CAMPO_TIPOS = [
 const TIPOS_QUE_USAN_CATALOGO = ["lista", "seleccion_multiple"];
 
 const CAMPO_FLAGS = [
+  { key: "uso_propuesta", label: "form propuesta", tone: "success", help: "Aparece en el formulario al crear/editar una propuesta. Si está apagado, el campo existe pero no se le pregunta al usuario." },
+  { key: "uso_lista", label: "lista propuestas", tone: "info", help: "Aparece como columna en la tabla de Propuestas." },
   { key: "obligatorio", label: "obligatorio", tone: "info", help: "El campo no se puede dejar vacío al cargar una propuesta." },
   { key: "uso_filtro", label: "filtro", tone: "default", help: "Aparece como filtro en listados y reportes." },
   { key: "uso_ranking", label: "ranking", tone: "success", help: "Aparece como columna en el ranking final." },
@@ -97,7 +99,6 @@ export default function CamposPanel({ campos, convId, reload, catalogos }) {
         endpoint={`/campos/${c.id}`}
         item={c}
         flags={CAMPO_FLAGS}
-        alwaysOn={[{ label: "propuesta", tone: "muted" }]}
         onChange={reload}
       />
     ) },
