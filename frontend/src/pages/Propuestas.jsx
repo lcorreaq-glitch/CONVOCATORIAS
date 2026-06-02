@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { Plus, Upload, Download, ExternalLink, Search, FileStack, Pencil } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import PropuestaForm from "./propuestas/PropuestaForm";
+import ConvocatoriaContextBanner from "@/components/ConvocatoriaContextBanner";
 
 export default function Propuestas() {
   const { activeConvocatoriaId, user } = useAuth();
@@ -120,6 +121,8 @@ export default function Propuestas() {
           </>
         }
       />
+
+      <ConvocatoriaContextBanner />
 
       {/* Filters */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-5">

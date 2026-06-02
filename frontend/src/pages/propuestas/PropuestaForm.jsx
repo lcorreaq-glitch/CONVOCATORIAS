@@ -25,7 +25,7 @@ import { AlertCircle, Info, ChevronDown, Check, FileEdit } from "lucide-react";
  *  - propuesta: si existe, modo edición; null = creación
  *  - onSaved(p): callback con la propuesta creada/actualizada
  */
-export default function PropuestaForm({ open, onOpenChange, convocatoriaId, campos, catalogos, propuesta, onSaved }) {
+export default function PropuestaForm({ open, onOpenChange, convocatoriaId, campos, catalogos, propuesta, onSaved, previewMode = false }) {
   const isEdit = !!propuesta;
   const [form, setForm] = useState({ codigo: "", nombre: "", organizacion: "", datos: {} });
   const [busy, setBusy] = useState(false);
@@ -120,12 +120,23 @@ export default function PropuestaForm({ open, onOpenChange, convocatoriaId, camp
           <div className="flex items-center gap-2">
             <FileEdit className="w-5 h-5 text-[#14776A]" />
             <DialogTitle className="font-display text-[18px]">
-              {isEdit ? `Editar propuesta ${propuesta.codigo}` : "Nueva propuesta"}
+              {previewMode
+                ? "Vista previa del formulario de propuesta"
+                : isEdit ? `Editar propuesta ${propuesta.codigo}` : "Nueva propuesta"}
             </DialogTitle>
           </div>
-          <p className="text-[12px] text-muted-foreground mt-1">
-            Los campos marcados con <span className="text-red-600">*</span> son obligatorios. El formulario se adapta automáticamente a la convocatoria activa.
-          </p>
+          {previewMode ? (
+            <div className="mt-2 p-2.5 rounded-lg bg-[#F0F7F5] border border-[#CDE7E1] text-[12.5px] text-[#0F5E54] flex items-start gap-2">
+              <Info className="w-4 h-4 mt-0.5 shrink-0" />
+              Así se verá el formulario cuando alguien cree una propuesta en esta convocatoria. Refleja
+              exactamente los campos, su orden, sus opciones de catálogo y los obligatorios actuales.
+              Modifica los campos en esta misma pestaña y vuelve a abrir esta vista para confirmar.
+            </div>
+          ) : (
+            <p className="text-[12px] text-muted-foreground mt-1">
+              Los campos marcados con <span className="text-red-600">*</span> son obligatorios. El formulario se adapta automáticamente a la convocatoria activa.
+            </p>
+          )}
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -169,10 +180,14 @@ export default function PropuestaForm({ open, onOpenChange, convocatoriaId, camp
         </div>
 
         <DialogFooter className="px-6 py-4 border-t border-border shrink-0 bg-secondary/30">
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-lg">Cancelar</Button>
-          <Button onClick={submit} disabled={busy} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg" data-testid="prop-submit-btn">
-            {busy ? "Guardando…" : isEdit ? "Guardar cambios" : "Crear propuesta"}
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-lg">
+            {previewMode ? "Cerrar vista previa" : "Cancelar"}
           </Button>
+          {!previewMode && (
+            <Button onClick={submit} disabled={busy} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg" data-testid="prop-submit-btn">
+              {busy ? "Guardando…" : isEdit ? "Guardar cambios" : "Crear propuesta"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

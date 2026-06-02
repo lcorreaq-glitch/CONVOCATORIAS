@@ -55,6 +55,7 @@ export default function ResumenPanel({ convId, refreshKey, onJump }) {
           flowTo={`${counts.propuestas} propuestas`}
           onClick={() => onJump && onJump("campos")}
           testId="resumen-card-campos"
+          hint="→ Tip: en la pestaña Campos puedes ver una 'Vista previa del formulario'"
         />
         <FlowCard
           icon={Boxes}
@@ -207,7 +208,7 @@ export default function ResumenPanel({ convId, refreshKey, onJump }) {
   );
 }
 
-function FlowCard({ icon: Icon, color, title, count, subtitle, flowTo, onClick, testId }) {
+function FlowCard({ icon: Icon, color, title, count, subtitle, flowTo, onClick, testId, hint }) {
   return (
     <button
       onClick={onClick}
@@ -223,6 +224,7 @@ function FlowCard({ icon: Icon, color, title, count, subtitle, flowTo, onClick, 
       <div className="font-display font-bold text-[15px] mt-2">{title}</div>
       <div className="text-[12px] text-[#5E6878] mt-1 leading-snug">{subtitle}</div>
       <div className="text-[11px] text-[#14776A] mt-3 font-semibold">→ {flowTo}</div>
+      {hint && <div className="text-[10.5px] text-[#5E6878] mt-1.5 italic leading-snug">{hint}</div>}
     </button>
   );
 }

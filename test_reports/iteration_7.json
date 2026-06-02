@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 7 frontend-only validation of (A) ConvocatoriaContextBanner in /propuestas and (B) Form preview in Configuración → Campos. All 11 scenarios PASS. Banner visible immediately after PageHeader with 'Estás trabajando en' label, conv-banner-switcher showing 'INC2026 · Iniciativas Comunitarias Antioquia 2026 · Activa · Evaluación Individual', estado badge 'Activa', etapa badge 'etapa: Evaluación Individual'. Chips show correct counts (16 campos, 6 catálogos, 12 propuestas) and all data-testids (banner-link-campos, banner-link-catalogos, banner-link-propuestas, banner-go-config) navigate as expected. Configuración → Campos shows 'Vista previa del formulario' button (data-testid=campos-preview-form) next to 'Nuevo campo'; clicking opens Dialog titled 'Vista previa del formulario de propuesta' with info banner ('Así se verá el formulario…') and renders ALL sections (Identificación, Información territorial, Información de la organización, Categorización, Datos administrativos y adicionales). In preview mode the 'Crear propuesta' button (data-testid=prop-submit-btn) is correctly ABSENT and only 'Cerrar vista previa' is in the footer. Resumen card 'Campos' shows the new tip 'Tip: en la pestaña Campos puedes ver una Vista previa del formulario'. Switcher synchronization with sidebar (data-testid=convocatoria-selector) verified — switching to convocatoria 'prueba' reduced rows from 12 → 0 instantly. Regression: /propuestas Nueva propuesta still shows prop-submit-btn ('Crear propuesta'). No propuestas were persisted.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Vista previa Dialog + (already noted) PropuestaForm Dialog", "issues": ["Console warning persists: 'Missing Description or aria-describedby={undefined} for DialogContent'. Add <DialogDescription> in PropuestaForm.jsx for a11y compliance. Non-blocking; appears on every Dialog mount."]}
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_7.json"],
+  "action_items": [
+    "OPCIONAL (cosmético/a11y): Añadir <DialogDescription> en /app/frontend/src/pages/propuestas/PropuestaForm.jsx para eliminar el warning de Radix sobre aria-describedby en ambos modos (creación/edición y previewMode).",
+    "OPCIONAL (UX): En ConvocatoriaContextBanner.jsx el chip 'criterios' está oculto cuando counts es null (línea 73: hide={!counts}). En /propuestas siempre se pasa counts=null, por lo que el chip de criterios NUNCA se muestra en este módulo. Si la intención era ocultarlo solo aquí, está bien; si se quería mostrarlo, hay que pasar la prop counts con criterios desde Propuestas.jsx.",
+    "OPCIONAL (consistencia): El banner muestra estado y etapa de la convocatoria, pero al cambiar al switcher con 'prueba' la lista se vacía sin ningún empty state explicativo si no hay propuestas; el EmptyState existente solo se renderiza si !items.length — confirmado que sí aparece, OK."
+  ],
+  "critical_code_review_comments": [
+    "ConvocatoriaContextBanner.jsx: hace 3 fetches en paralelo en cada cambio de convocatoria (campos, catalogos, propuestas). En /propuestas estos endpoints ya los pide Propuestas.jsx por separado — hay duplicación de red. Considerar pasar `counts` desde la página padre (Propuestas) usando los datos ya cargados, o memoizar con useSWR/react-query.",
+    "ConvocatoriaContextBanner.jsx línea 73: chip 'criterios' depende de counts!==null, pero counts no se pasa desde /propuestas → siempre oculto. OK como diseño pero documentar.",
+    "CamposPanel.jsx: monta un PropuestaForm completo aun cuando previewOpen=false; el Dialog ya gestiona open, pero PropuestaForm tiene un useEffect que reinicia form al abrir, por lo que es seguro. Sin riesgo de re-render costoso (los Selects no se montan hasta open).",
+    "PropuestaForm.jsx: prop `previewMode` se maneja correctamente en title, banner info, footer (oculta prop-submit-btn). El validate() y submit() siguen presentes pero inaccesibles en previewMode — código seguro.",
+    "Posible mejora: en preview mode, los inputs son interactivos (se pueden tipear valores) aunque no haya botón de submit. Considerar pasar `disabled` o `readOnly` a los inputs para clarificar la naturaleza solo-lectura. Hoy el usuario puede escribir y luego no encontrar cómo guardar; el banner azul lo explica pero un input deshabilitado sería más explícito."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100% (11/11 features validated)"},
+  "test_credentials": "lcorreaq / Chocolate2026!",
+  "seed_data_creation": "Ninguna. No se crearon propuestas (cancelado el form sin submit). BD intacta: INC2026 con sus 12 propuestas P-0001..P-0012.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "ConvocatoriaContextBanner.jsx y modo previewMode de PropuestaForm.jsx funcionan al 100%. Para próximos cambios: el sidebar 'convocatoria-selector' y el 'conv-banner-switcher' están sincronizados vía AuthContext.setConv — verificado cambiando la convocatoria desde el banner y observando que la lista de /propuestas y los conteos se actualizan automáticamente. TestIds clave de esta iter: conv-banner-switcher, banner-link-campos, banner-link-catalogos, banner-link-propuestas, banner-go-config, campos-preview-form. PropuestaForm prop nueva: previewMode (boolean, default false). El warning Radix 'aria-describedby' persiste — pendiente desde iter 6.",
+  "rca of the issue": "N/A — no se reprodujeron bugs. Todos los flujos pasaron al primer intento. Único observable cosmético: chip 'criterios' del banner siempre oculto en /propuestas (intencional por diseño)."
+}

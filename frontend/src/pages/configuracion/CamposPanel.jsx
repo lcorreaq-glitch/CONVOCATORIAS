@@ -8,9 +8,10 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Settings2, Trash2, Pencil, Link2 } from "lucide-react";
+import { Plus, Settings2, Trash2, Pencil, Link2, Eye } from "lucide-react";
 import SortableTable from "./SortableTable";
 import InlineFlagsEditor from "./InlineFlagsEditor";
+import PropuestaForm from "../propuestas/PropuestaForm";
 
 const CAMPO_TIPOS = [
   "texto_corto", "texto_largo", "numero", "moneda", "porcentaje", "fecha",
@@ -31,6 +32,7 @@ const CAMPO_FLAGS = [
 export default function CamposPanel({ campos, convId, reload, catalogos }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const blank = {
     nombre_visible: "", nombre_interno: "", tipo: "texto_corto",
     obligatorio: false, orden: 0, uso_filtro: false, uso_ranking: false,
@@ -117,10 +119,20 @@ export default function CamposPanel({ campos, convId, reload, catalogos }) {
             que se guarda en <code className="text-[11px] bg-secondary px-1 rounded">datos_dinamicos</code>.
           </p>
         </div>
-        <Dialog open={open} onOpenChange={(v) => { if (!v) { setEditing(null); setF(blank); } setOpen(v); }}>
-          <DialogTrigger asChild>
-            <Button onClick={startNew} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg gap-2" data-testid="add-campo-btn"><Plus className="w-4 h-4" />Nuevo campo</Button>
-          </DialogTrigger>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setPreviewOpen(true)}
+            className="rounded-lg gap-2 text-[12.5px]"
+            data-testid="campos-preview-form"
+            title="Ver el formulario tal como se verá al crear una propuesta"
+          >
+            <Eye className="w-4 h-4" /> Vista previa del formulario
+          </Button>
+          <Dialog open={open} onOpenChange={(v) => { if (!v) { setEditing(null); setF(blank); } setOpen(v); }}>
+            <DialogTrigger asChild>
+              <Button onClick={startNew} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg gap-2" data-testid="add-campo-btn"><Plus className="w-4 h-4" />Nuevo campo</Button>
+            </DialogTrigger>
           <DialogContent className="rounded-lg max-w-lg">
             <DialogHeader><DialogTitle className="font-display">{editing ? `Editar ${editing.nombre_visible}` : "Nuevo campo"}</DialogTitle></DialogHeader>
             <div className="space-y-3">
@@ -171,6 +183,7 @@ export default function CamposPanel({ campos, convId, reload, catalogos }) {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       <SortableTable
@@ -181,6 +194,18 @@ export default function CamposPanel({ campos, convId, reload, catalogos }) {
         searchPlaceholder="Buscar campos…"
         testIdPrefix="campo-row"
         emptyState={<EmptyState title="Sin campos configurados" hint="Crea los campos que tendrá cada propuesta." icon={Settings2} />}
+      />
+
+      {/* Vista previa del formulario tal como se verá en /propuestas */}
+      <PropuestaForm
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        convocatoriaId={convId}
+        campos={campos}
+        catalogos={catalogos}
+        propuesta={null}
+        previewMode={true}
+        onSaved={() => {}}
       />
     </div>
   );
