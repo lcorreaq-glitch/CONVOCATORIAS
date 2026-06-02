@@ -135,6 +135,15 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - **Backend**: 39/39 PASS (100%) — ronda 2 tras fix de ObjectId leak y brute-force key.
 - **Frontend**: validación manual con screenshots en login → dashboard → ranking → configuración → reportes.
 
+### Ranking & Desempates rediseñado (Feb 2026 v10)
+- ✅ **Panel "Cómo se calcula este ranking"** con explicación dinámica según `modo` (colectivo = promedio jurados terna, con fallback a promedio individuales; individual = promedio individuales finalizadas).
+- ✅ **Reglas de desempate en cascada visibles** como chips numerados en el header.
+- ✅ **Historial movido a Popover** ("Historial (N)") en el header en lugar de chips llenando la franja superior.
+- ✅ **Columna "Fuente"** por propuesta (Colectiva / Promedio individuales / Sin evaluación) con badges tonales.
+- ✅ **Detalle de propuesta (Dialog)** accesible con botón "Detalle ▸" por fila — muestra: puesto, puntaje oficial vs máximo, diferencial, fuente, tabla de criterios oficiales (puntaje / máximo / %), criterios diferenciales (caja naranja, no suman), y reglas de desempate con el **valor real** que tomó cada regla para esa propuesta + indicador "↑ Aplicada" cuando la regla se ejecutó.
+- ✅ **Indicador visual de empate**: filas con mismo `puntaje_total` resaltadas en amarillo claro.
+- ✅ Default `modo=colectivo` + `agrupar_por=subregion` (alineado con la spec: ranking por subregión sobre evaluación colectiva).
+
 ## Backlog / próximas tareas
 
 ### P0 (cierre de funcionalidad clave)
