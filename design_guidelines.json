@@ -1,0 +1,92 @@
+{
+  "project_name": "KRINOS - Tecnología que impulsa decisiones transparentes",
+  "domain": "Enterprise SaaS / Public Administration",
+  "theme": "Light",
+  "archetype": "4 (Swiss & High-Contrast)",
+  "emotional_tone": "Authoritative, precise, transparent, trustworthy, structural, institutional",
+  "colors": {
+    "background": "#FAFAFA",
+    "surface": "#FFFFFF",
+    "border": "#E4E4E7",
+    "primary": "#059669",
+    "primary_hover": "#047857",
+    "text_primary": "#09090B",
+    "text_secondary": "#52525B",
+    "accent_warning": "#F59E0B",
+    "accent_info": "#2563EB",
+    "accent_destructive": "#EF4444"
+  },
+  "typography": {
+    "headings": {
+      "font_family": "Cabinet Grotesk",
+      "weights": ["400", "700", "900"],
+      "usage": "Use for all H1-H4, dashboard widget titles, and key metrics. Tight tracking (tracking-tight)."
+    },
+    "body": {
+      "font_family": "IBM Plex Sans",
+      "weights": ["400", "500", "600"],
+      "usage": "Use for dense tables, forms, evaluation criteria, and long-form text. Highly legible for numbers and data."
+    }
+  },
+  "layout_and_spacing": {
+    "dashboard_grid": "Control Room Grid. Base grid-cols-1 md:grid-cols-3 lg:grid-cols-4. Tight gaps (gap-4 or gap-6) for high data density.",
+    "evaluation_screen": "Split-pane layout. 50% width for PDF/Document viewer, 50% for evaluation criteria Bento grid. Must feel like a command center for evaluation.",
+    "login_screen": "Asymmetrical layout. 40% abstract graphic side, 60% clean white space for the login form. Do not center everything.",
+    "spacing_scale": "Use generous padding inside containers (p-6) but tight margins between grid items. Expose the structural skeleton."
+  },
+  "component_rules": {
+    "general": "Cardless or flat cards with max 4px radius (rounded-sm) and 1px border. NO soft drop shadows. Rely on 1px stroke (border-zinc-200) for definition.",
+    "tables": "Dense. Sticky headers. Adaptive columns. Row borders only (border-b), no side borders. Small text (text-sm) for density.",
+    "buttons": "Flat colors. No gradients. Explicit hover states (hover:bg-emerald-700 hover:text-white).",
+    "badges": "Use for status (Pendiente, Aprobado, Rechazado). Solid subtle backgrounds (bg-emerald-50 text-emerald-700) with 1px border.",
+    "forms": "Drag-friendly custom fields and multi-step wizards must use clear vertical progression. Left-align all labels."
+  },
+  "icons_and_assets": {
+    "library": "lucide-react",
+    "style": "Stroke width 1.5. Clean, functional, non-decorative."
+  },
+  "media": {
+    "logo": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/82c2b5dd-47b9-4110-afc7-6f43ce21c264/images/cb2894912ee63b89aed50ae138f6ef9c75d6b4005c997830eb0e2f1356edf117.png",
+      "description": "KRINOS primary logo, minimalist icon with subtle scale of justice",
+      "usage": "Header, Login screen, PDF reports"
+    },
+    "login_hero": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/82c2b5dd-47b9-4110-afc7-6f43ce21c264/images/a78118fe9b41803fcd1e74c45eee1afa7fb8e7b478764b33645caf0869315721.png",
+      "description": "Abstract Swiss style geometric composition",
+      "usage": "Left panel of the login screen"
+    },
+    "avatars": [
+      {
+        "url": "https://images.pexels.com/photos/5945435/pexels-photo-5945435.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Professional evaluators / jury members",
+        "usage": "Dashboard tables, jury assignment screens"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1768310489951-a0a35cb52d56?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODF8MHwxfHNlYXJjaHw0fHxwcm9mZXNzaW9uYWwlMjBvZmZpY2UlMjB3b3JrZXJzJTIwcG9ydHJhaXRzfGVufDB8fHx8MTc4MDM3Mjc0OHww&ixlib=rb-4.1.0&q=85",
+        "description": "Institutional team members",
+        "usage": "Audit logs, supervisor avatars"
+      }
+    ],
+    "backgrounds": [
+      {
+        "url": "https://images.pexels.com/photos/33437205/pexels-photo-33437205.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Medellin Antioquia landscape",
+        "usage": "Alternative banner for Incentivos Antioquia 2026 onboarding/marketing areas"
+      }
+    ]
+  },
+  "accessibility_and_testing": {
+    "contrast": "Ensure minimum 4.5:1 ratio for normal text. Avoid light grey text on white backgrounds.",
+    "testing_tags": "All interactive and key informational elements MUST include a data-testid attribute (e.g., data-testid='eval-submit-button')."
+  },
+  "instructions_to_main_agent": [
+    "Install 'lucide-react' for icons.",
+    "Use standard Tailwind CSS combined with customized Shadcn components (strip out heavy shadows, use sharp corners rounded-none or rounded-sm).",
+    "Implement 'Cabinet Grotesk' (or equivalent strong display sans) for headings and 'IBM Plex Sans' for body text. Add them via Google Fonts or CSS imports.",
+    "Tables MUST be designed for high density: use text-sm, minimal vertical padding (py-2), and sticky headers.",
+    "Never use generic purple/teal. Stick strictly to the institutional monochrome + Emerald Green palette to honor the Antioquia context.",
+    "The evaluation screen must be a split view: Left side document preview (can be mocked with an iframe or placeholder), Right side evaluation form.",
+    "Avoid centering everything. Use asymmetrical layouts to create tension and structure, particularly on the login and dashboard overview."
+  ]
+}
