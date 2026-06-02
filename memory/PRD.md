@@ -83,6 +83,13 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - ✅ **Ruta `/mi-perfil`** para rol Jurado: ver/editar datos seguros (teléfono, perfil con IA), subir foto y hoja de vida. Datos críticos (nombre, email, subregiones) solo lectura.
 - ✅ **Seed INC2026**: 8 campos jurado + 29 jurados cargados desde el Excel del usuario con normalización de subregiones desordenadas.
 
+### Módulo Jurados parametrizable + Mi Perfil + IA (Feb 2026 v7 + v8)
+- ✅ v7: Campos por aplica_a, tipo archivo, IA, JuradoForm dinámico, banner, columnas dinámicas, plantilla XLSX dinámica, /mi-perfil, 29 jurados seed.
+- ✅ **v8 — Vista detalle compartida**: nuevo componente `JuradoDetalle` (drawer/Dialog read-only) accesible a cualquier rol autenticado con botón 👁 en cada fila. Muestra avatar, contacto, subregiones, perfil completo, hoja de vida descargable y todos los campos extras. Solo admin ve botón "Editar" en el footer.
+- ✅ Columna **Teléfono** activada en grilla (`uso_lista: true`).
+- ✅ Link al **`/mi-perfil`** desde el user-block del sidebar (clickeable para cualquier rol).
+- ✅ Permisos verificados: rol Jurado puede ver lista + detalle, no edita; admin puede todo.
+
 ### Filtros dinámicos en /propuestas (Feb 2026 v5 + v6)
 - ✅ v5: Filtros dinámicos según campos con `uso_filtro=true`.
 - ✅ **v6 (UX rediseñada estilo Airtable/Notion)**: solo búsqueda + Estado + botón "Filtrar por…" visibles por defecto. Click → Popover con buscador y lista de campos disponibles. Cada filtro elegido se agrega como **chip activo** con su control inline + X. Botón "Limpiar" cuando hay activos. Patrón profesional y manejable incluso con 20+ campos disponibles.

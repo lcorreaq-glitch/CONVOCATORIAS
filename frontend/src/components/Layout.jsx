@@ -155,7 +155,14 @@ export default function Layout() {
 
         {/* User block */}
         <div className="border-t border-border p-4 bg-[#F7F9FB]">
-          <div className="flex items-center gap-3 mb-3">
+          <NavLink
+            to="/mi-perfil"
+            data-testid="nav-mi-perfil"
+            className={({ isActive }) =>
+              `flex items-center gap-3 mb-3 -mx-1 px-1 py-1 rounded-lg ${isActive ? "bg-[#E8F3F0]" : "hover:bg-[#F1F4F7]"}`
+            }
+            title="Mi perfil"
+          >
             <div className="w-9 h-9 rounded-full bg-[#E8F3F0] flex items-center justify-center text-[#0F5E54] font-display font-extrabold text-[13px]">
               {(user?.name || "?").charAt(0)}
             </div>
@@ -165,7 +172,7 @@ export default function Layout() {
                 {user?.role?.replace(/_/g, " ")}
               </div>
             </div>
-          </div>
+          </NavLink>
           <Button
             data-testid={TID.logoutBtn}
             onClick={handleLogout}

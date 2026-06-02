@@ -8,8 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Upload, Download, Users, Pencil, Search, Filter, ChevronDown, X, ExternalLink } from "lucide-react";
+import { Plus, Upload, Download, Users, Pencil, Search, Filter, ChevronDown, X, ExternalLink, Eye } from "lucide-react";
 import JuradoForm from "./jurados/JuradoForm";
+import JuradoDetalle from "./jurados/JuradoDetalle";
 import ConvocatoriaContextBanner from "@/components/ConvocatoriaContextBanner";
 
 function renderCellValue(v, campo) {
@@ -87,6 +88,8 @@ export default function Jurados() {
   const [filtros, setFiltros] = useState({});
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [viewing, setViewing] = useState(null);
   const [importOpen, setImportOpen] = useState(false);
   const [file, setFile] = useState(null);
   const [importResult, setImportResult] = useState(null);
@@ -229,7 +232,7 @@ export default function Jurados() {
               <th>Subregiones</th>
               {camposLista.filter((c) => !["nombre", "email", "subregiones"].includes(c.nombre_interno)).map((c) => <th key={c.id}>{c.nombre_visible}</th>)}
               <th>Estado</th>
-              {canEdit && <th className="text-right">Acciones</th>}
+              <th className="text-right">Acciones</th>
             </tr>
           </thead>
           <tbody>
@@ -246,16 +249,25 @@ export default function Jurados() {
                   </td>
                 ))}
                 <td><Badge tone={estadoTone(j.estado)}>{j.estado || "Activo"}</Badge></td>
-                {canEdit && (
-                  <td className="text-right">
-                    <button onClick={() => { setEditing(j); setFormOpen(true); }} className="text-[#14776A] hover:text-[#0F5E54] p-1" data-testid={`jur-edit-${j.id}`} title="Editar">
-                      <Pencil className="w-4 h-4 inline" />
-                    </button>
-                  </td>
-                )}
+                <td className="text-right whitespace-nowrap">
+                  <button
+                    onClick={() => { setViewing(j); setDetailOpen(true); }}
+                    className="text-[#1D4ED8] hover:text-[#0F5E54] p-1"
+                    data-testid={`jur-view-${j.id}`}
+                    title="Ver detalle"
+                  ><Eye className="w-4 h-4 inline" /></button>
+                  {canEdit && (
+                    <button
+                      onClick={() => { setEditing(j); setFormOpen(true); }}
+                      className="text-[#14776A] hover:text-[#0F5E54] p-1 ml-0.5"
+                      data-testid={`jur-edit-${j.id}`}
+                      title="Editar"
+                    ><Pencil className="w-4 h-4 inline" /></button>
+                  )}
+                </td>
               </tr>
             ))}
-            {!filteredItems.length && <tr><td colSpan={4 + camposLista.length + (canEdit ? 1 : 0)}><EmptyState title="Sin jurados" hint="Crea un jurado nuevo o usa la carga masiva." icon={Users} /></td></tr>}
+            {!filteredItems.length && <tr><td colSpan={5 + camposLista.length}><EmptyState title="Sin jurados" hint="Crea un jurado nuevo o usa la carga masiva." icon={Users} /></td></tr>}
           </tbody>
         </table>
       </div>
@@ -268,6 +280,14 @@ export default function Jurados() {
         catalogos={catalogos}
         jurado={editing}
         onSaved={load}
+      />
+      <JuradoDetalle
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        jurado={viewing}
+        campos={campos}
+        canEdit={canEdit}
+        onEdit={(j) => { setEditing(j); setFormOpen(true); }}
       />
     </div>
   );
