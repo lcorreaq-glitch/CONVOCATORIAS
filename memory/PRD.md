@@ -171,6 +171,15 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - ✅ Banner explicativo por tab + tabla con avance (barra de progreso), documento del jurado, estado de firma, badges de estado y acciones contextuales (Forzar / Firmar / Descargar PDF).
 - ✅ Dialog de confirmación al forzar acta individual.
 
+### Rediseño UX `/evaluaciones/individual/:id` (Feb 2026 v12)
+- ✅ **Layout vertical** (eliminado split 2 columnas).
+- ✅ **Header sticky compacto**: back · código/nombre · estado · totales con barra de progreso · acciones.
+- ✅ **Banda resumen horizontal** con datos clave de la propuesta inline (Organización, Subregión, Municipio, Tipo, NIT, Línea, Temática) + iconos por tipo de campo.
+- ✅ **Drawer "Ficha completa"** lateral con todos los campos `uso_propuesta/uso_actas/uso_lista` (botón en banda resumen).
+- ✅ **Criterios a todo el ancho** (max-w 1280px centrado): mejor legibilidad, textarea + sugerencia IA en línea.
+- ✅ **Totales con tarjetas semánticas**: oficial verde + diferencial amarillo (no suma).
+- ✅ Banner v1 con grid de 5 criterios cuando es etapa colectiva.
+
 ## Backlog / próximas tareas
 
 ### P0 (cierre de funcionalidad clave)

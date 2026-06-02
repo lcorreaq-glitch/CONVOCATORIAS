@@ -1,13 +1,25 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { api, formatApiError, openPdf } from "@/lib/api";
 import { Badge, estadoTone } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { toast } from "sonner";
-import { ArrowLeft, ExternalLink, Save, CheckCircle2, PenLine, FileText, Lock, Sparkles } from "lucide-react";
+import {
+  ArrowLeft, ExternalLink, Save, CheckCircle2, PenLine, FileText, Lock, Sparkles,
+  Building2, MapPin, Calendar, Layers, Eye, ChevronDown, Eye as EyeIcon,
+} from "lucide-react";
 import { TID } from "@/constants/testIds";
+
+// Iconos por nombre interno (fallback Layers)
+const CAMPO_ICON = {
+  organizacion: Building2, nombre_organizacion: Building2,
+  subregion: MapPin, municipio: MapPin, departamento: MapPin,
+  fecha_radicacion: Calendar, fecha_presentacion: Calendar,
+  linea: Layers, tematica: Layers, tipo_organizacion: Building2,
+};
 
 export default function EvaluacionIndividual() {
   const { id } = useParams();
@@ -16,13 +28,13 @@ export default function EvaluacionIndividual() {
   const [propuesta, setPropuesta] = useState(null);
   const [criterios, setCriterios] = useState([]);
   const [campos, setCampos] = useState([]);
-  const [catalogos, setCatalogos] = useState([]);
   const [conv, setConv] = useState(null);
   const [puntajes, setPuntajes] = useState({});
   const [observaciones, setObservaciones] = useState({});
   const [obsFinal, setObsFinal] = useState("");
   const [saving, setSaving] = useState(false);
   const [v1Ref, setV1Ref] = useState(null);
+  const [showFicha, setShowFicha] = useState(false);
 
   useEffect(() => {
     api.get(`/evaluaciones-individuales/${id}`).then(async (r) => {
@@ -33,16 +45,14 @@ export default function EvaluacionIndividual() {
       const p = await api.get(`/propuestas/${r.data.propuesta_id}`);
       setPropuesta(p.data);
       const cid = p.data.convocatoria_id;
-      const [c, ca, cv] = await Promise.all([
+      const [c, cv] = await Promise.all([
         api.get(`/campos?convocatoria_id=${cid}&aplica_a=propuesta`),
-        api.get(`/catalogos?convocatoria_id=${cid}`),
         api.get(`/convocatorias/${cid}`),
       ]);
-      setCampos(c.data); setCatalogos(ca.data); setConv(cv.data);
+      setCampos(c.data); setConv(cv.data);
       const crit = await api.get(`/criterios?convocatoria_id=${r.data.convocatoria_id}`);
       setCriterios(crit.data);
     }).catch(() => toast.error("No se pudo cargar la evaluación"));
-    // Cargar referencia v1 si esta es una v2 (etapa colectiva)
     api.get(`/evaluaciones-individuales/${id}/referencia-v1`).then((r) => setV1Ref(r.data)).catch(() => setV1Ref(null));
   }, [id]);
 
@@ -50,8 +60,7 @@ export default function EvaluacionIndividual() {
   const setObs = (cid, v) => setObservaciones({ ...observaciones, [cid]: v });
 
   const total = (oficial = true) =>
-    criterios
-      .filter((c) => (oficial ? c.oficial : !c.oficial))
+    criterios.filter((c) => (oficial ? c.oficial : !c.oficial))
       .reduce((s, c) => s + (parseFloat(puntajes[c.id]) || 0), 0);
 
   const save = async (finalize = false) => {
@@ -89,236 +98,317 @@ export default function EvaluacionIndividual() {
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
-  if (!ev || !propuesta) return <div className="p-10 text-muted-foreground">Cargando…</div>;
+  // Campos resumen (uso_actas o uso_lista, excluyendo organizacion + link)
+  const camposResumen = useMemo(() => campos
+    .filter((c) => (c.uso_actas || c.uso_lista) && !["nombre_organizacion", "link_expediente"].includes(c.nombre_interno))
+    .slice(0, 6), [campos]);
 
+  // Campos completos para la ficha (drawer)
+  const camposFicha = useMemo(() => campos
+    .filter((c) => c.uso_propuesta || c.uso_actas || c.uso_lista)
+    .filter((c) => !["link_expediente"].includes(c.nombre_interno)), [campos]);
+
+  if (!ev || !propuesta) return <div className="p-10 text-muted-foreground">Cargando…</div>;
   const isLocked = ["Bloqueada", "Firmada", "Anulada"].includes(ev.estado);
+  const totalOf = total(true);
+  const maxOf = conv?.configuracion?.puntaje_max_evaluacion || 100;
+  const totalDif = total(false);
+  const pctTotal = Math.min(100, (totalOf / maxOf) * 100);
 
   return (
-    <div className="flex-1 flex flex-col h-screen">
-      <div className="border-b border-border bg-white px-8 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link to="/evaluaciones" className="text-muted-foreground hover:text-foreground"><ArrowLeft className="w-4 h-4" /></Link>
-          <div>
-            <div className="text-[10px] uppercase tracking-[0.16em] font-display font-bold text-[#0F5E54]">Evaluación individual</div>
-            <div className="font-display font-bold text-lg leading-tight">{propuesta.codigo} · {propuesta.nombre}</div>
+    <div className="flex-1 flex flex-col min-h-screen bg-[#FAFBFC]">
+      {/* HEADER STICKY */}
+      <div className="sticky top-0 z-30 border-b border-border bg-white px-6 lg:px-8 py-3.5 flex items-center justify-between gap-4 flex-wrap shadow-sm">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <Link to="/evaluaciones" className="text-muted-foreground hover:text-foreground shrink-0" data-testid="eval-back-btn">
+            <ArrowLeft className="w-4 h-4" />
+          </Link>
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase tracking-[0.16em] font-display font-bold text-[#0F5E54]">
+              Evaluación individual {ev.etapa === "colectiva" && `· v${ev.version || 2}`}
+            </div>
+            <div className="font-display font-bold text-lg leading-tight truncate">
+              {propuesta.codigo} · {propuesta.nombre}
+            </div>
           </div>
           <Badge tone={estadoTone(ev.estado)}>{ev.estado}</Badge>
-          {ev.etapa === "colectiva" && (
-            <Badge tone="info">Etapa colectiva · v{ev.version || 2}</Badge>
-          )}
+          {ev.etapa === "colectiva" && <Badge tone="info">Etapa colectiva</Badge>}
           {ev.ciego_hasta_cierre && !["Cerrada", "Firmada"].includes(ev.estado) && (
-            <Badge tone="warning">CIEGO · puntajes ocultos a pares</Badge>
+            <Badge tone="warning">CIEGO</Badge>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <div className="text-right mr-3">
+
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="text-right mr-1">
             <div className="text-[10px] uppercase tracking-wider font-display font-bold text-muted-foreground">Total oficial</div>
-            <div className="font-display font-black text-2xl tabular-nums">{total(true).toFixed(1)} <span className="text-base text-muted-foreground">/ {conv?.configuracion?.puntaje_max_evaluacion || 100}</span></div>
+            <div className="font-display font-black text-2xl tabular-nums leading-none">
+              {totalOf.toFixed(1)} <span className="text-base text-muted-foreground">/ {maxOf}</span>
+            </div>
+            <div className="mt-1 h-1 w-32 bg-secondary rounded-full overflow-hidden">
+              <div className="h-full bg-[#14776A] transition-all" style={{ width: `${pctTotal}%` }}></div>
+            </div>
           </div>
-          {!isLocked && <Button onClick={() => save(false)} disabled={saving} variant="outline" className="rounded-sm gap-2" data-testid="save-eval-btn"><Save className="w-4 h-4" />Guardar</Button>}
+          {!isLocked && (
+            <Button onClick={() => save(false)} disabled={saving} variant="outline" className="rounded-sm gap-2" data-testid="save-eval-btn">
+              <Save className="w-4 h-4" />Guardar
+            </Button>
+          )}
           {ev.estado !== "Finalizada" && !isLocked && (
             <Button onClick={() => save(true)} disabled={saving} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2" data-testid={TID.finalizarEvalBtn}>
               <CheckCircle2 className="w-4 h-4" />Finalizar
             </Button>
           )}
           {ev.estado === "Finalizada" && (
-            <Button onClick={firmar} className="bg-[#0F5E54] hover:bg-[#0B4A42] rounded-sm gap-2" data-testid={TID.firmarEvalBtn}><PenLine className="w-4 h-4" />Firmar</Button>
+            <Button onClick={firmar} className="bg-[#0F5E54] hover:bg-[#0B4A42] rounded-sm gap-2" data-testid={TID.firmarEvalBtn}>
+              <PenLine className="w-4 h-4" />Firmar
+            </Button>
           )}
           {(ev.estado === "Firmada" || ev.estado === "Finalizada") && (
-            <Button onClick={downloadActa} variant="outline" className="rounded-sm gap-2" data-testid="download-acta-btn"><FileText className="w-4 h-4" />Acta PDF</Button>
+            <Button onClick={downloadActa} variant="outline" className="rounded-sm gap-2" data-testid="download-acta-btn">
+              <FileText className="w-4 h-4" />Acta PDF
+            </Button>
           )}
         </div>
       </div>
 
-      {/* Split pane */}
-      <div className="flex-1 grid lg:grid-cols-2 overflow-hidden">
-        {/* Left: Expediente */}
-        <div className="border-r border-border bg-secondary/30 overflow-y-auto p-6">
-          <div className="text-[10px] uppercase tracking-[0.18em] font-display font-bold text-muted-foreground mb-2">
-            Convocatoria
-          </div>
-          {conv && (
-            <div className="bg-gradient-to-br from-[#F0F7F5] to-white border border-[#CDE7E1] rounded-lg p-3 mb-4">
-              <div className="flex items-center gap-2 flex-wrap">
-                <Badge tone="muted">{conv.codigo}</Badge>
-                <span className="font-display font-bold text-[14px]">{conv.nombre}</span>
-              </div>
-              <div className="text-[11px] text-muted-foreground mt-1">{conv.estado} · {conv.etapa_actual || "—"}</div>
+      {/* BANDA RESUMEN PROPUESTA (HORIZONTAL) */}
+      <div className="border-b border-border bg-white px-6 lg:px-8 py-4">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          {/* Organización principal */}
+          <div className="flex-1 min-w-[220px]">
+            <div className="text-[10px] uppercase tracking-[0.16em] font-display font-bold text-muted-foreground">Organización</div>
+            <div className="font-display font-bold text-[15px] mt-0.5 flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-[#14776A] shrink-0" />
+              {propuesta.organizacion || propuesta.datos?.nombre_organizacion || "—"}
             </div>
-          )}
-          <div className="text-[10px] uppercase tracking-[0.18em] font-display font-bold text-muted-foreground mb-3">
-            Información de la propuesta
-          </div>
-          <div className="bg-white border border-border rounded-sm p-5 space-y-4">
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-display font-bold">Organización</div>
-              <div className="font-semibold">{propuesta.organizacion || propuesta.datos?.nombre_organizacion || "—"}</div>
-            </div>
-            {/* Campos dinámicos con uso_actas o uso_lista */}
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              {campos.filter((c) => (c.uso_actas || c.uso_lista) && !["nombre_organizacion", "link_expediente"].includes(c.nombre_interno)).map((c) => {
-                const v = propuesta.datos?.[c.nombre_interno];
-                let display = v === null || v === undefined || v === "" ? "—" : v;
-                if (Array.isArray(v)) display = v.join(", ");
-                if (c.tipo === "si_no") display = v ? "Sí" : "No";
-                return (
-                  <div key={c.id}>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-display font-bold">{c.nombre_visible}</div>
-                    <div className={c.tipo === "fecha" || c.tipo === "hora" ? "font-mono text-xs" : ""}>{display}</div>
-                  </div>
-                );
-              })}
-            </div>
-            {propuesta.datos?.link_expediente && (
-              <div className="pt-3 border-t border-border">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 font-display font-bold">Documentos</div>
-                <a href={propuesta.datos.link_expediente} target="_blank" rel="noreferrer"
-                   className="inline-flex items-center gap-2 px-3 py-2 bg-[#14776A] hover:bg-[#0F5E54] text-white rounded-sm text-sm font-semibold transition-colors w-full justify-center">
-                  <ExternalLink className="w-4 h-4" /> Abrir expediente
-                </a>
+            {conv && (
+              <div className="text-[11px] text-muted-foreground mt-1 font-mono">
+                {conv.codigo} · {conv.nombre}
               </div>
             )}
           </div>
-          {v1Ref && ev.etapa === "colectiva" && (
-            <div className="bg-white border border-[#14776A]/30 rounded-sm p-4 mt-4">
-              <div className="text-[10px] uppercase tracking-[0.16em] font-display font-bold text-[#14776A] mb-2">
-                Referencia · Tu evaluación de la etapa individual (v1)
-              </div>
-              <p className="text-[11px] text-[#5E6878] mb-3">Esta evaluación fue precargada con estos valores. Ajusta tras la deliberación grupal.</p>
-              <div className="space-y-1.5">
-                {criterios.map((c) => (
-                  <div key={c.id} className="flex justify-between text-[12px] py-1 border-b border-[#F1F4F7] last:border-b-0">
-                    <span className="text-[#3F4856]">{c.nombre}</span>
-                    <span className="font-mono tabular-nums font-semibold">{v1Ref.puntajes?.[c.id] ?? "—"}</span>
-                  </div>
-                ))}
-                <div className="flex justify-between text-[12.5px] pt-2 mt-2 border-t border-[#14776A]/30 font-bold">
-                  <span>Total v1</span>
-                  <span className="font-mono tabular-nums">{v1Ref.puntaje_total ?? 0} / {conv?.configuracion?.puntaje_max_evaluacion || 100}</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
 
-        {/* Right: Form */}
-        <div className="overflow-y-auto p-6 bg-white">
-          <div className="text-[10px] uppercase tracking-[0.18em] font-display font-bold text-muted-foreground mb-3">
-            Criterios de evaluación
-          </div>
-          {isLocked && (
-            <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-sm flex items-center gap-2 text-sm">
-              <Lock className="w-4 h-4 text-amber-700" /> Esta evaluación está en estado <strong>{ev.estado}</strong> y no puede editarse.
-            </div>
-          )}
-          <div className="space-y-3">
-            {criterios.map((c) => {
-              const sumaRanking = !c.diferencial;
-              const v = puntajes[c.id];
-              const hasValue = v !== "" && v !== undefined && v !== null;
-              const pct = hasValue && c.puntaje_max ? Math.min(100, Math.max(0, (Number(v) / c.puntaje_max) * 100)) : 0;
+          {/* Grid de chips de metadatos */}
+          <div className="flex flex-wrap gap-x-6 gap-y-2 flex-[2_1_500px]">
+            {camposResumen.map((c) => {
+              const v = propuesta.datos?.[c.nombre_interno];
+              let display = v === null || v === undefined || v === "" ? "—" : v;
+              if (Array.isArray(v)) display = v.join(", ");
+              if (c.tipo === "si_no") display = v ? "Sí" : "No";
+              const Icon = CAMPO_ICON[c.nombre_interno] || Layers;
               return (
-                <div key={c.id} className={`rounded-lg border bg-white overflow-hidden shadow-sm ${sumaRanking ? "border-[#CDE7E1]" : "border-[#FDE68A]"}`}>
-                  {/* Header bar coloreado */}
-                  <div className={`h-1 w-full ${sumaRanking ? "bg-[#14776A]" : "bg-[#F59E0B]"}`}></div>
-                  <div className="p-4">
-                    <div className="flex items-start gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="font-display font-bold text-[14.5px] text-[#1A1F2C]">{c.nombre}</h4>
-                          {sumaRanking ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-[#E8F3F0] text-[#0F5E54] border border-[#CDE7E1]" title="Este criterio suma al puntaje total y afecta el ranking final">
-                              <span className="w-1.5 h-1.5 rounded-full bg-[#14776A]"></span>
-                              Suma al ranking · hasta {c.puntaje_max} pts
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]" title="Este criterio NO suma al puntaje total. Solo se usa para resolver empates en el ranking.">
-                              <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B]"></span>
-                              Solo para desempate (no suma)
-                            </span>
-                          )}
-                        </div>
-                        {c.descripcion && <p className="text-[12px] text-muted-foreground mt-1 leading-snug">{c.descripcion}</p>}
-                      </div>
-
-                      {/* Input puntaje grande y visible */}
-                      <div className="shrink-0 text-right">
-                        <div className="relative">
-                          <Input
-                            type="number"
-                            data-testid={`eval-input-${c.id}`}
-                            disabled={isLocked}
-                            min={c.puntaje_min} max={c.puntaje_max} step="0.1"
-                            value={puntajes[c.id] ?? ""}
-                            onChange={(e) => setPunt(c.id, e.target.value)}
-                            className={`w-28 rounded-lg text-right font-display font-extrabold text-[20px] tabular-nums pr-3 ${sumaRanking ? "border-[#CDE7E1] focus-visible:ring-[#14776A]" : "border-[#FDE68A] focus-visible:ring-[#F59E0B]"}`}
-                            placeholder="—"
-                          />
-                        </div>
-                        <div className="text-[10px] mt-1 text-muted-foreground font-mono">rango {c.puntaje_min}–{c.puntaje_max}</div>
-                      </div>
-                    </div>
-
-                    {/* Barra de progreso */}
-                    {hasValue && (
-                      <div className="mt-3 h-1.5 w-full bg-secondary rounded-full overflow-hidden">
-                        <div className={`h-full transition-all ${sumaRanking ? "bg-[#14776A]" : "bg-[#F59E0B]"}`} style={{ width: `${pct}%` }}></div>
-                      </div>
-                    )}
-
-                    {/* Observación */}
-                    <div className="mt-3">
-                      <Textarea
-                        data-testid={`eval-obs-${c.id}`}
-                        disabled={isLocked}
-                        rows={2}
-                        placeholder="Observación (opcional) — sustenta tu puntaje…"
-                        value={observaciones[c.id] || ""}
-                        onChange={(e) => setObs(c.id, e.target.value)}
-                        className="rounded-lg text-[13px] resize-none"
-                      />
-                      {!isLocked && (
-                        <div className="flex justify-end mt-1.5">
-                          <button type="button" onClick={() => sugerirObs(c.id)} data-testid={`ai-suggest-${c.id}`}
-                                  className="inline-flex items-center gap-1.5 text-[11px] text-[#14776A] hover:text-[#0F5E54] font-semibold">
-                            <Sparkles className="w-3 h-3" /> Sugerir con IA
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                <div key={c.id} className="min-w-[110px]">
+                  <div className="text-[9.5px] uppercase tracking-wider text-muted-foreground font-display font-bold flex items-center gap-1">
+                    <Icon className="w-2.5 h-2.5" />{c.nombre_visible}
+                  </div>
+                  <div className={`text-[13px] font-semibold mt-0.5 ${(c.tipo === "fecha" || c.tipo === "hora") ? "font-mono" : ""}`}>
+                    {display}
                   </div>
                 </div>
               );
             })}
           </div>
 
-          <div className="mt-6">
+          {/* Acciones */}
+          <div className="flex items-center gap-2 shrink-0">
+            <Button variant="outline" size="sm" onClick={() => setShowFicha(true)} className="gap-1.5 rounded-sm" data-testid="eval-ver-ficha-btn">
+              <EyeIcon className="w-3.5 h-3.5" /> Ficha completa
+            </Button>
+            {propuesta.datos?.link_expediente && (
+              <a href={propuesta.datos.link_expediente} target="_blank" rel="noreferrer"
+                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#14776A] hover:bg-[#0F5E54] text-white rounded-sm text-[12px] font-semibold transition-colors"
+                 data-testid="eval-expediente-btn">
+                <ExternalLink className="w-3.5 h-3.5" /> Expediente
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* CONTENT: CRITERIOS FULL WIDTH */}
+      <div className="flex-1 px-6 lg:px-8 py-6 max-w-[1280px] w-full mx-auto">
+        {isLocked && (
+          <div className="mb-5 p-3 bg-amber-50 border border-amber-200 rounded-sm flex items-center gap-2 text-sm">
+            <Lock className="w-4 h-4 text-amber-700" /> Esta evaluación está en estado <strong>{ev.estado}</strong> y no puede editarse.
+          </div>
+        )}
+
+        {/* Banner v1 reference si aplica */}
+        {v1Ref && ev.etapa === "colectiva" && (
+          <div className="mb-5 bg-gradient-to-r from-[#F0F7F5] to-white border border-[#14776A]/30 rounded-lg p-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.16em] font-display font-bold text-[#14776A]">Referencia · Tu evaluación individual (v1)</div>
+                <p className="text-[11.5px] text-[#5E6878] mt-0.5">Estos puntajes fueron precargados. Ajusta tras la deliberación grupal.</p>
+              </div>
+              <div className="text-right">
+                <div className="text-[10px] uppercase font-bold text-muted-foreground">Total v1</div>
+                <div className="font-display font-black text-xl tabular-nums">{v1Ref.puntaje_total ?? 0} / {maxOf}</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 mt-3">
+              {criterios.map((c) => (
+                <div key={c.id} className="bg-white border border-[#E0EEEA] rounded-sm px-2.5 py-1.5">
+                  <div className="text-[10px] text-muted-foreground truncate">{c.nombre}</div>
+                  <div className="font-mono tabular-nums font-bold text-sm">{v1Ref.puntajes?.[c.id] ?? "—"}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[10px] uppercase tracking-[0.18em] font-display font-bold text-muted-foreground">
+            Criterios de evaluación
+          </div>
+          <div className="text-[11.5px] text-muted-foreground">
+            {criterios.filter((c) => c.oficial).length} oficiales · {criterios.filter((c) => !c.oficial).length} diferenciales
+          </div>
+        </div>
+
+        {/* Criterios cards */}
+        <div className="space-y-3">
+          {criterios.map((c) => {
+            const sumaRanking = !c.diferencial && c.oficial !== false;
+            const v = puntajes[c.id];
+            const hasValue = v !== "" && v !== undefined && v !== null;
+            const pct = hasValue && c.puntaje_max ? Math.min(100, Math.max(0, (Number(v) / c.puntaje_max) * 100)) : 0;
+            return (
+              <div key={c.id} className={`rounded-lg border bg-white overflow-hidden shadow-sm ${sumaRanking ? "border-[#CDE7E1]" : "border-[#FDE68A]"}`}>
+                <div className={`h-1 w-full ${sumaRanking ? "bg-[#14776A]" : "bg-[#F59E0B]"}`}></div>
+                <div className="p-4">
+                  <div className="flex items-start gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="font-display font-bold text-[14.5px] text-[#1A1F2C]">{c.nombre}</h4>
+                        {sumaRanking ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-[#E8F3F0] text-[#0F5E54] border border-[#CDE7E1]">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#14776A]"></span>
+                            Suma al ranking · hasta {c.puntaje_max} pts
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B]"></span>
+                            Solo desempate (no suma)
+                          </span>
+                        )}
+                      </div>
+                      {c.descripcion && <p className="text-[12px] text-muted-foreground mt-1 leading-snug">{c.descripcion}</p>}
+                    </div>
+
+                    <div className="shrink-0 text-right">
+                      <Input
+                        type="number"
+                        data-testid={`eval-input-${c.id}`}
+                        disabled={isLocked}
+                        min={c.puntaje_min} max={c.puntaje_max} step="0.1"
+                        value={puntajes[c.id] ?? ""}
+                        onChange={(e) => setPunt(c.id, e.target.value)}
+                        className={`w-28 rounded-lg text-right font-display font-extrabold text-[20px] tabular-nums pr-3 ${sumaRanking ? "border-[#CDE7E1] focus-visible:ring-[#14776A]" : "border-[#FDE68A] focus-visible:ring-[#F59E0B]"}`}
+                        placeholder="—"
+                      />
+                      <div className="text-[10px] mt-1 text-muted-foreground font-mono">rango {c.puntaje_min}–{c.puntaje_max}</div>
+                    </div>
+                  </div>
+
+                  {hasValue && (
+                    <div className="mt-3 h-1.5 w-full bg-secondary rounded-full overflow-hidden">
+                      <div className={`h-full transition-all ${sumaRanking ? "bg-[#14776A]" : "bg-[#F59E0B]"}`} style={{ width: `${pct}%` }}></div>
+                    </div>
+                  )}
+
+                  <div className="mt-3 grid lg:grid-cols-[1fr_auto] gap-2 items-end">
+                    <Textarea
+                      data-testid={`eval-obs-${c.id}`}
+                      disabled={isLocked}
+                      rows={2}
+                      placeholder="Observación (opcional) — sustenta tu puntaje…"
+                      value={observaciones[c.id] || ""}
+                      onChange={(e) => setObs(c.id, e.target.value)}
+                      className="rounded-lg text-[13px] resize-none"
+                    />
+                    {!isLocked && (
+                      <button type="button" onClick={() => sugerirObs(c.id)} data-testid={`ai-suggest-${c.id}`}
+                              className="inline-flex items-center gap-1.5 text-[11px] text-[#14776A] hover:text-[#0F5E54] font-semibold whitespace-nowrap self-end mb-2">
+                        <Sparkles className="w-3 h-3" /> Sugerir con IA
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Observación final + Totales */}
+        <div className="mt-6 grid lg:grid-cols-[2fr_1fr] gap-4">
+          <div className="rounded-lg border border-border bg-white p-4">
             <label className="text-[10px] uppercase tracking-[0.16em] font-display font-bold text-muted-foreground mb-2 block">
-              Observación final
+              Observación final / Conclusiones
             </label>
             <Textarea
               data-testid="eval-obs-final"
               disabled={isLocked}
-              rows={4}
+              rows={5}
               value={obsFinal}
               onChange={(e) => setObsFinal(e.target.value)}
               placeholder="Conclusiones y observaciones generales de la evaluación…"
               className="rounded-sm"
             />
           </div>
-
-          <div className="mt-6 grid grid-cols-2 gap-3">
-            <div className="border border-border rounded-sm p-4">
-              <div className="text-[10px] uppercase tracking-wider font-display font-bold text-muted-foreground">Total oficial</div>
-              <div className="font-display font-black text-3xl tabular-nums mt-1">{total(true).toFixed(1)} <span className="text-lg text-muted-foreground">/ 100</span></div>
+          <div className="space-y-3">
+            <div className="rounded-lg border border-[#CDE7E1] bg-gradient-to-br from-[#F0F7F5] to-white p-4">
+              <div className="text-[10px] uppercase tracking-wider font-display font-bold text-[#0F5E54]">Total oficial</div>
+              <div className="font-display font-black text-3xl tabular-nums mt-1">
+                {totalOf.toFixed(1)} <span className="text-lg text-muted-foreground">/ {maxOf}</span>
+              </div>
+              <div className="mt-2 h-1.5 w-full bg-white rounded-full overflow-hidden border border-[#CDE7E1]">
+                <div className="h-full bg-[#14776A]" style={{ width: `${pctTotal}%` }}></div>
+              </div>
             </div>
-            <div className="border border-border rounded-sm p-4">
-              <div className="text-[10px] uppercase tracking-wider font-display font-bold text-muted-foreground">Total diferencial</div>
-              <div className="font-display font-black text-3xl tabular-nums mt-1">{total(false).toFixed(1)}</div>
+            <div className="rounded-lg border border-[#FDE68A] bg-[#FFFBEB]/40 p-4">
+              <div className="text-[10px] uppercase tracking-wider font-display font-bold text-[#92400E]">Total diferencial</div>
+              <div className="font-display font-black text-3xl tabular-nums mt-1 text-[#92400E]">{totalDif.toFixed(1)}</div>
+              <div className="text-[10.5px] text-muted-foreground mt-1">No suma — solo desempate</div>
             </div>
           </div>
         </div>
       </div>
+
+      {/* FICHA COMPLETA DRAWER */}
+      <Drawer open={showFicha} onOpenChange={setShowFicha}>
+        <DrawerContent className="max-w-2xl ml-auto">
+          <DrawerHeader>
+            <DrawerTitle className="font-display flex items-center gap-2">
+              <Eye className="w-5 h-5 text-[#14776A]" />
+              Ficha completa · {propuesta.codigo}
+            </DrawerTitle>
+            <div className="text-[12px] text-muted-foreground">{propuesta.nombre}</div>
+          </DrawerHeader>
+          <div className="px-6 pb-6 overflow-y-auto">
+            <div className="grid sm:grid-cols-2 gap-3">
+              {camposFicha.map((c) => {
+                const v = propuesta.datos?.[c.nombre_interno];
+                let display = v === null || v === undefined || v === "" ? "—" : v;
+                if (Array.isArray(v)) display = v.join(", ");
+                if (c.tipo === "si_no") display = v ? "Sí" : "No";
+                return (
+                  <div key={c.id} className="border border-border rounded-sm p-3 bg-white">
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-display font-bold">{c.nombre_visible}</div>
+                    <div className={`text-[13px] mt-1 ${(c.tipo === "fecha" || c.tipo === "hora") ? "font-mono" : ""}`}>{display}</div>
+                  </div>
+                );
+              })}
+            </div>
+            {propuesta.datos?.link_expediente && (
+              <a href={propuesta.datos.link_expediente} target="_blank" rel="noreferrer"
+                 className="mt-4 inline-flex items-center gap-2 px-3 py-2 bg-[#14776A] hover:bg-[#0F5E54] text-white rounded-sm text-sm font-semibold transition-colors">
+                <ExternalLink className="w-4 h-4" /> Abrir expediente externo
+              </a>
+            )}
+          </div>
+        </DrawerContent>
+      </Drawer>
     </div>
   );
 }
