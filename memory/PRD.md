@@ -231,6 +231,27 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - ✅ Frontend `Dashboard.jsx` reescrito completamente con `recharts` instalado. UI con grid responsive 1/2/3/4 columnas + cards con borde verde institucional.
 - ✅ Verificado e2e: admin ve 5 dashboards + jurado ve solo el suyo (RBAC funcional).
 
+### Dashboards FASES 2+3+4 — Comparativos, Editor sin código, Auto-sugerencias (Feb 2026 v17)
+**Fase 2 — Indicadores avanzados**:
+- ✅ **8 nuevos data sources**: `comparativo_jurados`, `comparativo_ternas`, `comparativo_subregiones`, `time_series_evaluaciones` (14 días), `dist_linea`, `ranking_por_linea`, `dist_priorizacion`, `kpi_ganadores/elegibles/lista_espera`.
+- ✅ **2 dashboards INC2026 nuevos**:
+  - "Resultados por línea / temática" (pie + ranking)
+  - "Indicadores de priorización poblacional" (mujeres, discapacidad, étnico, víctimas, PDET)
+- ✅ **3 widgets de comparativo** integrados en dashboards de jurado/terna/subregión (bar charts horizontales con promedio).
+- ✅ **Widget `time_series`** con LineChart (recharts) en avance general.
+- ✅ Total: **7 dashboards y 24 widgets** disponibles para admin (vs 5 dashboards / 15 widgets antes).
+
+**Fase 3 — Editor sin código**:
+- ✅ Endpoints: `GET /api/dashboards/overrides` y `PATCH` con operaciones incrementales: `add_hidden_dashboard`, `remove_hidden_dashboard`, `add_hidden_widget`, `remove_hidden_widget`, `custom_widget`, `delete_custom_widget_id`, `reset`.
+- ✅ Endpoint `GET /api/dashboards/catalog` con los 24 data sources + 9 widget types disponibles.
+- ✅ UI: botón **"Editar dashboards"** abre dialog con lista completa (incluyendo los ocultos en amarillo discontinuo). Toggle por dashboard (Ocultar/Mostrar) y por widget individual (clic en chip). Botón "Restaurar default".
+
+**Fase 4 — Auto-sugerencias**:
+- ✅ Función `_generate_suggestions(campos, dashboards_existentes, overrides)`: detecta campos configurados (subregion, linea, municipio, enfoque_poblacional) y sugiere widgets que aún no se visualizan.
+- ✅ Banner ámbar **"Sugerencias inteligentes"** en lo alto del dashboard cuando hay sugerencias activas, con razón explicativa (rationale).
+- ✅ Endpoints: `POST /api/dashboards/suggestions/{id}/accept` y `/dismiss` (descartar guarda en `hidden_widgets` para no volver a sugerir).
+- ✅ Verificado: al ocultar "territorial", aparecen 2 sugerencias `sug_subregion` y `sug_municipio` con texto "Detectamos el campo 'Subregión'/'Municipio'…".
+
 ## Backlog / próximas tareas
 
 ### P0 (cierre de funcionalidad clave)
