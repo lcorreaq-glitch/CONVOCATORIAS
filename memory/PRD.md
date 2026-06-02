@@ -73,6 +73,11 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - 1 convocatoria (INC2026), 9 catálogos, 16 campos, 10 criterios, 7 desempates.
 - **12 propuestas** habilitadas distribuidas en 6 subregiones, **6 jurados** con usuarios asociados, **3 ternas** (T1 Urabá, T2 Oriente, T3 Norte), **24 evaluaciones** individuales en Borrador.
 
+### Banner de contexto + Vista previa del formulario (Feb 2026 v3)
+- ✅ Nuevo componente **`ConvocatoriaContextBanner`** visible en /propuestas (y reutilizable en otros módulos): muestra en qué convocatoria está parado el usuario, switcher inline, contadores de campos/catálogos/propuestas y link rápido a Configuración.
+- ✅ Botón **"Vista previa del formulario"** en Configuración → Campos: abre el formulario exacto que verán los usuarios al crear una propuesta, en modo solo-lectura (PropuestaForm prop `previewMode=true`).
+- ✅ Refuerzo en card "Campos" del Resumen con tip sobre la vista previa.
+
 ### Módulo Propuestas con formulario dinámico (Feb 2026)
 - ✅ **Formulario dinámico de propuesta** que renderiza inputs según los campos configurados de la convocatoria activa. Selects de lista/multi alimentados desde catálogos vinculados. Componente: `/app/frontend/src/pages/propuestas/PropuestaForm.jsx`.
 - ✅ Botón **"Nueva propuesta"** + icono Editar por fila en `/app/frontend/src/pages/Propuestas.jsx`.
