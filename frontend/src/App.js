@@ -22,6 +22,7 @@ import Actas from "@/pages/Actas";
 import Reportes from "@/pages/Reportes";
 import Auditoria from "@/pages/Auditoria";
 import Usuarios from "@/pages/Usuarios";
+import Administracion from "@/pages/Administracion";
 
 export default function App() {
   return (
@@ -47,6 +48,7 @@ export default function App() {
               <Route path="/reportes" element={<Reportes />} />
               <Route path="/auditoria" element={<Auditoria />} />
               <Route path="/usuarios" element={<Usuarios />} />
+              <Route path="/administracion" element={<Administracion />} />
             </Route>
           </Routes>
         </AuthProvider>

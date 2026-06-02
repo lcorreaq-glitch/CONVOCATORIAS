@@ -60,11 +60,18 @@ async def seed_admin():
             "convocatoria_roles": [],
             "created_at": now_iso(),
         })
-    elif not verify_password(password, existing.get("password_hash", "")):
-        await db.users.update_one(
-            {"username": username},
-            {"$set": {"password_hash": hash_password(password)}},
-        )
+    else:
+        # Mantener admin alineado con .env (idempotente)
+        updates = {}
+        if existing.get("email") != email: updates["email"] = email
+        if existing.get("name") != name: updates["name"] = name
+        if not verify_password(password, existing.get("password_hash", "")):
+            updates["password_hash"] = hash_password(password)
+        existing_role = existing.get("role")
+        if existing_role != "admin_general": updates["role"] = "admin_general"
+        if not existing.get("active", True): updates["active"] = True
+        if updates:
+            await db.users.update_one({"username": username}, {"$set": updates})
 
 
 async def seed_incentivos_2026():

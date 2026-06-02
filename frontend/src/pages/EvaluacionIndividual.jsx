@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { ArrowLeft, ExternalLink, Save, CheckCircle2, PenLine, FileText, Lock } from "lucide-react";
+import { ArrowLeft, ExternalLink, Save, CheckCircle2, PenLine, FileText, Lock, Sparkles } from "lucide-react";
 import { TID } from "@/constants/testIds";
 
 export default function EvaluacionIndividual() {
@@ -61,6 +61,18 @@ export default function EvaluacionIndividual() {
   };
 
   const downloadActa = () => openPdf(`/actas/individual/${id}`);
+
+  const sugerirObs = async (criterioId) => {
+    try {
+      const punt = puntajes[criterioId];
+      if (punt === "" || punt === undefined) { toast.error("Asigne primero un puntaje al criterio."); return; }
+      const r = await api.post("/ai/sugerencia-observacion", {
+        evaluacion_id: id, criterio_id: criterioId, puntaje: parseFloat(punt),
+      });
+      setObservaciones((prev) => ({ ...prev, [criterioId]: r.data.observacion_sugerida }));
+      toast.success("Sugerencia de IA aplicada (puedes editarla)");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
 
   if (!ev || !propuesta) return <div className="p-10 text-muted-foreground">Cargando…</div>;
 
@@ -195,6 +207,14 @@ export default function EvaluacionIndividual() {
                   onChange={(e) => setObs(c.id, e.target.value)}
                   className="rounded-sm text-sm"
                 />
+                {!isLocked && (
+                  <div className="flex justify-end mt-1.5">
+                    <button type="button" onClick={() => sugerirObs(c.id)} data-testid={`ai-suggest-${c.id}`}
+                            className="inline-flex items-center gap-1.5 text-[11px] text-[#14776A] hover:text-[#0F5E54] font-semibold">
+                      <Sparkles className="w-3 h-3" /> Sugerir con IA
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

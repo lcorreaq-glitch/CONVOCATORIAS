@@ -120,20 +120,36 @@ export default function Layout() {
             </NavLink>
           ))}
           {user?.role === "admin_general" && (
-            <NavLink
-              to="/usuarios"
-              data-testid={TID.navUsuarios}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 my-0.5 rounded-lg text-[13px] transition-colors ${
-                  isActive
-                    ? "bg-[#E8F3F0] text-[#0F5E54] font-semibold"
-                    : "text-[#3F4856] hover:bg-[#F1F4F7] hover:text-[#1A1F2C]"
-                }`
-              }
-            >
-              <Users className="w-[18px] h-[18px] stroke-[1.6]" />
-              <span>Usuarios</span>
-            </NavLink>
+            <>
+              <NavLink
+                to="/administracion"
+                data-testid="nav-administracion"
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3 py-2.5 my-0.5 rounded-lg text-[13px] transition-colors ${
+                    isActive
+                      ? "bg-[#E8F3F0] text-[#0F5E54] font-semibold"
+                      : "text-[#3F4856] hover:bg-[#F1F4F7] hover:text-[#1A1F2C]"
+                  }`
+                }
+              >
+                <Settings2 className="w-[18px] h-[18px] stroke-[1.6]" />
+                <span>Administración</span>
+              </NavLink>
+              <NavLink
+                to="/usuarios"
+                data-testid={TID.navUsuarios}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3 py-2.5 my-0.5 rounded-lg text-[13px] transition-colors ${
+                    isActive
+                      ? "bg-[#E8F3F0] text-[#0F5E54] font-semibold"
+                      : "text-[#3F4856] hover:bg-[#F1F4F7] hover:text-[#1A1F2C]"
+                  }`
+                }
+              >
+                <Users className="w-[18px] h-[18px] stroke-[1.6]" />
+                <span>Usuarios</span>
+              </NavLink>
+            </>
           )}
         </nav>
 
