@@ -31,7 +31,7 @@ const CAMPO_FLAGS = [
   { key: "editable", label: "editable", tone: "muted", help: "Permite editar el valor después de creada la propuesta." },
 ];
 
-export default function CamposPanel({ campos, convId, reload, catalogos }) {
+export default function CamposPanel({ campos, convId, reload, catalogos, aplicaA = "propuesta" }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -39,6 +39,7 @@ export default function CamposPanel({ campos, convId, reload, catalogos }) {
     nombre_visible: "", nombre_interno: "", tipo: "texto_corto",
     obligatorio: false, orden: 0, uso_filtro: false, uso_ranking: false,
     uso_desempate: false, uso_actas: false, editable: true, catalogo_id: null,
+    uso_propuesta: aplicaA === "propuesta", uso_lista: false, aplica_a: aplicaA,
   };
   const [f, setF] = useState(blank);
   const startEdit = (c) => { setEditing(c); setF({ ...blank, ...c }); setOpen(true); };

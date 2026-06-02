@@ -189,15 +189,23 @@ class CampoIn(BaseModel):
     uso_desempate: bool = False
     uso_propuesta: bool = True   # Aparece en el formulario de propuesta
     uso_lista: bool = False      # Aparece como columna en /propuestas
+    aplica_a: str = "propuesta"  # "propuesta" | "jurado" — dominio al que pertenece el campo
     depende_de: Optional[str] = None
     catalogo_id: Optional[str] = None
     orden: int = 0
 
 
 @router.get("/campos")
-async def list_campos(convocatoria_id: str, user: dict = Depends(get_current_user)):
+async def list_campos(convocatoria_id: str, aplica_a: Optional[str] = None, user: dict = Depends(get_current_user)):
     db = get_db()
-    items = await db.campos.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).sort("orden", 1).to_list(500)
+    q = {"convocatoria_id": convocatoria_id}
+    if aplica_a:
+        # Compatibilidad: campos sin aplica_a se consideran de propuesta por default
+        if aplica_a == "propuesta":
+            q["$or"] = [{"aplica_a": "propuesta"}, {"aplica_a": {"$exists": False}}]
+        else:
+            q["aplica_a"] = aplica_a
+    items = await db.campos.find(q, {"_id": 0}).sort("orden", 1).to_list(500)
     return items
 
 

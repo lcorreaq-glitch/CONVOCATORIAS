@@ -169,10 +169,13 @@ class JuradoIn(BaseModel):
     especialidad: Optional[str] = ""
     linea_experiencia: Optional[str] = ""
     territorio: Optional[str] = ""
+    subregiones: Optional[List[str]] = None
     disponibilidad: Optional[str] = "Disponible"
     estado: str = "Activo"
     crear_usuario: bool = True
     password: Optional[str] = None
+    datos: Optional[dict] = None  # campos dinámicos definidos en Configuración
+    foto_url: Optional[str] = None
 
 
 @router.get("/jurados")
@@ -180,6 +183,34 @@ async def list_jurados(convocatoria_id: str, user: dict = Depends(get_current_us
     db = get_db()
     items = await db.jurados.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(2000)
     return items
+
+
+@router.get("/jurados/me")
+async def get_my_jurado(user: dict = Depends(get_current_user)):
+    """Devuelve el registro de jurado vinculado al usuario actual."""
+    db = get_db()
+    if not user.get("jurado_id"):
+        raise HTTPException(status_code=404, detail="Tu usuario no está vinculado a un jurado")
+    jur = await db.jurados.find_one({"id": user["jurado_id"]}, {"_id": 0})
+    if not jur:
+        raise HTTPException(status_code=404, detail="Registro de jurado no encontrado")
+    return jur
+
+
+@router.patch("/jurados/me")
+async def update_my_jurado(payload: dict, user: dict = Depends(get_current_user)):
+    """Permite al jurado editar SOLO sus datos básicos (perfil, foto, datos dinámicos no críticos)."""
+    db = get_db()
+    if not user.get("jurado_id"):
+        raise HTTPException(status_code=404, detail="Tu usuario no está vinculado a un jurado")
+    # Campos que el propio jurado NO puede modificar (solo admin):
+    SAFE_KEYS = {"telefono", "perfil", "especialidad", "linea_experiencia", "foto_url", "datos"}
+    safe = {k: v for k, v in payload.items() if k in SAFE_KEYS}
+    if not safe:
+        return await db.jurados.find_one({"id": user["jurado_id"]}, {"_id": 0})
+    await db.jurados.update_one({"id": user["jurado_id"]}, {"$set": safe})
+    await audit(user, "self_update", "jurados", user["jurado_id"], valor_nuevo=safe)
+    return await db.jurados.find_one({"id": user["jurado_id"]}, {"_id": 0})
 
 
 @router.post("/jurados")
@@ -190,6 +221,10 @@ async def create_jurado(payload: JuradoIn, user: dict = Depends(require_roles("a
     crear_user = doc.pop("crear_usuario", True)
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = now_iso()
+    if doc.get("datos") is None:
+        doc["datos"] = {}
+    if doc.get("subregiones") is None:
+        doc["subregiones"] = []
     await db.jurados.insert_one(doc)
     doc.pop("_id", None)
 
@@ -223,10 +258,22 @@ async def update_jurado(jid: str, payload: dict, user: dict = Depends(require_ro
 
 
 @router.get("/jurados-template")
-async def jurados_template(user: dict = Depends(get_current_user)):
+async def jurados_template(convocatoria_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    """Genera plantilla dinámica: base + campos configurados con aplica_a=jurado."""
+    db = get_db()
+    base_cols = ["nombre", "email", "telefono", "subregiones", "perfil"]
+    extra_cols = []
+    if convocatoria_id:
+        campos = await db.campos.find(
+            {"convocatoria_id": convocatoria_id, "aplica_a": "jurado"}, {"_id": 0}
+        ).sort("orden", 1).to_list(200)
+        extra_cols = [c["nombre_interno"] for c in campos if c["nombre_interno"] not in base_cols]
+    cols = base_cols + extra_cols
     wb = Workbook(); ws = wb.active; ws.title = "Jurados"
-    ws.append(["nombre", "email", "telefono", "perfil", "especialidad", "linea_experiencia", "territorio"])
-    ws.append(["Ana Pérez", "ana.perez@ejemplo.co", "3001234567", "Magíster en Desarrollo Comunitario", "Participación", "Cultura", "Urabá"])
+    ws.append(cols)
+    ws.append(["Ana Pérez", "ana.perez@ejemplo.co", "3001234567",
+               "Urabá; Norte", "Magíster en Desarrollo Comunitario..."]
+              + ["" for _ in extra_cols])
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                              headers={"Content-Disposition": "attachment; filename=plantilla_jurados.xlsx"})
@@ -242,43 +289,68 @@ async def import_jurados(convocatoria_id: str = Form(...), file: UploadFile = Fi
     if not rows:
         return {"creados": 0, "rechazados": 0, "errores": []}
     headers = [str(h).strip() if h else "" for h in rows[0]]
+    # campos jurado configurados de la convocatoria
+    campos_jurado = await db.campos.find(
+        {"convocatoria_id": convocatoria_id, "aplica_a": "jurado"}, {"_id": 0}
+    ).to_list(200)
+    campos_by_nombre = {c["nombre_interno"]: c for c in campos_jurado}
+    BASE_KEYS = {"nombre", "email", "telefono", "subregiones", "perfil", "especialidad",
+                 "linea_experiencia", "territorio", "estado"}
     created, errors = 0, []
     for idx, row in enumerate(rows[1:], start=2):
         try:
             data = {headers[i]: (row[i] if i < len(row) else None) for i in range(len(headers))}
             if not data.get("email") or not data.get("nombre"):
                 errors.append({"fila": idx, "error": "Falta nombre o email"}); continue
-            email = str(data["email"]).strip().lower()
+            # Separar base vs dinámico
+            base = {k: data.get(k) for k in BASE_KEYS if data.get(k) is not None}
+            datos_din = {}
+            for k, v in data.items():
+                if k in BASE_KEYS or not k or v is None: continue
+                if k in campos_by_nombre:
+                    # tipo conversion
+                    tipo = campos_by_nombre[k]["tipo"]
+                    if tipo == "si_no":
+                        datos_din[k] = str(v).strip().lower() in ("true", "1", "sí", "si", "yes")
+                    elif tipo == "seleccion_multiple":
+                        datos_din[k] = [s.strip() for s in str(v).split(";") if s.strip()]
+                    else:
+                        datos_din[k] = v
+                else:
+                    datos_din[k] = v
+            # Subregiones: array si viene con ';' o ','
+            subs_raw = base.get("subregiones")
+            if isinstance(subs_raw, str):
+                base["subregiones"] = [s.strip() for s in subs_raw.replace(",", ";").split(";") if s.strip()]
+            email = str(base["email"]).strip().lower()
+            existing = await db.jurados.find_one({"convocatoria_id": convocatoria_id, "email": email})
+            if existing:
+                errors.append({"fila": idx, "error": f"Email ya registrado: {email}"}); continue
+            jur_id = str(uuid.uuid4())
             doc = {
-                "id": str(uuid.uuid4()),
-                "convocatoria_id": convocatoria_id,
-                "nombre": str(data["nombre"]),
-                "email": email,
-                "telefono": str(data.get("telefono") or ""),
-                "perfil": str(data.get("perfil") or ""),
-                "especialidad": str(data.get("especialidad") or ""),
-                "linea_experiencia": str(data.get("linea_experiencia") or ""),
-                "territorio": str(data.get("territorio") or ""),
-                "disponibilidad": "Disponible",
-                "estado": "Activo",
-                "created_at": now_iso(),
+                "id": jur_id, "convocatoria_id": convocatoria_id,
+                "nombre": str(base.get("nombre")).strip(), "email": email,
+                "telefono": str(base.get("telefono") or "").strip(),
+                "perfil": str(base.get("perfil") or "").strip(),
+                "subregiones": base.get("subregiones") or [],
+                "estado": "Activo", "disponibilidad": "Disponible",
+                "datos": datos_din, "created_at": now_iso(),
             }
             await db.jurados.insert_one(doc)
-            # Crear usuario asociado
-            if not await db.users.find_one({"$or": [{"username": email}, {"email": email}]}):
+            # Crear usuario
+            existing_user = await db.users.find_one({"$or": [{"username": email}, {"email": email}]})
+            if not existing_user:
                 await db.users.insert_one({
-                    "id": str(uuid.uuid4()),
-                    "username": email, "email": email, "name": doc["nombre"],
-                    "password_hash": hash_password("Jurado2026!"),
+                    "id": str(uuid.uuid4()), "username": email, "email": email,
+                    "name": doc["nombre"], "password_hash": hash_password("Jurado2026!"),
                     "role": "jurado", "active": True,
                     "convocatoria_roles": [{"convocatoria_id": convocatoria_id, "role": "jurado"}],
-                    "jurado_id": doc["id"],
-                    "created_at": now_iso(),
+                    "jurado_id": jur_id, "created_at": now_iso(),
                 })
             created += 1
         except Exception as e:
             errors.append({"fila": idx, "error": str(e)})
-    await audit(user, "bulk_import", "jurados", convocatoria_id, detalle=f"Creados {created}, errores {len(errors)}")
+    await audit(user, "import", "jurados", convocatoria_id, detalle=f"creados={created} errores={len(errors)}")
     return {"creados": created, "rechazados": len(errors), "errores": errors[:50]}
 
 

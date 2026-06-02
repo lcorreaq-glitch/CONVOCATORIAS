@@ -138,6 +138,38 @@ async def borrador_acta_colectiva(payload: ActaDraftIn, user: dict = Depends(get
     return {"borrador": draft, "marcado_como_sugerencia": True}
 
 
+class MejorarTextoIn(BaseModel):
+    texto: str
+    contexto: Optional[str] = "perfil_jurado"
+
+
+@router.post("/mejorar-texto")
+async def mejorar_texto(payload: MejorarTextoIn, user: dict = Depends(get_current_user)):
+    """Mejora la redacción de un texto manteniendo el contenido. Útil para perfiles, descripciones."""
+    if not payload.texto or len(payload.texto.strip()) < 5:
+        raise HTTPException(status_code=400, detail="Texto vacío o demasiado corto")
+    if len(payload.texto) > 4000:
+        raise HTTPException(status_code=400, detail="Texto excede 4000 caracteres")
+
+    sys_msg = {
+        "perfil_jurado": (
+            "Eres un editor profesional especializado en perfiles institucionales. "
+            "Reescribe el siguiente perfil de jurado/evaluador con redacción clara, profesional y concisa "
+            "en español neutro, manteniendo toda la información factual. "
+            "Estructura: profesión, formación, especialización y experiencia relevante. "
+            "Máximo 4 frases. Devuelve SOLO el texto mejorado, sin comillas ni encabezados."
+        ),
+        "descripcion": (
+            "Eres un editor profesional. Reescribe el siguiente texto de manera clara y concisa "
+            "en español neutro, manteniendo toda la información. Devuelve solo el texto mejorado."
+        ),
+    }.get(payload.contexto, "Mejora la redacción manteniendo el contenido.")
+
+    mejorado = await _chat(sys_msg, payload.texto.strip(), session_suffix=f"mejorar-{user.get('id','')[:6]}")
+    await audit(user, "ai_mejorar", "textos", payload.contexto, detalle=f"len_in={len(payload.texto)} len_out={len(mejorado)}")
+    return {"texto_mejorado": mejorado, "texto_original": payload.texto}
+
+
 @router.get("/status")
 async def ai_status(user: dict = Depends(get_current_user)):
     cfg = await get_ai_config()

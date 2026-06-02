@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import PageHeader, { Badge } from "@/components/PageHeader";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sparkles, Info } from "lucide-react";
+import { Sparkles, Info, FileText, Users } from "lucide-react";
 
 import ResumenPanel from "./configuracion/ResumenPanel";
 import CamposPanel from "./configuracion/CamposPanel";
@@ -21,8 +21,13 @@ export default function Configuracion() {
   const [desempates, setDesempates] = useState([]);
   const [convs, setConvs] = useState([]);
   const [tab, setTab] = useState("resumen");
+  const [aplicaA, setAplicaA] = useState("propuesta"); // sub-tab dentro de Campos
 
   const conv = convs.find((c) => c.id === activeConvocatoriaId);
+  // separar campos por aplica_a (compatibilidad: sin aplica_a → propuesta)
+  const camposPropuesta = campos.filter((c) => (c.aplica_a || "propuesta") === "propuesta");
+  const camposJurado = campos.filter((c) => c.aplica_a === "jurado");
+  const camposVisibles = aplicaA === "jurado" ? camposJurado : camposPropuesta;
 
   const reload = async () => {
     if (!activeConvocatoriaId) return;
@@ -103,7 +108,28 @@ export default function Configuracion() {
           <ResumenPanel convId={activeConvocatoriaId} refreshKey={`${campos.length}-${catalogos.length}-${criterios.length}-${desempates.length}`} onJump={(t) => setTab(t)} />
         </TabsContent>
         <TabsContent value="campos" className="mt-6">
-          <CamposPanel campos={campos} convId={activeConvocatoriaId} reload={reload} catalogos={catalogos} />
+          {/* Sub-tabs: campos de propuesta vs campos de jurado */}
+          <div className="mb-4 inline-flex rounded-lg border border-border bg-white p-1">
+            <button
+              onClick={() => setAplicaA("propuesta")}
+              className={`px-3 py-1.5 rounded-md text-[12.5px] font-semibold inline-flex items-center gap-1.5 transition-colors ${aplicaA === "propuesta" ? "bg-[#14776A] text-white" : "text-muted-foreground hover:text-foreground"}`}
+              data-testid="subtab-campos-propuesta"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              Campos de Propuesta
+              <span className="font-mono text-[11px] opacity-80">({camposPropuesta.length})</span>
+            </button>
+            <button
+              onClick={() => setAplicaA("jurado")}
+              className={`px-3 py-1.5 rounded-md text-[12.5px] font-semibold inline-flex items-center gap-1.5 transition-colors ${aplicaA === "jurado" ? "bg-[#14776A] text-white" : "text-muted-foreground hover:text-foreground"}`}
+              data-testid="subtab-campos-jurado"
+            >
+              <Users className="w-3.5 h-3.5" />
+              Campos de Jurado
+              <span className="font-mono text-[11px] opacity-80">({camposJurado.length})</span>
+            </button>
+          </div>
+          <CamposPanel campos={camposVisibles} convId={activeConvocatoriaId} reload={reload} catalogos={catalogos} aplicaA={aplicaA} />
         </TabsContent>
         <TabsContent value="catalogos" className="mt-6">
           <CatalogosPanel catalogos={catalogos} convId={activeConvocatoriaId} reload={reload} campos={campos} />

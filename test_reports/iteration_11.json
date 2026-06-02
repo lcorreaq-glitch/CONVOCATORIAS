@@ -1,0 +1,34 @@
+{
+  "summary": "Iter 11 e2e — backend 11/11 pytest PASSED, frontend critical flows PASSED. Tested campos aplica_a (8 jurado / 16 propuesta), upload/file (PDF), AI mejorar-texto (Emergent LLM Key OK, devuelve texto_mejorado real), GET/PATCH /jurados/me (PATCH ignora nombre/email/subregiones y aplica solo telefono/perfil/foto_url/datos, verificado), jurados-template XLSX dinámico, 29 jurados sembrados con datos.cedula y datos.organizacion. Frontend: sub-tabs Configuración (16 propuesta / 8 jurado con conteo en pestaña), /jurados muestra 29 filas, filtros Airtable-style abren popover con opciones, chip se agrega y X funciona, JuradoForm modal abre con campos dinámicos + botón IA + submit, /mi-perfil con admin (sin jurado_id) NO crashea — muestra toast 'No se pudo cargar tu perfil' y estado vacío, /mi-perfil con jurado yicell.gonzalez carga todos los controles (telefono, perfil, mejorar-IA, foto-upload, hv-upload, save).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/jurados filtros", "issues": ["Solo 2 campos de jurado (organizacion, subregiones) tienen uso_filtro=true en el seed. El usuario podría esperar también filtrar por especialidad/linea_experiencia. Considera marcar más campos jurado con uso_filtro=true en seed_jurados_inc2026.py si la spec lo requiere."]},
+      {"screen": "JuradoForm modal", "issues": ["data-testid='jur-hoja_vida' no fue encontrado por el query_selector (devolvió null) aunque IA y perfil sí están. El input de archivo (FileField) está hidden detrás de un label y el data-testid se pasa al <input type='file' className='hidden'> en JuradoForm.jsx línea 308. Verificar visualmente que el componente FileField se renderice cuando el modal abre en modo 'nuevo' (sin valor). Si el rendering condicional omite hoja_vida en create-mode, agregar fallback. Endpoint POST /api/upload/file ya está confirmado funcional desde backend."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_jurados_iter11.py", "/app/test_reports/pytest/iter11_jurados.xml"],
+  "action_items": [
+    "(Opcional) Verificar manualmente que el campo 'hoja_vida' tipo archivo se renderiza visualmente en JuradoForm modal — el selector data-testid='jur-hoja_vida' del input file no fue hallable; puede ser por estar dentro de label hidden o por filtrar campos archivo del array dinámico de campos render.",
+    "(Opcional) Marcar más campos jurado con uso_filtro=true en seed si se quieren más opciones en el 'Filtrar por…' de /jurados.",
+    "(Cosmético, ya señalado iter9-10) Actualizar subtitle de PageHeader en Propuestas.jsx para reflejar filtros dinámicos."
+  ],
+  "critical_code_review_comments": [
+    "routes_data.py PATCH /jurados/me usa whitelist SAFE_KEYS={telefono, perfil, especialidad, linea_experiencia, foto_url, datos}. Bien — bloquea nombre/email/subregiones según spec. Verificado en test_patch_me_ignores_unsafe_fields.",
+    "routes_data.py POST /jurados — al crear usuario hace insert sin verificar si 'crear_user' colisiona con un user que ya tiene 'jurado_id' distinto. Mitigado por el `if not existing`, pero si existing tiene rol distinto no se reusa. Aceptable.",
+    "routes_ai.py /mejorar-texto valida len(texto) entre 5 y 4000 chars. Bien. session_suffix usa user.get('id','')[:6] que asume id existe en el dict user — si auth devuelve user sin 'id' caería en cadena vacía, no crashea pero podría colisionar sesiones. Bajo impacto.",
+    "routes_upload.py /file lee todo el archivo en memoria con file.read() y luego compara len(content) > 10MB. Para archivos >10MB esto consume memoria antes de rechazar. Mejor leer en chunks o usar Content-Length header. Bajo impacto en MVP.",
+    "JuradoForm.jsx — el render dinámico de campos tipo archivo (FileField, línea ~290+) pone data-testid sobre el <input> hidden pero el área clickeable es el <label>. Para pruebas e2e considerar agregar data-testid también al label visible o usar set_input_files con el ID del input. (Ya el upload del backend está probado.)",
+    "Configuracion.jsx — useMemo() de camposJurado y camposPropuesta filtra `c.aplica_a === 'jurado'` y `c.aplica_a !== 'jurado'`. Compatibilidad correcta con campos legacy sin aplica_a (caen en propuesta). Verificado en backend test."
+  ],
+  "updated_files": ["/app/backend/tests/test_jurados_iter11.py"],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100% (8/8 escenarios críticos)"},
+  "test_credentials": "Admin: lcorreaq / Chocolate2026!  | Jurado: yicell.gonzalez@fodc.org.co / Jurado2026! (verificado funcionando)",
+  "seed_data_creation": "Ninguna. Tests solo PATCH /jurados/me con restauración al final (telefono/perfil del jurado yicell.gonzalez devueltos al valor original). Uploads se guardan en collection 'uploads' (registro de prueba 'hoja_vida.pdf' 55b) — no afecta jurados/propuestas.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "INC2026 codigo != id; siempre resolver via GET /api/convocatorias y buscar codigo='INC2026' (id real = 43b9b70a-eedf-4580-9f78-927a473e8b96). TestIds clave de iter11: tab-campos, subtab-campos-propuesta/jurado, jur-new-btn, jur-template-btn, jur-import-btn, jur-add-filter-btn, jur-add-filter-option-{ni}, jur-remove-filter-{ni}, jur-clear-filters, jurado-row-{id}, jur-edit-{id}, jur-nombre/email/telefono/perfil, jur-mejorar-ia, jur-submit-btn; mi-perfil-{telefono,perfil,mejorar-ia,foto-upload,hv-upload,save}. /mi-perfil con admin muestra 'Cargando perfil...' + toast 'No se pudo cargar tu perfil' (no crash). 29 jurados con subregiones[] y datos:{cedula,organizacion} confirmados. AI integration (Emergent key) funcionando.",
+  "rca of the issue": "N/A — no se encontraron bugs. Únicos hallazgos: (1) solo 2 campos jurado marcados con uso_filtro=true en seed (organizacion, subregiones), puede ser intencional; (2) selector e2e del input file hoja_vida no localizable directamente porque el data-testid está en el <input type='file' className='hidden'> debajo del label clickeable — el endpoint POST /api/upload/file está validado funcionalmente."
+}
