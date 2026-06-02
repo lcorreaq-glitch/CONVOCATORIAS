@@ -21,7 +21,6 @@ import Ranking from "@/pages/Ranking";
 import Actas from "@/pages/Actas";
 import Reportes from "@/pages/Reportes";
 import Auditoria from "@/pages/Auditoria";
-import Usuarios from "@/pages/Usuarios";
 import Administracion from "@/pages/Administracion";
 import ConvocatoriaDetail from "@/pages/ConvocatoriaDetail";
 import MiPerfil from "@/pages/MiPerfil";
@@ -50,7 +49,6 @@ export default function App() {
               <Route path="/actas" element={<Actas />} />
               <Route path="/reportes" element={<Reportes />} />
               <Route path="/auditoria" element={<Auditoria />} />
-              <Route path="/usuarios" element={<Usuarios />} />
               <Route path="/administracion" element={<Administracion />} />
               <Route path="/mi-perfil" element={<MiPerfil />} />
             </Route>
