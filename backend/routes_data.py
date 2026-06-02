@@ -27,12 +27,33 @@ class PropuestaIn(BaseModel):
 async def list_propuestas(convocatoria_id: str, estado: Optional[str] = None,
                           subregion: Optional[str] = None, linea: Optional[str] = None,
                           search: Optional[str] = None,
+                          filtros: Optional[str] = None,
                           user: dict = Depends(get_current_user)):
+    """Lista propuestas con filtros dinámicos.
+
+    `filtros` es un JSON con {nombre_interno_campo: valor} que se traduce a query
+    sobre datos.<nombre_interno>. Soporta también si_no (true/false) y arrays
+    (busca propuestas cuyo array contenga el valor).
+    """
+    import json as _json
     db = get_db()
     q = {"convocatoria_id": convocatoria_id}
     if estado: q["estado"] = estado
     if subregion: q["datos.subregion"] = subregion
     if linea: q["datos.linea"] = linea
+    if filtros:
+        try:
+            extra = _json.loads(filtros)
+            for k, v in (extra or {}).items():
+                if v is None or v == "" or v == "__all__":
+                    continue
+                # Si es array (seleccion_multiple), buscar coincidencia
+                if isinstance(v, list):
+                    q[f"datos.{k}"] = {"$in": v}
+                else:
+                    q[f"datos.{k}"] = v
+        except Exception:
+            pass
     if search:
         q["$or"] = [
             {"nombre": {"$regex": search, "$options": "i"}},

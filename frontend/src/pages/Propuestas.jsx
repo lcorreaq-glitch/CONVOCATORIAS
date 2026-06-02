@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Upload, Download, ExternalLink, Search, FileStack, Pencil } from "lucide-react";
+import { Plus, Upload, Download, ExternalLink, Search, FileStack, Pencil, X } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import PropuestaForm from "./propuestas/PropuestaForm";
 import ConvocatoriaContextBanner from "@/components/ConvocatoriaContextBanner";
@@ -20,12 +20,76 @@ function renderCellValue(v, campo) {
   return String(v);
 }
 
+function DynamicFilter({ campo, catalogo, value, onChange }) {
+  const tipo = campo.tipo;
+  const placeholder = `${campo.nombre_visible}…`;
+  const testId = `filter-${campo.nombre_interno}`;
+
+  // si_no → 3-state select (todos / sí / no)
+  if (tipo === "si_no") {
+    return (
+      <Select value={value ?? "__all__"} onValueChange={onChange}>
+        <SelectTrigger className="rounded-sm w-[180px]" data-testid={testId}>
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__all__">{campo.nombre_visible}: todos</SelectItem>
+          <SelectItem value={true}>Sí</SelectItem>
+          <SelectItem value={false}>No</SelectItem>
+        </SelectContent>
+      </Select>
+    );
+  }
+  // listas con catálogo
+  if ((tipo === "lista" || tipo === "seleccion_multiple") && catalogo) {
+    const valores = (catalogo.valores || []).filter((v) => v.activo !== false);
+    return (
+      <Select value={value ?? "__all__"} onValueChange={onChange}>
+        <SelectTrigger className="rounded-sm w-[200px]" data-testid={testId}>
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__all__">{campo.nombre_visible}: todos</SelectItem>
+          {valores.map((v) => <SelectItem key={v.id || v.valor} value={v.valor}>{v.valor}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    );
+  }
+  // fecha → input date
+  if (tipo === "fecha") {
+    return (
+      <div className="flex items-center gap-1.5">
+        <span className="text-[11px] text-muted-foreground">{campo.nombre_visible}:</span>
+        <Input type="date" value={value || ""} onChange={(e) => onChange(e.target.value)} className="rounded-sm w-[150px]" data-testid={testId} />
+        {value && <button onClick={() => onChange("")} className="text-muted-foreground hover:text-red-500"><X className="w-3 h-3" /></button>}
+      </div>
+    );
+  }
+  // numérico → input + signo
+  if (["numero", "moneda", "porcentaje"].includes(tipo)) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <span className="text-[11px] text-muted-foreground">{campo.nombre_visible}:</span>
+        <Input type="number" value={value ?? ""} onChange={(e) => onChange(e.target.value === "" ? "" : Number(e.target.value))} className="rounded-sm w-[120px]" data-testid={testId} placeholder="valor exacto" />
+        {value !== "" && value !== undefined && <button onClick={() => onChange("")} className="text-muted-foreground hover:text-red-500"><X className="w-3 h-3" /></button>}
+      </div>
+    );
+  }
+  // default → input texto
+  return (
+    <div className="flex items-center gap-1.5">
+      <Input value={value || ""} onChange={(e) => onChange(e.target.value)} className="rounded-sm w-[180px]" placeholder={placeholder} data-testid={testId} />
+      {value && <button onClick={() => onChange("")} className="text-muted-foreground hover:text-red-500"><X className="w-3 h-3" /></button>}
+    </div>
+  );
+}
+
 export default function Propuestas() {
   const { activeConvocatoriaId, user } = useAuth();
   const [items, setItems] = useState([]);
   const [search, setSearch] = useState("");
   const [estado, setEstado] = useState("__all__");
-  const [subregion, setSubregion] = useState("__all__");
+  const [filtros, setFiltros] = useState({}); // {nombre_interno: valor}
   const [importOpen, setImportOpen] = useState(false);
   const [file, setFile] = useState(null);
   const [importResult, setImportResult] = useState(null);
@@ -40,7 +104,10 @@ export default function Propuestas() {
     if (!activeConvocatoriaId) return;
     const params = new URLSearchParams({ convocatoria_id: activeConvocatoriaId });
     if (estado && estado !== "__all__") params.set("estado", estado);
-    if (subregion && subregion !== "__all__") params.set("subregion", subregion);
+    const activeFilters = Object.fromEntries(
+      Object.entries(filtros).filter(([, v]) => v !== "" && v !== "__all__" && v !== undefined && v !== null && !(Array.isArray(v) && v.length === 0))
+    );
+    if (Object.keys(activeFilters).length > 0) params.set("filtros", JSON.stringify(activeFilters));
     if (search) params.set("search", search);
     api.get(`/propuestas?${params}`).then((r) => setItems(r.data));
   };
@@ -48,13 +115,14 @@ export default function Propuestas() {
     if (!activeConvocatoriaId) return;
     api.get(`/campos?convocatoria_id=${activeConvocatoriaId}`).then((r) => setCampos(r.data));
     api.get(`/catalogos?convocatoria_id=${activeConvocatoriaId}`).then((r) => setCatalogos(r.data));
+    setFiltros({}); // limpiar al cambiar de convocatoria
   }, [activeConvocatoriaId]);
-  useEffect(() => { load(); }, [activeConvocatoriaId, estado, subregion, search]);
+  useEffect(() => { load(); }, [activeConvocatoriaId, estado, filtros, search]);
 
-  const subregiones = useMemo(() => {
-    const c = catalogos.find((x) => x.nombre.toLowerCase().includes("subreg"));
-    return c?.valores || [];
-  }, [catalogos]);
+  // Campos disponibles para filtrar: los marcados con uso_filtro
+  const camposFiltro = useMemo(() => campos.filter((c) => c.uso_filtro), [campos]);
+  const catById = useMemo(() => Object.fromEntries(catalogos.map((c) => [c.id, c])), [catalogos]);
+  const setFiltro = (key, val) => setFiltros((f) => ({ ...f, [key]: val }));
 
   const downloadTemplate = () => {
     downloadFile(`/propuestas-template?convocatoria_id=${activeConvocatoriaId}`, "plantilla_propuestas.xlsx")
@@ -132,31 +200,43 @@ export default function Propuestas() {
 
       <ConvocatoriaContextBanner />
 
-      {/* Filters */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-5">
-        <div className="relative">
-          <Search className="w-4 h-4 absolute left-2.5 top-3 text-muted-foreground" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar propuesta…" className="rounded-sm pl-9" data-testid="propuestas-search" />
+      {/* Filters: dynamic - shows search + estado + any campo with uso_filtro=true */}
+      <div className="mb-5">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="relative flex-1 min-w-[240px] max-w-md">
+            <Search className="w-4 h-4 absolute left-2.5 top-3 text-muted-foreground" />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar propuesta…" className="rounded-sm pl-9" data-testid="propuestas-search" />
+          </div>
+          <Select value={estado} onValueChange={setEstado}>
+            <SelectTrigger className="rounded-sm w-[200px]" data-testid="filter-estado"><SelectValue placeholder="Estado" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">Todos los estados</SelectItem>
+              {["Registrada", "En revisión documental", "Habilitada", "No habilitada", "Asignada", "En evaluación individual", "Rankeada", "Ganadora", "Elegible"].map((s) => (
+                <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {camposFiltro.map((c) => (
+            <DynamicFilter key={c.id} campo={c} catalogo={catById[c.catalogo_id]} value={filtros[c.nombre_interno]} onChange={(v) => setFiltro(c.nombre_interno, v)} />
+          ))}
+          <div className="text-xs text-muted-foreground self-center ml-auto font-mono">
+            {items.length} resultado{items.length === 1 ? "" : "s"}
+          </div>
         </div>
-        <Select value={estado} onValueChange={setEstado}>
-          <SelectTrigger className="rounded-sm" data-testid="filter-estado"><SelectValue placeholder="Estado" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">Todos los estados</SelectItem>
-            {["Registrada", "En revisión documental", "Habilitada", "No habilitada", "Asignada", "En evaluación individual", "Rankeada", "Ganadora", "Elegible"].map((s) => (
-              <SelectItem key={s} value={s}>{s}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={subregion} onValueChange={setSubregion}>
-          <SelectTrigger className="rounded-sm" data-testid="filter-subregion"><SelectValue placeholder="Subregión" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">Todas las subregiones</SelectItem>
-            {subregiones.map((v) => <SelectItem key={v.id} value={v.valor}>{v.valor}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <div className="text-xs text-muted-foreground self-center text-right font-mono">
-          {items.length} resultado{items.length === 1 ? "" : "s"}
-        </div>
+        {camposFiltro.length === 0 && (
+          <p className="mt-2 text-[11.5px] text-muted-foreground italic">
+            No hay campos marcados como "filtro" en esta convocatoria. Ve a <strong className="text-[#14776A] not-italic">Configuración → Campos</strong> y activa el flag <em>"filtro"</em> en los campos que quieras filtrar aquí.
+          </p>
+        )}
+        {Object.keys(filtros).some((k) => filtros[k] && filtros[k] !== "__all__") && (
+          <button
+            onClick={() => setFiltros({})}
+            className="mt-2 text-[11.5px] text-[#14776A] hover:underline font-semibold"
+            data-testid="clear-filters"
+          >
+            Limpiar filtros
+          </button>
+        )}
       </div>
 
       {/* Columnas dinámicas según campos con uso_lista=true (default si no hay ninguno: subregion + linea) */}
