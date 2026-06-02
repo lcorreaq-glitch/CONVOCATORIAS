@@ -75,10 +75,37 @@ async def seed_admin():
 
 
 async def seed_incentivos_2026():
-    """Seed the Incentivos Antioquia 2026 convocatoria as the first configured process."""
+    """Seed the Incentivos Antioquia 2026 convocatoria as the first configured process.
+    Idempotente: si ya existe, actualiza solo el bloque de entidades y datos completos."""
     import uuid
     db = get_db()
-    if await db.convocatorias.find_one({"codigo": "INC2026"}):
+    full_entidades = [{
+        "id": "ent-gobantioquia",
+        "nombre": "Gobernación de Antioquia",
+        "tipo": "Entidad Pública Departamental",
+        "rol": "Convocante / Operadora / Financiadora",
+        "nit": "890.900.286-0",
+        "representante": "Secretaría de Participación Ciudadana",
+        "cargo": "Secretaría",
+        "correo": "participacion@antioquia.gov.co",
+        "telefono": "+57 604 383 8300",
+        "direccion": "Calle 42B 52-106, Medellín, Antioquia",
+        "logo_url": "",
+        "pagina_web": "https://www.antioquia.gov.co",
+        "texto_institucional": "La Gobernación de Antioquia, en cumplimiento del Plan de Desarrollo, convoca a las organizaciones comunitarias del departamento a presentar iniciativas para el fortalecimiento del tejido social.",
+        "principal": True,
+    }]
+
+    existing = await db.convocatorias.find_one({"codigo": "INC2026"})
+    if existing:
+        # Actualizar entidades si están incompletas (idempotente)
+        ent_current = existing.get("entidades") or []
+        needs_update = (not ent_current) or any(not e.get("nit") or not e.get("pagina_web") for e in ent_current)
+        if needs_update:
+            await db.convocatorias.update_one(
+                {"codigo": "INC2026"},
+                {"$set": {"entidades": full_entidades, "descripcion": existing.get("descripcion") or "Convocatoria de incentivos y estímulos para iniciativas comunitarias de las subregiones de Antioquia."}}
+            )
         return
 
     conv_id = str(uuid.uuid4())
@@ -89,17 +116,7 @@ async def seed_incentivos_2026():
         "descripcion": "Convocatoria de incentivos y estímulos para iniciativas comunitarias de las subregiones de Antioquia.",
         "vigencia": "2026",
         "tipo": "Convocatoria de iniciativas comunitarias",
-        "entidades": [{
-            "nombre": "Gobernación de Antioquia",
-            "tipo": "Entidad Pública",
-            "rol": "Convocante / Operadora / Financiadora",
-            "nit": "890.900.286-0",
-            "responsable": "Secretaría de Participación Ciudadana",
-            "cargo": "Secretaría",
-            "correo": "participacion@antioquia.gov.co",
-            "telefono": "+57 604 383 8300",
-            "principal": True,
-        }],
+        "entidades": full_entidades,
         "estado": "Activa",
         "etapa_actual": "Evaluación Individual",
         "etapas_habilitadas": [

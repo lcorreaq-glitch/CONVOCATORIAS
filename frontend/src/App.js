@@ -23,6 +23,7 @@ import Reportes from "@/pages/Reportes";
 import Auditoria from "@/pages/Auditoria";
 import Usuarios from "@/pages/Usuarios";
 import Administracion from "@/pages/Administracion";
+import ConvocatoriaDetail from "@/pages/ConvocatoriaDetail";
 
 export default function App() {
   return (
@@ -35,6 +36,7 @@ export default function App() {
             <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/convocatorias" element={<Convocatorias />} />
+              <Route path="/convocatorias/:id" element={<ConvocatoriaDetail />} />
               <Route path="/configuracion" element={<Configuracion />} />
               <Route path="/propuestas" element={<Propuestas />} />
               <Route path="/jurados" element={<Jurados />} />
