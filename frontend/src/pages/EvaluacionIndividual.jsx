@@ -19,6 +19,7 @@ export default function EvaluacionIndividual() {
   const [observaciones, setObservaciones] = useState({});
   const [obsFinal, setObsFinal] = useState("");
   const [saving, setSaving] = useState(false);
+  const [v1Ref, setV1Ref] = useState(null);
 
   useEffect(() => {
     api.get(`/evaluaciones-individuales/${id}`).then((r) => {
@@ -29,6 +30,8 @@ export default function EvaluacionIndividual() {
       return api.get(`/propuestas/${r.data.propuesta_id}`).then((p) => setPropuesta(p.data))
         .then(() => api.get(`/criterios?convocatoria_id=${r.data.convocatoria_id}`).then((c) => setCriterios(c.data)));
     }).catch(() => toast.error("No se pudo cargar la evaluación"));
+    // Cargar referencia v1 si esta es una v2 (etapa colectiva)
+    api.get(`/evaluaciones-individuales/${id}/referencia-v1`).then((r) => setV1Ref(r.data)).catch(() => setV1Ref(null));
   }, [id]);
 
   const setPunt = (cid, v) => setPuntajes({ ...puntajes, [cid]: v === "" ? "" : parseFloat(v) });
@@ -88,6 +91,12 @@ export default function EvaluacionIndividual() {
             <div className="font-display font-bold text-lg leading-tight">{propuesta.codigo} · {propuesta.nombre}</div>
           </div>
           <Badge tone={estadoTone(ev.estado)}>{ev.estado}</Badge>
+          {ev.etapa === "colectiva" && (
+            <Badge tone="info">Etapa colectiva · v{ev.version || 2}</Badge>
+          )}
+          {ev.ciego_hasta_cierre && !["Cerrada", "Firmada"].includes(ev.estado) && (
+            <Badge tone="warning">CIEGO · puntajes ocultos a pares</Badge>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <div className="text-right mr-3">
@@ -159,6 +168,26 @@ export default function EvaluacionIndividual() {
               )}
             </div>
           </div>
+          {v1Ref && ev.etapa === "colectiva" && (
+            <div className="bg-white border border-[#14776A]/30 rounded-sm p-4 mt-4">
+              <div className="text-[10px] uppercase tracking-[0.16em] font-display font-bold text-[#14776A] mb-2">
+                Referencia · Tu evaluación de la etapa individual (v1)
+              </div>
+              <p className="text-[11px] text-[#5E6878] mb-3">Esta evaluación fue precargada con estos valores. Ajusta tras la deliberación grupal.</p>
+              <div className="space-y-1.5">
+                {criterios.map((c) => (
+                  <div key={c.id} className="flex justify-between text-[12px] py-1 border-b border-[#F1F4F7] last:border-b-0">
+                    <span className="text-[#3F4856]">{c.nombre}</span>
+                    <span className="font-mono tabular-nums font-semibold">{v1Ref.puntajes?.[c.id] ?? "—"}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between text-[12.5px] pt-2 mt-2 border-t border-[#14776A]/30 font-bold">
+                  <span>Total v1</span>
+                  <span className="font-mono tabular-nums">{v1Ref.puntaje_total ?? 0} / 100</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right: Form */}

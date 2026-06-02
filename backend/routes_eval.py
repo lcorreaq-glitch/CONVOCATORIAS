@@ -205,6 +205,165 @@ async def crear_eval_colectiva(payload: EvalColectivaIn, user: dict = Depends(re
     return doc
 
 
+@router.post("/evaluaciones-colectivas/{eid}/iniciar-modalidad-nueva")
+async def iniciar_modalidad_nueva(eid: str, user: dict = Depends(require_roles("admin_general", "admin_convocatoria", "integrante_terna"))):
+    """Modalidad 2: crea evaluaciones v2 (etapa='colectiva') precargadas con los puntajes de v1 para cada integrante de la terna.
+    Los puntajes permanecen CIEGOS hasta que la colectiva se cierre."""
+    db = get_db()
+    ev = await db.evaluaciones_colectivas.find_one({"id": eid})
+    if not ev:
+        raise HTTPException(status_code=404, detail="Evaluación colectiva no encontrada")
+    if ev.get("estado") not in ("Abierta", "En proceso"):
+        raise HTTPException(status_code=400, detail="Solo se puede iniciar en colectivas abiertas")
+
+    terna = await db.ternas.find_one({"id": ev["terna_id"]})
+    if not terna:
+        raise HTTPException(status_code=404, detail="Terna no encontrada")
+
+    created = 0
+    for integ in terna.get("integrantes", []):
+        jid = integ.get("jurado_id")
+        if not jid: continue
+        # No duplicar si ya existe v2
+        existing_v2 = await db.evaluaciones_individuales.find_one({
+            "propuesta_id": ev["propuesta_id"], "jurado_id": jid,
+            "etapa": "colectiva", "evaluacion_colectiva_id": eid,
+        })
+        if existing_v2: continue
+        # Buscar v1 (etapa individual) para precargar
+        v1 = await db.evaluaciones_individuales.find_one({
+            "propuesta_id": ev["propuesta_id"], "jurado_id": jid,
+            "$or": [{"etapa": "individual"}, {"etapa": {"$exists": False}}],
+        })
+        await db.evaluaciones_individuales.insert_one({
+            "id": str(uuid.uuid4()),
+            "convocatoria_id": ev["convocatoria_id"],
+            "propuesta_id": ev["propuesta_id"],
+            "jurado_id": jid,
+            "terna_id": ev["terna_id"],
+            "evaluacion_colectiva_id": eid,
+            "etapa": "colectiva",
+            "version": 2,
+            "replaces_id": v1.get("id") if v1 else None,
+            "estado": "Borrador",
+            "puntajes": dict(v1.get("puntajes") or {}) if v1 else {},
+            "observaciones": dict(v1.get("observaciones") or {}) if v1 else {},
+            "observacion_final": (v1.get("observacion_final") or "") if v1 else "",
+            "puntaje_total": v1.get("puntaje_total", 0) if v1 else 0,
+            "puntaje_diferencial_total": v1.get("puntaje_diferencial_total", 0) if v1 else 0,
+            "ciego_hasta_cierre": True,
+            "created_at": now_iso(),
+        })
+        created += 1
+
+    await db.evaluaciones_colectivas.update_one(
+        {"id": eid},
+        {"$set": {"estado": "En proceso", "modalidad_resuelta": "nueva_evaluacion", "iniciada_at": now_iso()}}
+    )
+    await audit(user, "start_modalidad_nueva", "evaluaciones_colectivas", eid, detalle=f"v2 creadas: {created}")
+    return {"ok": True, "v2_creadas": created}
+
+
+@router.get("/evaluaciones-colectivas/{eid}/v2")
+async def list_v2(eid: str, user: dict = Depends(get_current_user)):
+    """Lista las evaluaciones v2 asociadas a una colectiva. Aplica regla de CIEGO: si la colectiva no está cerrada,
+    cada jurado solo ve sus propios puntajes; los pares se muestran sin puntajes/observaciones."""
+    db = get_db()
+    col = await db.evaluaciones_colectivas.find_one({"id": eid}, {"_id": 0})
+    if not col:
+        raise HTTPException(status_code=404, detail="No encontrada")
+    items = await db.evaluaciones_individuales.find(
+        {"evaluacion_colectiva_id": eid, "etapa": "colectiva"}, {"_id": 0}
+    ).to_list(50)
+    closed = col.get("estado") in ("Cerrada", "Firmada")
+    # Encontrar mi jurado_id por email
+    my_jurado = await db.jurados.find_one({"email": user.get("email")})
+    my_jid = my_jurado["id"] if my_jurado else None
+    out = []
+    for it in items:
+        is_mine = (it.get("jurado_id") == my_jid)
+        is_admin = user.get("role") in ("admin_general", "admin_convocatoria")
+        if closed or is_mine or is_admin:
+            out.append(it)
+        else:
+            # Ciego: ocultar puntajes y observaciones
+            redacted = {
+                "id": it["id"], "jurado_id": it["jurado_id"],
+                "estado": it["estado"], "etapa": it["etapa"], "version": it["version"],
+                "ciego": True,
+                "fecha_finalizacion": it.get("fecha_finalizacion"),
+            }
+            out.append(redacted)
+    return {"items": out, "ciego_activo": not closed, "modalidad": col.get("modalidad_resuelta") or col.get("modalidad")}
+
+
+@router.post("/evaluaciones-colectivas/{eid}/cerrar-con-promedio-v2")
+async def cerrar_con_promedio_v2(eid: str, user: dict = Depends(require_roles("admin_general", "admin_convocatoria", "integrante_terna"))):
+    """Cierra la colectiva calculando el promedio de las v2 finalizadas como puntaje definitivo."""
+    db = get_db()
+    col = await db.evaluaciones_colectivas.find_one({"id": eid})
+    if not col:
+        raise HTTPException(status_code=404, detail="No encontrada")
+    if col.get("estado") in ("Cerrada", "Firmada"):
+        raise HTTPException(status_code=400, detail="Colectiva ya cerrada")
+
+    v2s = await db.evaluaciones_individuales.find({
+        "evaluacion_colectiva_id": eid, "etapa": "colectiva",
+        "estado": {"$in": ["Finalizada", "Firmada"]},
+    }).to_list(50)
+    if not v2s:
+        raise HTTPException(status_code=400, detail="No hay evaluaciones v2 finalizadas para promediar")
+
+    # Verificar que TODOS los integrantes finalizaron
+    terna = await db.ternas.find_one({"id": col["terna_id"]})
+    expected = len([i for i in (terna.get("integrantes") or []) if i.get("jurado_id")])
+    if len(v2s) < expected:
+        raise HTTPException(status_code=400, detail=f"Faltan v2 por finalizar ({len(v2s)}/{expected})")
+
+    # Promediar criterio por criterio
+    all_crits = set()
+    for e in v2s: all_crits.update((e.get("puntajes") or {}).keys())
+    promedio = {}
+    for cid in all_crits:
+        vals = [float((e.get("puntajes") or {}).get(cid, 0)) for e in v2s]
+        promedio[cid] = round(sum(vals) / len(vals), 2)
+
+    criterios = await db.criterios.find({"convocatoria_id": col["convocatoria_id"]}).to_list(100)
+    total_of = sum(promedio.get(c["id"], 0) for c in criterios if c.get("oficial", True))
+    total_dif = sum(promedio.get(c["id"], 0) for c in criterios if not c.get("oficial", True))
+
+    await db.evaluaciones_colectivas.update_one(
+        {"id": eid},
+        {"$set": {
+            "estado": "Cerrada",
+            "puntajes": promedio,
+            "puntaje_final": round(total_of, 2),
+            "puntaje_diferencial_total": round(total_dif, 2),
+            "fuente_definitiva": "promedio_etapa_colectiva",
+            "fecha_cierre": now_iso(),
+            "v2_relacionadas": [e["id"] for e in v2s],
+        }}
+    )
+    await audit(user, "close_modalidad_nueva", "evaluaciones_colectivas", eid,
+                detalle=f"Cerrada con promedio v2 ({len(v2s)} jurados). Puntaje definitivo: {round(total_of, 2)}")
+    return await db.evaluaciones_colectivas.find_one({"id": eid}, {"_id": 0})
+
+
+@router.get("/evaluaciones-individuales/{eid}/referencia-v1")
+async def get_v1_reference(eid: str, user: dict = Depends(get_current_user)):
+    """Devuelve la v1 (etapa individual) que precarga una v2. Solo lectura, mostrada como referencia."""
+    db = get_db()
+    v2 = await db.evaluaciones_individuales.find_one({"id": eid}, {"_id": 0})
+    if not v2:
+        raise HTTPException(status_code=404, detail="Evaluación no encontrada")
+    if v2.get("etapa") != "colectiva":
+        raise HTTPException(status_code=400, detail="Esta evaluación no es etapa colectiva")
+    if not v2.get("replaces_id"):
+        return None
+    v1 = await db.evaluaciones_individuales.find_one({"id": v2["replaces_id"]}, {"_id": 0})
+    return v1
+
+
 class EvalColUpdate(BaseModel):
     puntajes: Optional[dict] = None
     observacion_consolidada: Optional[str] = None
@@ -212,6 +371,30 @@ class EvalColUpdate(BaseModel):
 
 
 @router.patch("/evaluaciones-colectivas/{eid}")
+async def save_eval_colectiva(eid: str, payload: EvalColUpdate, user: dict = Depends(get_current_user)):
+    db = get_db()
+    ev = await db.evaluaciones_colectivas.find_one({"id": eid})
+    if not ev:
+        raise HTTPException(status_code=404, detail="Evaluación colectiva no encontrada")
+    if ev["estado"] in ("Cerrada", "Firmada"):
+        raise HTTPException(status_code=400, detail="Evaluación colectiva ya cerrada")
+    updates = {}
+    if payload.puntajes is not None:
+        updates["puntajes"] = payload.puntajes
+        criterios = await db.criterios.find({"convocatoria_id": ev["convocatoria_id"]}, {"_id": 0}).to_list(100)
+        total_of = sum(float(payload.puntajes.get(c["id"], 0)) for c in criterios if c.get("oficial", True))
+        total_dif = sum(float(payload.puntajes.get(c["id"], 0)) for c in criterios if not c.get("oficial", True))
+        updates["puntaje_final"] = round(total_of, 2)
+        updates["puntaje_diferencial_total"] = round(total_dif, 2)
+    if payload.observacion_consolidada is not None:
+        updates["observacion_consolidada"] = payload.observacion_consolidada
+    if payload.cerrar:
+        updates["estado"] = "Cerrada"
+        updates["fecha_cierre"] = now_iso()
+    if updates:
+        await db.evaluaciones_colectivas.update_one({"id": eid}, {"$set": updates})
+    await audit(user, "save", "evaluaciones_colectivas", eid, valor_nuevo=updates)
+    return await db.evaluaciones_colectivas.find_one({"id": eid}, {"_id": 0})
 async def save_eval_colectiva(eid: str, payload: EvalColUpdate, user: dict = Depends(get_current_user)):
     db = get_db()
     ev = await db.evaluaciones_colectivas.find_one({"id": eid})
