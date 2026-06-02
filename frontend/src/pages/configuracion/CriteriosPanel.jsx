@@ -20,12 +20,40 @@ const CRITERIO_FLAGS = [
 export default function CriteriosPanel({ criterios, convId, reload }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [puntajeMax, setPuntajeMax] = useState(100);
+  const [savingMax, setSavingMax] = useState(false);
   const blank = { nombre: "", descripcion: "", puntaje_min: 0, puntaje_max: 10, ponderacion: 10, oficial: true, diferencial: false, orden: 0 };
   const [f, setF] = useState(blank);
+
+  // cargar puntaje_max_evaluacion de la convocatoria
+  React.useEffect(() => {
+    if (!convId) return;
+    api.get(`/convocatorias/${convId}`).then((r) => {
+      if (r.data?.configuracion?.puntaje_max_evaluacion) {
+        setPuntajeMax(r.data.configuracion.puntaje_max_evaluacion);
+      }
+    }).catch(() => {});
+  }, [convId]);
+
+  const updatePuntajeMax = async (val) => {
+    setPuntajeMax(val);
+    setSavingMax(true);
+    try {
+      await api.patch(`/convocatorias/${convId}`, { configuracion: { puntaje_max_evaluacion: val } });
+    } catch { /* ignore */ } finally { setSavingMax(false); }
+  };
+
   const startEdit = (c) => { setEditing(c); setF({ ...blank, ...c }); setOpen(true); };
   const startNew = () => { setEditing(null); setF({ ...blank, orden: (criterios.length || 0) + 1 }); setOpen(true); };
   const submit = async () => {
     try {
+      // Validar: suma de criterios oficiales no debe exceder puntajeMax
+      const otrosOficiales = criterios.filter((c) => c.oficial && c.id !== editing?.id).reduce((s, c) => s + (c.puntaje_max || 0), 0);
+      const nuevaSuma = otrosOficiales + (f.oficial ? Number(f.puntaje_max) : 0);
+      if (f.oficial && nuevaSuma > puntajeMax) {
+        toast.error(`Suma de criterios oficiales (${nuevaSuma}) excede el máximo configurado (${puntajeMax}). Reduce este criterio o aumenta el máximo.`);
+        return;
+      }
       if (editing) { await api.patch(`/criterios/${editing.id}`, f); toast.success("Criterio actualizado"); }
       else { await api.post("/criterios", { ...f, convocatoria_id: convId }); toast.success("Criterio creado"); }
       setOpen(false); setEditing(null); reload();
@@ -78,10 +106,21 @@ export default function CriteriosPanel({ criterios, convId, reload }) {
             Cada jurado puntuará cada criterio. Los criterios <strong>oficiales</strong> suman al puntaje total;
             los <strong>diferenciales</strong> registran información complementaria sin afectar el total.
           </p>
-          <p className="text-[12.5px] text-[#14776A] mt-1.5 font-semibold">
-            Puntaje oficial máximo: <span className="tabular-nums">{totalOficial}</span>
-            {totalOficial !== 100 && totalOficial > 0 && <span className="text-[#B45309] ml-2">⚠ usualmente se calibra a 100</span>}
-          </p>
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            <Label className="text-[12px] text-[#5E6878]">Puntaje máximo de la evaluación:</Label>
+            <Input type="number" min={1} max={1000} value={puntajeMax}
+              onChange={(e) => updatePuntajeMax(Number(e.target.value))}
+              className="rounded-lg h-8 w-24 text-center font-mono tabular-nums font-bold text-[#14776A]"
+              data-testid="puntaje-max-input" />
+            {savingMax && <span className="text-[10px] text-muted-foreground italic">guardando…</span>}
+            <span className="text-[12px] text-[#5E6878] mx-2">|</span>
+            <span className={`text-[12.5px] font-semibold ${totalOficial === puntajeMax ? "text-emerald-700" : totalOficial > puntajeMax ? "text-red-600" : "text-[#B45309]"}`}>
+              Suma actual de criterios oficiales: <span className="tabular-nums">{totalOficial}</span> / {puntajeMax}
+              {totalOficial === puntajeMax && " ✓ calibrado"}
+              {totalOficial > puntajeMax && " ⚠ excede el máximo"}
+              {totalOficial < puntajeMax && totalOficial > 0 && ` ⚠ faltan ${puntajeMax - totalOficial} puntos`}
+            </span>
+          </div>
         </div>
         <Dialog open={open} onOpenChange={(v) => { if (!v) { setEditing(null); setF(blank); } setOpen(v); }}>
           <DialogTrigger asChild><Button onClick={startNew} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg gap-2" data-testid="add-criterio-btn"><Plus className="w-4 h-4" />Nuevo criterio</Button></DialogTrigger>

@@ -15,6 +15,9 @@ export default function EvaluacionIndividual() {
   const [ev, setEv] = useState(null);
   const [propuesta, setPropuesta] = useState(null);
   const [criterios, setCriterios] = useState([]);
+  const [campos, setCampos] = useState([]);
+  const [catalogos, setCatalogos] = useState([]);
+  const [conv, setConv] = useState(null);
   const [puntajes, setPuntajes] = useState({});
   const [observaciones, setObservaciones] = useState({});
   const [obsFinal, setObsFinal] = useState("");
@@ -22,13 +25,22 @@ export default function EvaluacionIndividual() {
   const [v1Ref, setV1Ref] = useState(null);
 
   useEffect(() => {
-    api.get(`/evaluaciones-individuales/${id}`).then((r) => {
+    api.get(`/evaluaciones-individuales/${id}`).then(async (r) => {
       setEv(r.data);
       setPuntajes(r.data.puntajes || {});
       setObservaciones(r.data.observaciones || {});
       setObsFinal(r.data.observacion_final || "");
-      return api.get(`/propuestas/${r.data.propuesta_id}`).then((p) => setPropuesta(p.data))
-        .then(() => api.get(`/criterios?convocatoria_id=${r.data.convocatoria_id}`).then((c) => setCriterios(c.data)));
+      const p = await api.get(`/propuestas/${r.data.propuesta_id}`);
+      setPropuesta(p.data);
+      const cid = p.data.convocatoria_id;
+      const [c, ca, cv] = await Promise.all([
+        api.get(`/campos?convocatoria_id=${cid}&aplica_a=propuesta`),
+        api.get(`/catalogos?convocatoria_id=${cid}`),
+        api.get(`/convocatorias/${cid}`),
+      ]);
+      setCampos(c.data); setCatalogos(ca.data); setConv(cv.data);
+      const crit = await api.get(`/criterios?convocatoria_id=${r.data.convocatoria_id}`);
+      setCriterios(crit.data);
     }).catch(() => toast.error("No se pudo cargar la evaluación"));
     // Cargar referencia v1 si esta es una v2 (etapa colectiva)
     api.get(`/evaluaciones-individuales/${id}/referencia-v1`).then((r) => setV1Ref(r.data)).catch(() => setV1Ref(null));
@@ -101,7 +113,7 @@ export default function EvaluacionIndividual() {
         <div className="flex items-center gap-2">
           <div className="text-right mr-3">
             <div className="text-[10px] uppercase tracking-wider font-display font-bold text-muted-foreground">Total oficial</div>
-            <div className="font-display font-black text-2xl tabular-nums">{total(true).toFixed(1)} <span className="text-base text-muted-foreground">/ 100</span></div>
+            <div className="font-display font-black text-2xl tabular-nums">{total(true).toFixed(1)} <span className="text-base text-muted-foreground">/ {conv?.configuracion?.puntaje_max_evaluacion || 100}</span></div>
           </div>
           {!isLocked && <Button onClick={() => save(false)} disabled={saving} variant="outline" className="rounded-sm gap-2" data-testid="save-eval-btn"><Save className="w-4 h-4" />Guardar</Button>}
           {ev.estado !== "Finalizada" && !isLocked && (
@@ -122,51 +134,50 @@ export default function EvaluacionIndividual() {
       <div className="flex-1 grid lg:grid-cols-2 overflow-hidden">
         {/* Left: Expediente */}
         <div className="border-r border-border bg-secondary/30 overflow-y-auto p-6">
+          <div className="text-[10px] uppercase tracking-[0.18em] font-display font-bold text-muted-foreground mb-2">
+            Convocatoria
+          </div>
+          {conv && (
+            <div className="bg-gradient-to-br from-[#F0F7F5] to-white border border-[#CDE7E1] rounded-lg p-3 mb-4">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge tone="muted">{conv.codigo}</Badge>
+                <span className="font-display font-bold text-[14px]">{conv.nombre}</span>
+              </div>
+              <div className="text-[11px] text-muted-foreground mt-1">{conv.estado} · {conv.etapa_actual || "—"}</div>
+            </div>
+          )}
           <div className="text-[10px] uppercase tracking-[0.18em] font-display font-bold text-muted-foreground mb-3">
-            Expediente documental
+            Información de la propuesta
           </div>
           <div className="bg-white border border-border rounded-sm p-5 space-y-4">
             <div>
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-display font-bold">Organización</div>
-              <div className="font-semibold">{propuesta.organizacion || "—"}</div>
+              <div className="font-semibold">{propuesta.organizacion || propuesta.datos?.nombre_organizacion || "—"}</div>
             </div>
+            {/* Campos dinámicos con uso_actas o uso_lista */}
             <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-display font-bold">Subregión</div>
-                <div>{propuesta.datos?.subregion || "—"}</div>
-              </div>
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-display font-bold">Municipio</div>
-                <div>{propuesta.datos?.municipio || "—"}</div>
-              </div>
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-display font-bold">Línea</div>
-                <div>{propuesta.datos?.linea || "—"}</div>
-              </div>
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-display font-bold">Temática</div>
-                <div>{propuesta.datos?.tematica || "—"}</div>
-              </div>
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-display font-bold">Representante</div>
-                <div>{propuesta.datos?.representante_legal || "—"}</div>
-              </div>
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-display font-bold">Radicación</div>
-                <div className="font-mono text-xs">{propuesta.datos?.fecha_radicacion} {propuesta.datos?.hora_radicacion}</div>
-              </div>
+              {campos.filter((c) => (c.uso_actas || c.uso_lista) && !["nombre_organizacion", "link_expediente"].includes(c.nombre_interno)).map((c) => {
+                const v = propuesta.datos?.[c.nombre_interno];
+                let display = v === null || v === undefined || v === "" ? "—" : v;
+                if (Array.isArray(v)) display = v.join(", ");
+                if (c.tipo === "si_no") display = v ? "Sí" : "No";
+                return (
+                  <div key={c.id}>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-display font-bold">{c.nombre_visible}</div>
+                    <div className={c.tipo === "fecha" || c.tipo === "hora" ? "font-mono text-xs" : ""}>{display}</div>
+                  </div>
+                );
+              })}
             </div>
-            <div className="pt-3 border-t border-border">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 font-display font-bold">Documentos</div>
-              {propuesta.datos?.link_expediente ? (
+            {propuesta.datos?.link_expediente && (
+              <div className="pt-3 border-t border-border">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 font-display font-bold">Documentos</div>
                 <a href={propuesta.datos.link_expediente} target="_blank" rel="noreferrer"
                    className="inline-flex items-center gap-2 px-3 py-2 bg-[#14776A] hover:bg-[#0F5E54] text-white rounded-sm text-sm font-semibold transition-colors w-full justify-center">
-                  <ExternalLink className="w-4 h-4" /> Abrir expediente (Google Drive)
+                  <ExternalLink className="w-4 h-4" /> Abrir expediente
                 </a>
-              ) : (
-                <p className="text-xs text-muted-foreground">Sin link de expediente registrado.</p>
-              )}
-            </div>
+              </div>
+            )}
           </div>
           {v1Ref && ev.etapa === "colectiva" && (
             <div className="bg-white border border-[#14776A]/30 rounded-sm p-4 mt-4">
@@ -183,7 +194,7 @@ export default function EvaluacionIndividual() {
                 ))}
                 <div className="flex justify-between text-[12.5px] pt-2 mt-2 border-t border-[#14776A]/30 font-bold">
                   <span>Total v1</span>
-                  <span className="font-mono tabular-nums">{v1Ref.puntaje_total ?? 0} / 100</span>
+                  <span className="font-mono tabular-nums">{v1Ref.puntaje_total ?? 0} / {conv?.configuracion?.puntaje_max_evaluacion || 100}</span>
                 </div>
               </div>
             </div>
