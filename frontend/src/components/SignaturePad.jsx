@@ -114,7 +114,7 @@ export default function SignaturePad({ value, onChange, readOnly = false, testId
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-testid={`${testIdPrefix}-pad`}>
       {mode === "view" && value && (
         <div className="border border-border rounded-lg p-3 bg-white">
           <img src={value} alt="Firma actual" className="max-h-28 mx-auto object-contain" data-testid={`${testIdPrefix}-current`} />

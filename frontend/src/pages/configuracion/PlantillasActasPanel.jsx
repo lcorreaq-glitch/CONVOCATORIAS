@@ -91,17 +91,19 @@ export default function PlantillasActasPanel({ convId }) {
             const disabled = t.subregionOnly && !data.uso_acta_subregional;
             const Icon = t.icon;
             return (
-              <button
+              <div
                 key={t.key}
-                disabled={disabled}
-                onClick={() => setActiveTipo(t.key)}
+                role="button"
+                tabIndex={disabled ? -1 : 0}
+                onClick={() => !disabled && setActiveTipo(t.key)}
+                onKeyDown={(e) => { if (!disabled && (e.key === "Enter" || e.key === " ")) setActiveTipo(t.key); }}
                 data-testid={`plantilla-tipo-${t.key}`}
                 className={`w-full text-left p-3 rounded-lg border transition-all ${
                   activeTipo === t.key
                     ? "bg-[#F0F7F5] border-[#14776A] shadow-sm"
                     : disabled
                     ? "opacity-50 cursor-not-allowed bg-white border-border"
-                    : "bg-white border-border hover:border-[#CDE7E1]"
+                    : "bg-white border-border hover:border-[#CDE7E1] cursor-pointer"
                 }`}>
                 <div className="flex items-center gap-2 mb-1">
                   <Icon className="w-4 h-4 text-[#14776A]" />
@@ -109,14 +111,14 @@ export default function PlantillasActasPanel({ convId }) {
                 </div>
                 <p className="text-[11px] text-muted-foreground leading-snug">{t.desc}</p>
                 {t.subregionOnly && (
-                  <div className="mt-2 flex items-center gap-2">
+                  <div className="mt-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                     <Switch checked={data.uso_acta_subregional} onCheckedChange={toggleSubregional} data-testid="toggle-uso-subregional" />
                     <span className="text-[10.5px] text-muted-foreground">
                       {data.uso_acta_subregional ? "Habilitada" : "Deshabilitada"}
                     </span>
                   </div>
                 )}
-              </button>
+              </div>
             );
           })}
         </div>
