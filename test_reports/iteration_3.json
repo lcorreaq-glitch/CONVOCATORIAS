@@ -1,0 +1,43 @@
+{
+  "summary": "Tested redesigned Configuración module: backend resumen/reordenar/clonar/export/import + frontend Resumen tab, modals (Campos→Catálogo vinculado, Desempates→Fuente), reorder buttons, search, header actions. 11/11 new config tests pass; 38/39 regression tests pass (1 stale assertion unrelated to this feature). Frontend flows all confirmed working.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/auth/login (test_login_success in backend_test.py)", "issue": "Pre-existing regression test asserts admin email 'lcorreaq@krinos.gov.co' but actual seed value is 'lcorreaq@gmail.com' (per test_credentials.md). Update assertion or seed. Not related to current iteration."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Resumen > Vinculación catálogos→campos", "issues": ["A catalogo row labeled '17548fd7' (a UUID-prefix) appears, suggesting fallback to id when 'nombre' is missing. Likely from pre-existing test data (TEST_Cat_*). Consider hiding TEST_/ orphan catalogos with no nombre or showing a clearer placeholder."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_config_module.py",
+    "/app/test_reports/pytest/config_module_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Update backend_test.py::TestAuth::test_login_success to assert lcorreaq@gmail.com (current seed) or align seed_admin to original email.",
+    "(Optional polish) On Resumen 'Vinculación' panel, fallback rendering shows raw catalogo id ('17548fd7') for a residual TEST_ entry without name; consider filtering catalogos without 'nombre' or labeling them as 'sin nombre'."
+  ],
+  "critical_code_review_comments": [
+    "Backend: routes_config.py clone correctly remaps catalogo_id from source→target ids. Verified by creating a campo with catalogo_id in source then cloning; target campo references new catalogo id.",
+    "Backend: 'agregar' mode correctly skips duplicates by nombre_interno (campos) / nombre (catalogos/criterios). Desempates lack uniqueness key so re-clone duplicates them — confirm if this is intended.",
+    "Backend: resumen tolerant decoding handles legacy 'criterio:<nombre>' and bare nombre_interno desempate refs (fuentes set was non-empty in INC2026 seed).",
+    "Frontend: SortableTable provides data-testid='move-up-<uuid>' and title='Mover arriba' — good for automated testing. Disabled state on first/last row works correctly.",
+    "Frontend: After reorder, server response is persisted (verified via page reload).",
+    "Catálogo dropdown appears only when tipo in ('lista','seleccion_multiple') as expected.",
+    "Frontend Clonar modal correctly bundles toggles for campos/catalogos/criterios/desempates and modo (agregar/reemplazar)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_config_module.py (new)"
+  ],
+  "success_rate": {"backend": "100% (11/11 new config tests; 38/39 overall regression)", "frontend": "100% (Resumen, modals, reorder, search, header actions all verified)"},
+  "test_credentials": "Admin: username=lcorreaq, password=Chocolate2026! (login OK via /api/auth/login → access_token).",
+  "seed_data_creation": "Tests create temporary convocatorias (TEST_/IMP prefixes) and clean them up via DELETE. One transient TEST_vinc_campo_* is created in source INC2026 to validate catalogo_id remap; not cleaned (harmless, low orden, would be filtered by name filter).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression suite has one stale assertion in TestAuth::test_login_success (email mismatch). The new test_config_module.py covers resumen, reordenar (campos/criterios/desempates), clonar (same-id 400, source-not-found 404, agregar→skips duplicates, catalogo_id remap), and export/import (shape, roundtrip remap, invalid version). For frontend reorder testing use button[title=\"Mover arriba\"]:not([disabled]) or [data-testid^=move-up-]. Login uses 2 plain inputs on the root page; submit button text 'Ingresar'.",
+  "rca of the issue": "N/A — no blocking issues found in this iteration."
+}
