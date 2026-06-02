@@ -7,11 +7,12 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Upload, Download, ExternalLink, Search, FileStack } from "lucide-react";
+import { Plus, Upload, Download, ExternalLink, Search, FileStack, Pencil } from "lucide-react";
 import { TID } from "@/constants/testIds";
+import PropuestaForm from "./propuestas/PropuestaForm";
 
 export default function Propuestas() {
-  const { activeConvocatoriaId } = useAuth();
+  const { activeConvocatoriaId, user } = useAuth();
   const [items, setItems] = useState([]);
   const [search, setSearch] = useState("");
   const [estado, setEstado] = useState("__all__");
@@ -21,6 +22,10 @@ export default function Propuestas() {
   const [importResult, setImportResult] = useState(null);
   const [campos, setCampos] = useState([]);
   const [catalogos, setCatalogos] = useState([]);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+
+  const canEdit = user?.role === "admin_general" || user?.role === "admin_convocatoria";
 
   const load = () => {
     if (!activeConvocatoriaId) return;
@@ -73,6 +78,15 @@ export default function Propuestas() {
         subtitle="Registro, consulta y seguimiento de propuestas con expediente documental externo. Carga masiva mediante Excel y filtros por subregión, línea y estado."
         actions={
           <>
+            {canEdit && (
+              <Button
+                onClick={() => { setEditing(null); setFormOpen(true); }}
+                className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2"
+                data-testid="prop-new-btn"
+              >
+                <Plus className="w-4 h-4" /> Nueva propuesta
+              </Button>
+            )}
             <Button variant="outline" className="rounded-sm gap-2" onClick={downloadTemplate} data-testid={TID.templateDownloadBtn}>
               <Download className="w-4 h-4" /> Plantilla
             </Button>
@@ -140,6 +154,7 @@ export default function Propuestas() {
             <tr>
               <th>Código</th><th>Propuesta</th><th>Organización</th><th>Subregión</th><th>Línea</th>
               <th>Estado</th><th>Expediente</th>
+              {canEdit && <th className="text-right">Acciones</th>}
             </tr>
           </thead>
           <tbody>
@@ -147,7 +162,7 @@ export default function Propuestas() {
               <tr key={p.id} data-testid={`propuesta-row-${p.codigo}`}>
                 <td className="font-mono text-xs">{p.codigo}</td>
                 <td><div className="font-semibold">{p.nombre}</div></td>
-                <td className="text-muted-foreground">{p.organizacion || "—"}</td>
+                <td className="text-muted-foreground">{p.organizacion || p.datos?.nombre_organizacion || "—"}</td>
                 <td>{p.datos?.subregion || "—"}</td>
                 <td>{p.datos?.linea || "—"}</td>
                 <td><Badge tone={estadoTone(p.estado)}>{p.estado}</Badge></td>
@@ -158,12 +173,32 @@ export default function Propuestas() {
                     </a>
                   ) : <span className="text-muted-foreground text-xs">—</span>}
                 </td>
+                {canEdit && (
+                  <td className="text-right">
+                    <button
+                      onClick={() => { setEditing(p); setFormOpen(true); }}
+                      className="text-[#14776A] hover:text-[#0F5E54] p-1"
+                      data-testid={`prop-edit-${p.codigo}`}
+                      title="Editar propuesta"
+                    ><Pencil className="w-4 h-4 inline" /></button>
+                  </td>
+                )}
               </tr>
             ))}
-            {!items.length && <tr><td colSpan={7}><EmptyState title="Sin propuestas" hint="Usa carga masiva para importar desde Excel." icon={FileStack} /></td></tr>}
+            {!items.length && <tr><td colSpan={canEdit ? 8 : 7}><EmptyState title="Sin propuestas" hint="Crea una propuesta nueva o usa carga masiva para importar desde Excel." icon={FileStack} /></td></tr>}
           </tbody>
         </table>
       </div>
+
+      <PropuestaForm
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        convocatoriaId={activeConvocatoriaId}
+        campos={campos}
+        catalogos={catalogos}
+        propuesta={editing}
+        onSaved={load}
+      />
     </div>
   );
 }
