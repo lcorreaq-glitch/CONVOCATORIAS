@@ -211,52 +211,85 @@ export default function EvaluacionIndividual() {
               <Lock className="w-4 h-4 text-amber-700" /> Esta evaluación está en estado <strong>{ev.estado}</strong> y no puede editarse.
             </div>
           )}
-          <div className="space-y-4">
-            {criterios.map((c) => (
-              <div key={c.id} className="border border-border rounded-sm p-4">
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <div className="font-display font-bold text-sm">{c.nombre}</div>
-                      {c.diferencial ? <Badge tone="warning">diferencial</Badge> : <Badge tone="success">oficial</Badge>}
+          <div className="space-y-3">
+            {criterios.map((c) => {
+              const sumaRanking = !c.diferencial;
+              const v = puntajes[c.id];
+              const hasValue = v !== "" && v !== undefined && v !== null;
+              const pct = hasValue && c.puntaje_max ? Math.min(100, Math.max(0, (Number(v) / c.puntaje_max) * 100)) : 0;
+              return (
+                <div key={c.id} className={`rounded-lg border bg-white overflow-hidden shadow-sm ${sumaRanking ? "border-[#CDE7E1]" : "border-[#FDE68A]"}`}>
+                  {/* Header bar coloreado */}
+                  <div className={`h-1 w-full ${sumaRanking ? "bg-[#14776A]" : "bg-[#F59E0B]"}`}></div>
+                  <div className="p-4">
+                    <div className="flex items-start gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="font-display font-bold text-[14.5px] text-[#1A1F2C]">{c.nombre}</h4>
+                          {sumaRanking ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-[#E8F3F0] text-[#0F5E54] border border-[#CDE7E1]" title="Este criterio suma al puntaje total y afecta el ranking final">
+                              <span className="w-1.5 h-1.5 rounded-full bg-[#14776A]"></span>
+                              Suma al ranking · hasta {c.puntaje_max} pts
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]" title="Este criterio NO suma al puntaje total. Solo se usa para resolver empates en el ranking.">
+                              <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B]"></span>
+                              Solo para desempate (no suma)
+                            </span>
+                          )}
+                        </div>
+                        {c.descripcion && <p className="text-[12px] text-muted-foreground mt-1 leading-snug">{c.descripcion}</p>}
+                      </div>
+
+                      {/* Input puntaje grande y visible */}
+                      <div className="shrink-0 text-right">
+                        <div className="relative">
+                          <Input
+                            type="number"
+                            data-testid={`eval-input-${c.id}`}
+                            disabled={isLocked}
+                            min={c.puntaje_min} max={c.puntaje_max} step="0.1"
+                            value={puntajes[c.id] ?? ""}
+                            onChange={(e) => setPunt(c.id, e.target.value)}
+                            className={`w-28 rounded-lg text-right font-display font-extrabold text-[20px] tabular-nums pr-3 ${sumaRanking ? "border-[#CDE7E1] focus-visible:ring-[#14776A]" : "border-[#FDE68A] focus-visible:ring-[#F59E0B]"}`}
+                            placeholder="—"
+                          />
+                        </div>
+                        <div className="text-[10px] mt-1 text-muted-foreground font-mono">rango {c.puntaje_min}–{c.puntaje_max}</div>
+                      </div>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">{c.descripcion}</p>
-                  </div>
-                  <div className="text-right">
-                    <Input
-                      type="number"
-                      data-testid={`eval-input-${c.id}`}
-                      disabled={isLocked}
-                      min={c.puntaje_min}
-                      max={c.puntaje_max}
-                      step="0.1"
-                      value={puntajes[c.id] ?? ""}
-                      onChange={(e) => setPunt(c.id, e.target.value)}
-                      className="w-24 rounded-sm font-mono text-right tabular-nums"
-                      placeholder={`${c.puntaje_min}–${c.puntaje_max}`}
-                    />
-                    <div className="text-[10px] mt-1 text-muted-foreground font-mono">máx {c.puntaje_max}</div>
+
+                    {/* Barra de progreso */}
+                    {hasValue && (
+                      <div className="mt-3 h-1.5 w-full bg-secondary rounded-full overflow-hidden">
+                        <div className={`h-full transition-all ${sumaRanking ? "bg-[#14776A]" : "bg-[#F59E0B]"}`} style={{ width: `${pct}%` }}></div>
+                      </div>
+                    )}
+
+                    {/* Observación */}
+                    <div className="mt-3">
+                      <Textarea
+                        data-testid={`eval-obs-${c.id}`}
+                        disabled={isLocked}
+                        rows={2}
+                        placeholder="Observación (opcional) — sustenta tu puntaje…"
+                        value={observaciones[c.id] || ""}
+                        onChange={(e) => setObs(c.id, e.target.value)}
+                        className="rounded-lg text-[13px] resize-none"
+                      />
+                      {!isLocked && (
+                        <div className="flex justify-end mt-1.5">
+                          <button type="button" onClick={() => sugerirObs(c.id)} data-testid={`ai-suggest-${c.id}`}
+                                  className="inline-flex items-center gap-1.5 text-[11px] text-[#14776A] hover:text-[#0F5E54] font-semibold">
+                            <Sparkles className="w-3 h-3" /> Sugerir con IA
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
-                <Textarea
-                  data-testid={`eval-obs-${c.id}`}
-                  disabled={isLocked}
-                  rows={2}
-                  placeholder="Observación (opcional)"
-                  value={observaciones[c.id] || ""}
-                  onChange={(e) => setObs(c.id, e.target.value)}
-                  className="rounded-sm text-sm"
-                />
-                {!isLocked && (
-                  <div className="flex justify-end mt-1.5">
-                    <button type="button" onClick={() => sugerirObs(c.id)} data-testid={`ai-suggest-${c.id}`}
-                            className="inline-flex items-center gap-1.5 text-[11px] text-[#14776A] hover:text-[#0F5E54] font-semibold">
-                      <Sparkles className="w-3 h-3" /> Sugerir con IA
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="mt-6">
