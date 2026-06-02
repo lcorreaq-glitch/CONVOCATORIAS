@@ -1,0 +1,35 @@
+{
+  "summary": "Backend regression suite (39 tests) for KRINOS executed against public URL. 29 PASS / 10 FAIL. Auth (login/me/JWT bearer), seed data (12 propuestas, 6 jurados, 3 ternas, 24 evaluaciones, 11 campos, 4 catálogos, 9 criterios, 7 desempates), reads on all major endpoints, RBAC (jurado→/users 403, /auditoria 403), reports/dashboard/excel, evaluación individual full flow (Borrador→En edición→Finalizada→Firmada + acta PDF), and asignación masiva-subregion all PASS. CRITICAL: every POST that returns the inserted doc fails with 500 due to MongoDB `_id` ObjectId leaking into FastAPI response (jsonable_encoder ValueError). This blocks create-propuesta, create-jurado, create-terna, create-asignacion, create-catalogo, create-campo, create-criterio, evaluaciones-colectivas POST, and ranking generation (rankings.insert_one then returns doc).",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/propuestas, /api/jurados, /api/ternas, /api/asignaciones, /api/catalogos, /api/campos, /api/criterios, /api/evaluaciones-colectivas, /api/rankings/generar", "issue": "500 Internal Server Error - Motor insert_one mutates the dict adding ObjectId `_id`; the route then returns the same dict and FastAPI's jsonable_encoder raises ValueError [TypeError(\"'ObjectId' object is not iterable\")]. Fix: after every `await db.X.insert_one(doc)` add `doc.pop('_id', None)` (or build a new dict for the response). Backend log confirms /root/.venv/.../fastapi/encoders.py serialization error.", "priority": "CRITICAL"},
+      {"endpoint": "POST /api/auth/login (brute-force)", "issue": "Lockout did not trigger after 5 failed attempts to a fixed username; 6th attempt returned 401 instead of 429. Possible cause: ingress propagates a different client.host per request (k8s pod IP varies) so lock_key f\"{ip}:{ident}\" is never reused. Recommend keying lockout on identifier only, or on x-forwarded-for. The brute-force protection is effectively bypassed in production.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/users", "issue": "EmailStr (pydantic email-validator) rejects RFC reserved TLDs like .test and .example with 422. Acceptable behavior, but documentation/test data should use real-looking domains (e.g. @krinos.gov.co)."},
+      {"endpoint": "Seed asignaciones count", "issue": "Spec said '24 individuales + 12 colectivas'. Actual seed creates colectivas/individuales only for the 8 propuestas whose subregion is mapped to a terna (Urabá/Oriente/Norte). Total = 8 colectivas + 24 individuales = 32. The 4 propuestas in Bajo Cauca/Suroeste/Magdalena Medio have no terna assigned. Either expand subregion_to_terna mapping or update spec."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "FIX (critical): strip Mongo `_id` after every insert_one before returning the doc. Affected files: /app/backend/routes_config.py (create_convocatoria, create_catalogo, create_campo, create_criterio, create_desempate), /app/backend/routes_data.py (create_propuesta, create_jurado, create_terna, create_asignacion, masiva-subregion - but masiva doesn't return doc so OK), /app/backend/routes_eval.py (crear_eval_colectiva), /app/backend/routes_reports.py (generar_ranking - it does `await db.rankings.insert_one(resultado); return resultado`). Quickest patch is `doc.pop('_id', None)` after insert, OR insert a copy: `await db.X.insert_one({**doc})`.",
+    "FIX (security): brute-force lockout currently bypassable in k8s ingress. Use identifier-only or X-Forwarded-For-derived IP as lock key.",
+    "Consider expanding subregion→terna mapping in seed_demo_data so every propuesta has assignations (or document the limitation)."
+  ],
+  "critical_code_review_comments": [
+    "MongoDB ObjectId leakage: pattern `doc['id']=...; await coll.insert_one(doc); return doc` is used in 9+ POST handlers and is broken. Motor's insert_one mutates the input dict adding `_id` (ObjectId). FastAPI jsonable_encoder cannot serialize it.",
+    "Brute-force lock key includes client IP which is unstable behind k8s ingress; effective protection is missing.",
+    "auth.py uses `bcrypt` + `$2b$` hash format (correct), but `secure=False` cookies on set_auth_cookies — fine because the spec uses Bearer tokens, but cookies are still being set on every login and never used by tests.",
+    "GET endpoints already strip `_id` with projection `{'_id':0}` - apply the same discipline to POST returns.",
+    "Email validator rejects .test/.example TLDs — be explicit in API docs."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py", "/app/backend/tests/__init__.py"],
+  "success_rate": {"backend": "74% (29/39)", "frontend": "skipped"},
+  "test_credentials": "lcorreaq / Chocolate2026! (admin), ana.perez@krinos.gov.co / Jurado2026! (jurado)",
+  "seed_data_creation": "Tests created TEST_-prefixed propuestas/criterios/campos/catalogos/users (those that succeeded). Most POST creates failed due to the ObjectId bug.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "After main agent fixes the `_id` leak, re-run /app/backend/tests/backend_test.py. Expect the 8 currently-failing POST/colectiva/ranking tests to pass. The brute-force test may still fail depending on ingress IP handling. The asignaciones_seed expectation can be loosened to >=32 OR seed mapping expanded.",
+  "rca of the issue": "Motor's AsyncIOMotorCollection.insert_one(document) mutates the passed dict, setting `document['_id']` to a bson.ObjectId. Routes that do `await db.X.insert_one(doc)` then `return doc` end up returning that dict including `_id`. FastAPI's jsonable_encoder cannot encode bson.ObjectId → ValueError [TypeError(\"'ObjectId' object is not iterable\")] → 500. Reproduction: POST /api/propuestas with valid admin token and minimal payload → 500. Mitigation: insert a copy (`await db.X.insert_one({**doc})`) or pop `_id` after insert (`doc.pop('_id', None)`)."
+}
