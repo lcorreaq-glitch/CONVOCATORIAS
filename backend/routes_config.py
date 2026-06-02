@@ -72,6 +72,42 @@ async def update_convocatoria(cid: str, payload: dict, user: dict = Depends(requ
     return out
 
 
+@router.delete("/convocatorias/{cid}")
+async def delete_convocatoria(cid: str, force: bool = False, user: dict = Depends(require_roles("admin_general"))):
+    db = get_db()
+    existing = await db.convocatorias.find_one({"id": cid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Convocatoria no encontrada")
+
+    # Validación de seguridad: bloqueada si tiene evaluaciones
+    blockers = {}
+    blockers["evaluaciones_individuales"] = await db.evaluaciones_individuales.count_documents({"convocatoria_id": cid})
+    blockers["evaluaciones_colectivas"] = await db.evaluaciones_colectivas.count_documents({"convocatoria_id": cid})
+    blockers["rankings"] = await db.rankings.count_documents({"convocatoria_id": cid})
+
+    if not force and any(blockers.values()):
+        return {
+            "ok": False,
+            "blocked": True,
+            "reason": "La convocatoria tiene evaluaciones, evaluaciones colectivas o rankings asociados y no puede eliminarse sin perder trazabilidad.",
+            "bloqueos": blockers,
+            "sugerencia": "Cambia el estado de la convocatoria a 'Anulada' o 'Finalizada' para conservar la historia."
+        }
+
+    if force and user["role"] != "admin_general":
+        raise HTTPException(status_code=403, detail="Solo Admin General puede forzar eliminación")
+
+    # Hard delete cuando no hay bloqueos o force=true (solo admin_general)
+    for col in ["propuestas", "jurados", "ternas", "asignaciones", "campos", "catalogos",
+                "criterios", "desempates", "evaluaciones_individuales", "evaluaciones_colectivas",
+                "rankings"]:
+        await db[col].delete_many({"convocatoria_id": cid})
+    await db.convocatorias.delete_one({"id": cid})
+    await audit(user, "delete", "convocatorias", cid, valor_anterior={"codigo": existing["codigo"]},
+                detalle=f"force={force} bloqueos={blockers}")
+    return {"ok": True, "deleted": True, "force": force}
+
+
 # ==================== CATÁLOGOS ====================
 class CatalogoIn(BaseModel):
     convocatoria_id: str

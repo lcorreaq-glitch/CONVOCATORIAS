@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, FolderOpen, Pencil } from "lucide-react";
+import { Plus, FolderOpen, Pencil, Trash2 } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link } from "react-router-dom";
@@ -31,6 +31,21 @@ export default function Convocatorias() {
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail));
     }
+  };
+
+  const onDelete = async (c) => {
+    const yes = confirm(`¿Eliminar la convocatoria "${c.nombre}"?\n\nEsta acción puede afectar propuestas, jurados y configuración asociada. Se cancelará si existen evaluaciones registradas.`);
+    if (!yes) return;
+    try {
+      const r = await api.delete(`/convocatorias/${c.id}`);
+      if (r.data.blocked) {
+        const det = Object.entries(r.data.bloqueos || {}).filter(([_, v]) => v).map(([k, v]) => `${k}: ${v}`).join(" · ");
+        toast.error(`No se puede eliminar: ${r.data.reason}\nBloqueos → ${det}\nSugerencia: ${r.data.sugerencia}`, { duration: 10000 });
+        return;
+      }
+      toast.success(`Convocatoria ${c.codigo} eliminada`);
+      load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
   const canCreate = user?.role === "admin_general" || user?.role === "admin_convocatoria";
@@ -98,6 +113,11 @@ export default function Convocatorias() {
                     <Pencil className="w-3.5 h-3.5" /> Editar
                   </Button>
                 </Link>
+              )}
+              {user?.role === "admin_general" && (
+                <Button size="sm" variant="outline" className="rounded-lg text-[#B42318] hover:bg-red-50" onClick={() => onDelete(c)} data-testid={`conv-delete-${c.codigo}`}>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
               )}
             </div>
           </div>

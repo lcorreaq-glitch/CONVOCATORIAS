@@ -186,17 +186,39 @@ export default function ConvocatoriaDetail() {
                     <Input value={e.pagina_web || ""} onChange={(ev) => updateEnt(idx, "pagina_web", ev.target.value)} placeholder="https://..." className="rounded-lg" /></div>
                   <div className="col-span-2"><Label className="text-xs font-semibold">Dirección</Label>
                     <Input value={e.direccion || ""} onChange={(ev) => updateEnt(idx, "direccion", ev.target.value)} className="rounded-lg" /></div>
-                  <div><Label className="text-xs font-semibold">URL del logo</Label>
-                    <Input value={e.logo_url || ""} onChange={(ev) => updateEnt(idx, "logo_url", ev.target.value)} placeholder="https://.../logo.png" className="rounded-lg font-mono text-[12px]" /></div>
+                  <div className="col-span-2"><Label className="text-xs font-semibold">Logo institucional</Label>
+                    <div className="flex items-center gap-3 mt-1">
+                      {e.logo_url ? (
+                        <div className="flex items-center gap-3 border border-[#E2E7EC] rounded-lg p-2 bg-[#F7F9FB] flex-1">
+                          <img src={e.logo_url} alt="logo" className="h-12 w-20 object-contain bg-white border border-[#E2E7EC] rounded" onError={(ev) => { ev.target.style.display = "none"; }} />
+                          <div className="flex-1 text-[11px] text-[#5E6878] font-mono truncate">{e.logo_url.startsWith("data:") ? "Imagen cargada" : e.logo_url}</div>
+                          <button type="button" onClick={() => updateEnt(idx, "logo_url", "")} className="text-[#B42318] hover:bg-red-50 p-1.5 rounded-lg" title="Eliminar logo">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="flex-1 cursor-pointer">
+                          <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className="hidden" data-testid={`conv-ent-logo-upload-${idx}`}
+                                 onChange={async (ev) => {
+                                   const file = ev.target.files?.[0]; if (!file) return;
+                                   const fd = new FormData(); fd.append("file", file);
+                                   try {
+                                     const r = await api.post("/upload/image", fd);
+                                     updateEnt(idx, "logo_url", r.data.data_url);
+                                     toast.success("Logo cargado");
+                                   } catch (er) { toast.error(formatApiError(er.response?.data?.detail)); }
+                                 }} />
+                          <div className="border-2 border-dashed border-[#E2E7EC] rounded-lg p-4 text-center hover:border-[#14776A] hover:bg-[#F0F7F5] transition-colors">
+                            <div className="text-[12.5px] text-[#5E6878]"><strong className="text-[#14776A]">Subir logo</strong> · PNG, JPG, WEBP o SVG (máx 2 MB)</div>
+                          </div>
+                        </label>
+                      )}
+                    </div>
+                  </div>
                   <div className="col-span-3"><Label className="text-xs font-semibold">Texto institucional para actas / comunicaciones</Label>
                     <Textarea rows={2} value={e.texto_institucional || ""} onChange={(ev) => updateEnt(idx, "texto_institucional", ev.target.value)} className="rounded-lg" /></div>
                 </div>
-                {e.logo_url && (
-                  <div className="mt-3 pt-3 border-t border-[#E2E7EC] flex items-center gap-3">
-                    <span className="text-[11px] uppercase tracking-wider font-bold text-[#5E6878]">Vista logo</span>
-                    <img src={e.logo_url} alt={e.nombre} className="h-8 object-contain" onError={(ev) => { ev.target.style.display = "none"; }} />
-                  </div>
-                )}
+                {/* (preview now lives within the logo block above) */}
               </div>
             ))}
             {!(f.entidades || []).length && (
