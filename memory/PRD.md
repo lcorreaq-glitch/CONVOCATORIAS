@@ -73,6 +73,13 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - 1 convocatoria (INC2026), 9 catálogos, 16 campos, 10 criterios, 7 desempates.
 - **12 propuestas** habilitadas distribuidas en 6 subregiones, **6 jurados** con usuarios asociados, **3 ternas** (T1 Urabá, T2 Oriente, T3 Norte), **24 evaluaciones** individuales en Borrador.
 
+### Módulo Propuestas con formulario dinámico (Feb 2026)
+- ✅ **Formulario dinámico de propuesta** que renderiza inputs según los campos configurados de la convocatoria activa. Selects de lista/multi alimentados desde catálogos vinculados. Componente: `/app/frontend/src/pages/propuestas/PropuestaForm.jsx`.
+- ✅ Botón **"Nueva propuesta"** + icono Editar por fila en `/app/frontend/src/pages/Propuestas.jsx`.
+- ✅ Secciones agrupadas: Identificación · Territorial · Organización · Categorización · Datos administrativos.
+- ✅ Validación de obligatorios con marcado visual en rojo + toast.
+- ✅ **Alineación INC2026 con plantilla Excel oficial** (17 columnas) vía `/app/backend/align_inc2026.py` (idempotente). Campos agregados: nombre_organizacion, nit_rut, id_organismo_comunal, ganador_2024, ganador_2025. Catálogos nuevos: **Municipios (125 valores de Antioquia)**, **Temáticas (8 sublíneas)**. Remapeo de catalogo_id en municipio (texto→lista), tipo_organizacion, enfoque_poblacional, linea, tematica.
+
 ### Módulo Configuración rediseñado (Feb 2026)
 - ✅ Pestaña **Resumen** con diagrama de flujo, alertas y mapa de vinculaciones + sección de tipos de comparación del sistema.
 - ✅ **Vinculación explícita**: campos tipo lista usan selector de Catálogo; desempates usan selector Criterio/Campo/Sorteo.
