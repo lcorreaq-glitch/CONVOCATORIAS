@@ -1,0 +1,35 @@
+{
+  "summary": "Iter 10: Verificación e2e del rediseño tipo Airtable/Notion del bloque de filtros en /propuestas. TODOS los escenarios en scope PASARON (11/11). El UI por defecto solo muestra: búsqueda + Estado + botón 'Filtrar por…' + contador de resultados (NO se ven los 8 filtros dinámicos). Click en 'Filtrar por…' (data-testid=add-filter-btn) abre Popover con add-filter-search y las 8 opciones esperadas para INC2026 (subregion, municipio, tipo_organizacion, enfoque_poblacional, linea, tematica, ganador_2024, ganador_2025). El buscador del Popover filtra correctamente (escribir 'gan' deja solo Ganador 2024 y Ganador 2025; subregion/linea ocultos). Click en una opción agrega un ActiveFilterChip con el control de valor inline + X, cierra el popover, y la opción desaparece del Popover (no se puede agregar dos veces). El borde del chip arranca gris (border-border) y al elegir valor cambia a verde (border-[#14776A] bg-[#F0F7F5]) — VERIFICADO leyendo className del wrapper. El control inline se adapta al tipo de campo (lista → Select del catálogo; si_no → Select Sí/No). El X (data-testid=remove-filter-{ni}) remueve el chip y el campo vuelve a estar disponible en el Popover. El botón 'Limpiar' (data-testid=clear-filters) aparece solo cuando hay ≥1 chip activo y vacía todos los chips de una. Filtros funcionales: Subregión=Oriente → 3 propuestas (P-0004,P-0005,P-0006) (spec pedía 4 pero seed real es 3, mismo hallazgo que iter9). Combinado Subregión=Oriente + Línea=Cultura → 1 propuesta (P-0004 Cine Móvil Antioquia Oriente) ✓.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Propuestas - PageHeader subtitle", "issues": ["El subtítulo aún dice 'filtros por subregión, línea y estado' pero el nuevo diseño soporta filtros dinámicos por cualquier campo con uso_filtro=true. Actualizar copy. (Ya señalado en iter9, sigue sin cambiar.)"]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(Discrepancia de seed conocida desde iter9) Si la spec realmente espera 4 propuestas en Oriente para INC2026, agregar una más al seed. Hoy hay solo 3 (P-0004, P-0005, P-0006). El código de filtrado es correcto.",
+    "(Cosmético) Actualizar subtitle de PageHeader en Propuestas.jsx línea 201 para reflejar filtros dinámicos."
+  ],
+  "critical_code_review_comments": [
+    "Propuestas.jsx ActiveFilterChip: cuando un chip se agrega con setFiltro(key, '') (string vacío), el chip queda 'no seteado' (borde gris) y el backend no envía ese filtro porque load() filtra valores vacíos en activeFilters (línea 151). Correcto. Pero al cambiar de convocatoria el useEffect setFiltros({}) garantiza reset. ✓",
+    "AddFilterButton: el filtrado por search es case-insensitive con toLowerCase(). Bien. Pero no normaliza acentos (escribir 'subreg' funciona, 'subregión' también, pero 'tipo organizacion' sin acento no matchearía 'Tipo de Organización' si el usuario escribe sin acento). Mejora opcional: normalizar via .normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').",
+    "Propuestas.jsx línea 163: useEffect depende de [filtros] como objeto. Cada setFiltros crea referencia nueva → load() ejecuta. OK porque setFiltros se llama solo en eventos explícitos. Sin debounce para search/numero/fecha inputs: si el usuario tipea rápido en un chip tipo 'numero' o 'texto', cada keystroke dispara request. Considerar debounce ~300ms (también aplica al input principal propuestas-search).",
+    "ActiveFilterChip si_no: usa value strings 'true'/'false' en SelectItem y normaliza en onChange con v === 'true'. Bien — corrige la observación de iter9 que usaba booleanos directos. ✓",
+    "Propuestas.jsx no muestra hint cuando camposFiltro está vacío en el bloque chips, pero sí muestra un párrafo de hint (líneas 302-307) en italic. Buena UX. ✓",
+    "AddFilterButton onAdd no valida que la key no esté ya activa (el padre lo hace al filtrar camposDisponibles antes de pasarlas). Acoplamiento implícito; podría hacerse defensivo dentro del componente."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skip per request)", "frontend": "100% (11/11 escenarios)"},
+  "test_credentials": "lcorreaq / Chocolate2026!",
+  "seed_data_creation": "Ninguna. No se crearon propuestas ni se modificó la convocatoria. Estado final = baseline 12 propuestas (clear-filters reset).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Filtros refactorizados a patrón Airtable/Notion. TestIds del bloque: propuestas-search (input principal), filter-estado (select estado fijo), add-filter-btn (botón Filtrar por…), add-filter-search (input dentro del Popover), add-filter-option-{nombre_interno} (cada opción del Popover), filter-{nombre_interno} (control inline del chip activo), remove-filter-{nombre_interno} (X del chip), clear-filters (botón Limpiar, solo visible si hay ≥1 chip). INC2026 tiene 8 campos con uso_filtro=true: subregion, municipio, tipo_organizacion, enfoque_poblacional, linea, tematica, ganador_2024, ganador_2025. Subregión Oriente = 3 propuestas (P-0004,P-0005,P-0006), no 4 como dice spec. Oriente+Línea=Cultura = 1 (P-0004 Cine Móvil Antioquia Oriente). Borde chip gris→verde verificado vía className.",
+  "rca of the issue": "N/A — sin bugs. La única discrepancia (Oriente=3 vs spec=4) es de seed, no de código. Mismo hallazgo que iter9."
+}

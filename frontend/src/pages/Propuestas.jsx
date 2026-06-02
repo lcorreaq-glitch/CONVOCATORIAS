@@ -7,10 +7,11 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Upload, Download, ExternalLink, Search, FileStack, Pencil, X } from "lucide-react";
+import { Plus, Upload, Download, ExternalLink, Search, FileStack, Pencil, X, Filter, ChevronDown } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import PropuestaForm from "./propuestas/PropuestaForm";
 import ConvocatoriaContextBanner from "@/components/ConvocatoriaContextBanner";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 function renderCellValue(v, campo) {
   if (v === null || v === undefined || v === "") return <span className="text-muted-foreground">—</span>;
@@ -20,67 +21,109 @@ function renderCellValue(v, campo) {
   return String(v);
 }
 
-function DynamicFilter({ campo, catalogo, value, onChange }) {
+function ActiveFilterChip({ campo, catalogo, value, onChange, onRemove }) {
   const tipo = campo.tipo;
-  const placeholder = `${campo.nombre_visible}…`;
-  const testId = `filter-${campo.nombre_interno}`;
+  const id = `filter-${campo.nombre_interno}`;
+  let valueLabel = "Selecciona…";
+  let isSet = false;
+  if (value !== "" && value !== undefined && value !== null && value !== "__all__") {
+    isSet = true;
+    valueLabel = String(value);
+    if (tipo === "si_no") valueLabel = value === true || value === "true" ? "Sí" : "No";
+  }
 
-  // si_no → 3-state select (todos / sí / no)
-  if (tipo === "si_no") {
-    return (
-      <Select value={value ?? "__all__"} onValueChange={onChange}>
-        <SelectTrigger className="rounded-sm w-[180px]" data-testid={testId}>
-          <SelectValue placeholder={placeholder} />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__all__">{campo.nombre_visible}: todos</SelectItem>
-          <SelectItem value={true}>Sí</SelectItem>
-          <SelectItem value={false}>No</SelectItem>
-        </SelectContent>
-      </Select>
-    );
-  }
-  // listas con catálogo
-  if ((tipo === "lista" || tipo === "seleccion_multiple") && catalogo) {
-    const valores = (catalogo.valores || []).filter((v) => v.activo !== false);
-    return (
-      <Select value={value ?? "__all__"} onValueChange={onChange}>
-        <SelectTrigger className="rounded-sm w-[200px]" data-testid={testId}>
-          <SelectValue placeholder={placeholder} />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__all__">{campo.nombre_visible}: todos</SelectItem>
-          {valores.map((v) => <SelectItem key={v.id || v.valor} value={v.valor}>{v.valor}</SelectItem>)}
-        </SelectContent>
-      </Select>
-    );
-  }
-  // fecha → input date
-  if (tipo === "fecha") {
-    return (
-      <div className="flex items-center gap-1.5">
-        <span className="text-[11px] text-muted-foreground">{campo.nombre_visible}:</span>
-        <Input type="date" value={value || ""} onChange={(e) => onChange(e.target.value)} className="rounded-sm w-[150px]" data-testid={testId} />
-        {value && <button onClick={() => onChange("")} className="text-muted-foreground hover:text-red-500"><X className="w-3 h-3" /></button>}
-      </div>
-    );
-  }
-  // numérico → input + signo
-  if (["numero", "moneda", "porcentaje"].includes(tipo)) {
-    return (
-      <div className="flex items-center gap-1.5">
-        <span className="text-[11px] text-muted-foreground">{campo.nombre_visible}:</span>
-        <Input type="number" value={value ?? ""} onChange={(e) => onChange(e.target.value === "" ? "" : Number(e.target.value))} className="rounded-sm w-[120px]" data-testid={testId} placeholder="valor exacto" />
-        {value !== "" && value !== undefined && <button onClick={() => onChange("")} className="text-muted-foreground hover:text-red-500"><X className="w-3 h-3" /></button>}
-      </div>
-    );
-  }
-  // default → input texto
+  const renderControl = () => {
+    if (tipo === "si_no") {
+      return (
+        <Select value={value === true ? "true" : value === false ? "false" : ""} onValueChange={(v) => onChange(v === "true")}>
+          <SelectTrigger className="rounded-md h-7 text-[12px] w-[100px] border-0 bg-transparent px-1 focus:ring-0" data-testid={id}>
+            <SelectValue placeholder="Sí / No" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="true">Sí</SelectItem>
+            <SelectItem value="false">No</SelectItem>
+          </SelectContent>
+        </Select>
+      );
+    }
+    if ((tipo === "lista" || tipo === "seleccion_multiple") && catalogo) {
+      const valores = (catalogo.valores || []).filter((v) => v.activo !== false);
+      return (
+        <Select value={value || ""} onValueChange={onChange}>
+          <SelectTrigger className="rounded-md h-7 text-[12px] min-w-[140px] border-0 bg-transparent px-1 focus:ring-0" data-testid={id}>
+            <SelectValue placeholder="Selecciona…" />
+          </SelectTrigger>
+          <SelectContent className="max-h-72">
+            {valores.map((v) => <SelectItem key={v.id || v.valor} value={v.valor}>{v.valor}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      );
+    }
+    if (tipo === "fecha") {
+      return <Input type="date" value={value || ""} onChange={(e) => onChange(e.target.value)} className="rounded-md h-7 text-[12px] w-[140px] border-0 bg-transparent px-1 focus:ring-0" data-testid={id} />;
+    }
+    if (["numero", "moneda", "porcentaje"].includes(tipo)) {
+      return <Input type="number" value={value ?? ""} onChange={(e) => onChange(e.target.value === "" ? "" : Number(e.target.value))} className="rounded-md h-7 text-[12px] w-[110px] border-0 bg-transparent px-1 focus:ring-0" data-testid={id} placeholder="valor" />;
+    }
+    return <Input value={value || ""} onChange={(e) => onChange(e.target.value)} className="rounded-md h-7 text-[12px] w-[140px] border-0 bg-transparent px-1 focus:ring-0" data-testid={id} placeholder="texto" />;
+  };
+
   return (
-    <div className="flex items-center gap-1.5">
-      <Input value={value || ""} onChange={(e) => onChange(e.target.value)} className="rounded-sm w-[180px]" placeholder={placeholder} data-testid={testId} />
-      {value && <button onClick={() => onChange("")} className="text-muted-foreground hover:text-red-500"><X className="w-3 h-3" /></button>}
+    <div className={`inline-flex items-center gap-1 rounded-md border ${isSet ? "border-[#14776A] bg-[#F0F7F5]" : "border-border bg-white"} pl-2 pr-1 h-8`}>
+      <span className="text-[11.5px] font-semibold text-[#0F5E54]">{campo.nombre_visible}:</span>
+      {renderControl()}
+      <button onClick={onRemove} className="text-muted-foreground hover:text-red-500 p-0.5 rounded-sm" data-testid={`remove-filter-${campo.nombre_interno}`} title="Quitar este filtro">
+        <X className="w-3 h-3" />
+      </button>
     </div>
+  );
+}
+
+function AddFilterButton({ camposDisponibles, onAdd }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const filtered = camposDisponibles.filter((c) => c.nombre_visible.toLowerCase().includes(search.toLowerCase()));
+  if (camposDisponibles.length === 0) return null;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-[#CBD5E1] hover:border-[#14776A] hover:text-[#14776A] px-2.5 h-8 text-[12px] font-semibold text-[#5E6878] transition-colors"
+          data-testid="add-filter-btn"
+        >
+          <Filter className="w-3.5 h-3.5" />
+          Filtrar por…
+          <ChevronDown className="w-3 h-3 opacity-60" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-72 p-2">
+        <div className="text-[10.5px] uppercase tracking-wide font-display font-bold text-[#5E6878] px-1.5 py-1">
+          Elige un campo para filtrar
+        </div>
+        <Input
+          autoFocus
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar campo…"
+          className="rounded-md h-8 text-[12px] mb-1"
+          data-testid="add-filter-search"
+        />
+        <div className="max-h-72 overflow-auto">
+          {filtered.length === 0 && <div className="text-xs text-muted-foreground p-2 italic">Sin campos disponibles</div>}
+          {filtered.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => { onAdd(c.nombre_interno); setOpen(false); setSearch(""); }}
+              className="w-full text-left px-2 py-1.5 rounded-md hover:bg-secondary text-[12.5px] flex items-center justify-between"
+              data-testid={`add-filter-option-${c.nombre_interno}`}
+            >
+              <span>{c.nombre_visible}</span>
+              <span className="text-[10px] text-muted-foreground font-mono">{c.tipo}</span>
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -123,6 +166,9 @@ export default function Propuestas() {
   const camposFiltro = useMemo(() => campos.filter((c) => c.uso_filtro), [campos]);
   const catById = useMemo(() => Object.fromEntries(catalogos.map((c) => [c.id, c])), [catalogos]);
   const setFiltro = (key, val) => setFiltros((f) => ({ ...f, [key]: val }));
+  const removeFiltro = (key) => setFiltros((f) => { const n = { ...f }; delete n[key]; return n; });
+  // Filtros visibles como chips: los que tienen key presente (incluso si valor está vacío, el chip queda visible para que el usuario lo complete)
+  const activeFilterKeys = useMemo(() => Object.keys(filtros), [filtros]);
 
   const downloadTemplate = () => {
     downloadFile(`/propuestas-template?convocatoria_id=${activeConvocatoriaId}`, "plantilla_propuestas.xlsx")
@@ -200,15 +246,15 @@ export default function Propuestas() {
 
       <ConvocatoriaContextBanner />
 
-      {/* Filters: dynamic - shows search + estado + any campo with uso_filtro=true */}
+      {/* Filters: search + estado fijos + chips dinámicos (patrón Airtable/Notion) */}
       <div className="mb-5">
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="relative flex-1 min-w-[240px] max-w-md">
-            <Search className="w-4 h-4 absolute left-2.5 top-3 text-muted-foreground" />
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar propuesta…" className="rounded-sm pl-9" data-testid="propuestas-search" />
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[220px] max-w-sm">
+            <Search className="w-4 h-4 absolute left-2.5 top-2.5 text-muted-foreground" />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar propuesta…" className="rounded-md pl-9 h-9 text-[13px]" data-testid="propuestas-search" />
           </div>
           <Select value={estado} onValueChange={setEstado}>
-            <SelectTrigger className="rounded-sm w-[200px]" data-testid="filter-estado"><SelectValue placeholder="Estado" /></SelectTrigger>
+            <SelectTrigger className="rounded-md h-9 w-[180px] text-[13px]" data-testid="filter-estado"><SelectValue placeholder="Estado" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="__all__">Todos los estados</SelectItem>
               {["Registrada", "En revisión documental", "Habilitada", "No habilitada", "Asignada", "En evaluación individual", "Rankeada", "Ganadora", "Elegible"].map((s) => (
@@ -216,26 +262,48 @@ export default function Propuestas() {
               ))}
             </SelectContent>
           </Select>
-          {camposFiltro.map((c) => (
-            <DynamicFilter key={c.id} campo={c} catalogo={catById[c.catalogo_id]} value={filtros[c.nombre_interno]} onChange={(v) => setFiltro(c.nombre_interno, v)} />
-          ))}
-          <div className="text-xs text-muted-foreground self-center ml-auto font-mono">
+
+          {/* Chips de filtros activos */}
+          {activeFilterKeys.map((key) => {
+            const campo = camposFiltro.find((c) => c.nombre_interno === key);
+            if (!campo) return null;
+            return (
+              <ActiveFilterChip
+                key={key}
+                campo={campo}
+                catalogo={catById[campo.catalogo_id]}
+                value={filtros[key]}
+                onChange={(v) => setFiltro(key, v)}
+                onRemove={() => removeFiltro(key)}
+              />
+            );
+          })}
+
+          <AddFilterButton
+            camposDisponibles={camposFiltro.filter((c) => !activeFilterKeys.includes(c.nombre_interno))}
+            onAdd={(key) => setFiltro(key, "")}
+          />
+
+          {activeFilterKeys.length > 0 && (
+            <button
+              onClick={() => setFiltros({})}
+              className="text-[12px] text-[#5E6878] hover:text-red-600 underline underline-offset-2"
+              data-testid="clear-filters"
+              title="Quitar todos los filtros"
+            >
+              Limpiar
+            </button>
+          )}
+
+          <div className="text-xs text-muted-foreground self-center ml-auto font-mono tabular-nums">
             {items.length} resultado{items.length === 1 ? "" : "s"}
           </div>
         </div>
         {camposFiltro.length === 0 && (
           <p className="mt-2 text-[11.5px] text-muted-foreground italic">
-            No hay campos marcados como "filtro" en esta convocatoria. Ve a <strong className="text-[#14776A] not-italic">Configuración → Campos</strong> y activa el flag <em>"filtro"</em> en los campos que quieras filtrar aquí.
+            No hay campos marcados como "filtro" en esta convocatoria. Activa el flag <em>"filtro"</em> en
+            {" "}<strong className="text-[#14776A] not-italic">Configuración → Campos</strong> para poder filtrar.
           </p>
-        )}
-        {Object.keys(filtros).some((k) => filtros[k] && filtros[k] !== "__all__") && (
-          <button
-            onClick={() => setFiltros({})}
-            className="mt-2 text-[11.5px] text-[#14776A] hover:underline font-semibold"
-            data-testid="clear-filters"
-          >
-            Limpiar filtros
-          </button>
         )}
       </div>
 
