@@ -1,0 +1,798 @@
+"""KRINOS - Actas configurables (Individual por Jurado / Colectiva por Terna / Subregional).
+
+Cada plantilla se almacena en convocatoria.configuracion.acta_templates[tipo] = {
+  encabezado, considerandos, certificacion, tabla_titulo, tabla_subtitulo, texto_cierre,
+  pie_firmantes_titulo
+}
+
+Render: ReportLab. Merge tags resueltos en _render_text(...).
+"""
+import io
+import re
+import base64
+from datetime import datetime
+from typing import Optional, List, Dict, Any
+from fastapi import APIRouter, HTTPException, Depends, Body
+from fastapi.responses import StreamingResponse
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.lib import colors as rl_colors
+from reportlab.lib.enums import TA_JUSTIFY, TA_CENTER, TA_LEFT
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, KeepTogether
+)
+
+from db import get_db, now_iso
+from auth import get_current_user, require_roles, audit
+
+router = APIRouter(prefix="/api", tags=["actas"])
+
+# ============================================================
+# DEFAULT TEMPLATES (INC2026 — texto literal de los .docx)
+# ============================================================
+DEFAULT_INC2026_TEMPLATES = {
+    "individual": {
+        "encabezado": "ACTA DE EVALUACIÓN TÉCNICA INDIVIDUAL\nCONVOCATORIA PÚBLICA ESTÍMULOS E INICIATIVAS POR ANTIOQUIA FIRME 2026",
+        "considerandos": (
+            "a) La Convocatoria Pública Estímulos e Iniciativas por Antioquia Firme 2026, liderada por la "
+            "Gobernación de Antioquia (Secretaría de Gobierno a través de la Dirección de Participación "
+            "Comunitaria y Ciudadana), tiene como objetivo fortalecer las organizaciones comunales y sociales "
+            "mediante el reconocimiento y financiación de iniciativas orientadas al desarrollo territorial, la "
+            "participación ciudadana y la inclusión social.\n\n"
+            "b) El proceso evaluativo para esta vigencia se encuentra centralizado en aplicativo digital, "
+            "garantizando las condiciones técnicas para una evaluación ágil, transparente, trazable y coherente "
+            "con los lineamientos vigentes.\n\n"
+            "c) Fui designado(a) como jurado evaluador para participar en la revisión individual de las propuestas "
+            "habilitadas por mi trayectoria y conocimiento del territorio, declarando no tener ninguna inhabilidad, "
+            "incompatibilidad o impedimento legal o ético para ejercer dicho rol.\n\n"
+            "d) Participé en el proceso de inducción metodológica, ingresé al aplicativo digital, accedí a la "
+            "documentación técnica, soportes y ejecuté la revisión de manera independiente conforme a los criterios "
+            "técnicos de evaluación 2026."
+        ),
+        "certificacion": (
+            "Al recibir el conjunto de iniciativas asignadas en mi panel digital, no me encuentro incurso(a) en ninguna "
+            "causal de inhabilidad, incompatibilidad o conflicto de interés. Declaro no tener vínculos familiares, "
+            "laborales, contractuales, económicos ni asociativos con las organizaciones postulantes o sus integrantes "
+            "que puedan comprometer mi independencia y objetividad. Desarrollé el estudio y evaluación individual de las "
+            "propuestas asignadas en los tiempos estipulados por el cronograma oficial, accediendo a la documentación "
+            "exclusivamente a través de la plataforma de la Gobernación de Antioquia. Apliqué los cinco (5) criterios "
+            "técnicos de evaluación, asignando los puntajes numéricos justificados cualitativamente. Comprendo y valido "
+            "que el sistema digital calculó de manera automática los puntos adicionales de priorización territorial. "
+            "Realicé la calificación con total independencia, transparencia y objetividad, actuando bajo los principios "
+            "éticos de la función pública, y me comprometo a guardar estricta reserva y confidencialidad sobre la "
+            "información leída."
+        ),
+        "tabla_titulo": "PUNTAJES ASIGNADOS EN EL APLICATIVO",
+        "tabla_subtitulo": "La siguiente tabla resume las calificaciones definitivas ingresadas y guardadas por el jurado en la plataforma digital para la subregión asignada.",
+        "texto_cierre": (
+            "Nota: Esta acta certifica el cierre del \"Momento 1\" de la evaluación, y sus resultados son el insumo "
+            "oficial para la sesión de deliberación y consenso subregional.\n\n"
+            "Este documento se firma a los {{fecha_dia}} días del mes de {{fecha_mes}} de {{fecha_anio}}, "
+            "como constancia de la culminación exitosa del proceso de evaluación individual."
+        ),
+        "pie_firmantes_titulo": "FIRMA DEL JURADO EVALUADOR",
+    },
+    "colectiva_terna": {
+        "encabezado": "ACTA DE EVALUACIÓN TÉCNICA COLECTIVA POR TERNA\nCONVOCATORIA PÚBLICA ESTÍMULOS E INICIATIVAS POR ANTIOQUIA FIRME 2026",
+        "considerandos": (
+            "a) La Convocatoria Pública Estímulos e Iniciativas por Antioquia Firme 2026, liderada por la "
+            "Gobernación de Antioquia (Secretaría de Gobierno a través de la Dirección de Participación "
+            "Comunitaria y Ciudadana), tiene como propósito fortalecer las organizaciones comunales y sociales "
+            "mediante el reconocimiento a iniciativas que promuevan el desarrollo territorial, la inclusión social "
+            "y la participación ciudadana.\n\n"
+            "b) Para la vigencia 2026, el proceso evaluativo se centralizó en el aplicativo, garantizando "
+            "condiciones de agilidad, transparencia, trazabilidad y cálculo automatizado de puntajes adicionales "
+            "y criterios de desempate.\n\n"
+            "c) Conforme a la metodología del proceso, una vez finalizada la fase de evaluación individual en la "
+            "plataforma, la terna de jurados asignada a la subregión debe llevar a cabo una sesión de deliberación "
+            "colectiva, con el propósito de verificar la consistencia de criterios, armonizar observaciones y "
+            "validar los resultados y clasificaciones que arroja el sistema.\n\n"
+            "d) Los(as) suscritos(as) jurados participamos en dicha sesión de deliberación en la fecha señalada, "
+            "revisando en conjunto las justificaciones técnicas consignadas en el aplicativo y acordando, por "
+            "consenso, el cierre del proceso para nuestra subregión conforme a las directrices de la convocatoria."
+        ),
+        "certificacion": (
+            "Ninguno de los integrantes de la terna presenta conflicto de interés, inhabilidad o incompatibilidad "
+            "respecto a las iniciativas evaluadas y hemos actuado en todas las fases con independencia, "
+            "imparcialidad y rigor técnico. Durante la sesión revisamos de manera detallada las evaluaciones "
+            "individuales consolidadas en el aplicativo y las observaciones cualitativas que las sustentan. "
+            "Validamos que el aplicativo digital procesó correctamente los cálculos finales, incluyendo la "
+            "priorización territorial y la aplicación estricta de las reglas de desempate, basándose única y "
+            "exclusivamente en los datos y valoraciones que ingresamos previamente en nuestra evaluación técnica. "
+            "Garantizamos que el proceso de deliberación se desarrolló bajo los principios de legalidad, "
+            "objetividad, transparencia y equidad, y que las decisiones que avalamos representan el consenso del "
+            "cuerpo evaluador de la subregión."
+        ),
+        "tabla_titulo": "RESULTADOS CONSOLIDADOS POR EL APLICATIVO",
+        "tabla_subtitulo": "La siguiente tabla oficializa el listado de las propuestas evaluadas por la terna, con el puntaje total definitivo calculado por la plataforma.",
+        "texto_cierre": (
+            "Este documento se firma el día {{fecha_dia}} del mes de {{fecha_mes}} de {{fecha_anio}}, como "
+            "constancia del cierre de la sesión de evaluación colectiva y la validación final de los resultados "
+            "subregionales."
+        ),
+        "pie_firmantes_titulo": "JURADOS EVALUADORES (TERNA SUBREGIONAL)",
+    },
+    "subregional": {
+        "encabezado": "ACTA DE EVALUACIÓN TÉCNICA COLECTIVA POR SUBREGIÓN\nCONVOCATORIA PÚBLICA ESTÍMULOS E INICIATIVAS POR ANTIOQUIA FIRME 2026",
+        "considerandos": (
+            "a) La Convocatoria Pública Estímulos e Iniciativas por Antioquia Firme 2026, liderada por la "
+            "Gobernación de Antioquia (Secretaría de Gobierno a través de la Dirección de Participación "
+            "Comunitaria y Ciudadana), tiene como propósito fortalecer las organizaciones comunales y sociales "
+            "mediante el reconocimiento a iniciativas que promuevan el desarrollo territorial, la inclusión social "
+            "y la participación ciudadana.\n\n"
+            "b) Para la vigencia 2026, el proceso evaluativo se centralizó en el aplicativo, garantizando "
+            "condiciones de agilidad, transparencia, trazabilidad y cálculo automatizado de puntajes adicionales "
+            "y criterios de desempate.\n\n"
+            "c) Conforme a la metodología del proceso, una vez finalizada la fase de evaluación individual en la "
+            "plataforma, las ternas de jurados asignadas a la subregión {{subregion}} llevaron a cabo sesiones "
+            "de deliberación colectiva, con el propósito de verificar la consistencia de criterios, armonizar "
+            "observaciones y validar los resultados y clasificaciones que arroja el sistema.\n\n"
+            "d) Los(as) suscritos(as) jurados participamos en dichas sesiones de deliberación, revisando en "
+            "conjunto las justificaciones técnicas consignadas en el aplicativo y acordando, por consenso, el "
+            "cierre del proceso para nuestra subregión conforme a las directrices de la convocatoria."
+        ),
+        "certificacion": (
+            "Ninguno de los integrantes de este equipo subregional presenta conflicto de interés, inhabilidad o "
+            "incompatibilidad respecto a las iniciativas evaluadas y hemos actuado en todas las fases con "
+            "independencia, imparcialidad y rigor técnico. Durante la sesión revisamos de manera detallada las "
+            "evaluaciones individuales consolidadas en el aplicativo y las observaciones cualitativas que las "
+            "sustentan. Validamos que el aplicativo digital procesó correctamente los cálculos finales, incluyendo "
+            "la priorización territorial y la aplicación estricta de las reglas de desempate, basándose única y "
+            "exclusivamente en los datos y valoraciones que ingresamos previamente en nuestra evaluación técnica. "
+            "Garantizamos que el proceso de deliberación se desarrolló bajo los principios de legalidad, "
+            "objetividad, transparencia y equidad, y que las decisiones que avalamos representan el consenso del "
+            "cuerpo evaluador de la subregión."
+        ),
+        "tabla_titulo": "RESULTADOS CONSOLIDADOS POR EL APLICATIVO",
+        "tabla_subtitulo": "La siguiente tabla oficializa el listado de las propuestas evaluadas en la subregión, con el puntaje total definitivo calculado por la plataforma.",
+        "texto_cierre": (
+            "Este documento se firma el día {{fecha_dia}} del mes de {{fecha_mes}} de {{fecha_anio}}, "
+            "como constancia del cierre de la sesión de evaluación colectiva y la validación final de los "
+            "resultados subregionales."
+        ),
+        "pie_firmantes_titulo": "JURADOS EVALUADORES (SUBREGIONALES)",
+    },
+}
+
+DEFAULT_GENERIC_TEMPLATES = {
+    "individual": {
+        "encabezado": "ACTA DE EVALUACIÓN INDIVIDUAL\n{{convocatoria_nombre}}",
+        "considerandos": "Edita este texto desde Configuración → Plantillas de Actas para personalizar los considerandos del acta individual.",
+        "certificacion": "El(la) jurado certifica haber evaluado las propuestas asignadas con independencia, transparencia y rigor técnico.",
+        "tabla_titulo": "PUNTAJES ASIGNADOS",
+        "tabla_subtitulo": "Resumen de las calificaciones definitivas ingresadas por el jurado en la plataforma.",
+        "texto_cierre": "Documento firmado el día {{fecha_dia}} del mes de {{fecha_mes}} de {{fecha_anio}}.",
+        "pie_firmantes_titulo": "FIRMA DEL JURADO EVALUADOR",
+    },
+    "colectiva_terna": {
+        "encabezado": "ACTA DE EVALUACIÓN COLECTIVA POR TERNA\n{{convocatoria_nombre}}",
+        "considerandos": "Edita este texto desde Configuración → Plantillas de Actas para personalizar los considerandos del acta colectiva.",
+        "certificacion": "La terna evaluadora certifica haber consolidado las evaluaciones individuales con base en el aplicativo.",
+        "tabla_titulo": "RESULTADOS CONSOLIDADOS POR LA TERNA",
+        "tabla_subtitulo": "Listado de propuestas evaluadas con el puntaje total definitivo.",
+        "texto_cierre": "Documento firmado el día {{fecha_dia}} del mes de {{fecha_mes}} de {{fecha_anio}}.",
+        "pie_firmantes_titulo": "INTEGRANTES DE LA TERNA",
+    },
+    "subregional": {
+        "encabezado": "ACTA SUBREGIONAL\n{{convocatoria_nombre}}",
+        "considerandos": "Edita este texto desde Configuración → Plantillas de Actas para personalizar los considerandos del acta subregional.",
+        "certificacion": "Los jurados de la subregión {{subregion}} certifican el cierre del proceso de evaluación.",
+        "tabla_titulo": "RESULTADOS SUBREGIONALES",
+        "tabla_subtitulo": "Listado de propuestas evaluadas en la subregión.",
+        "texto_cierre": "Documento firmado el día {{fecha_dia}} del mes de {{fecha_mes}} de {{fecha_anio}}.",
+        "pie_firmantes_titulo": "JURADOS EVALUADORES",
+    },
+}
+
+MERGE_TAGS = [
+    {"tag": "{{convocatoria_nombre}}", "descripcion": "Nombre de la convocatoria"},
+    {"tag": "{{convocatoria_codigo}}", "descripcion": "Código de la convocatoria"},
+    {"tag": "{{convocatoria_vigencia}}", "descripcion": "Vigencia (año) de la convocatoria"},
+    {"tag": "{{fecha}}", "descripcion": "Fecha actual (DD de mes de AAAA)"},
+    {"tag": "{{fecha_dia}}", "descripcion": "Día actual (1-31)"},
+    {"tag": "{{fecha_mes}}", "descripcion": "Mes actual en letras"},
+    {"tag": "{{fecha_anio}}", "descripcion": "Año actual"},
+    {"tag": "{{jurado_nombre}}", "descripcion": "Nombre del jurado (solo Individual)"},
+    {"tag": "{{jurado_documento}}", "descripcion": "Cédula del jurado (solo Individual)"},
+    {"tag": "{{subregion}}", "descripcion": "Subregión asignada"},
+    {"tag": "{{terna_codigo}}", "descripcion": "Código de la terna (solo Colectiva)"},
+]
+
+MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+            "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+
+
+def _render_text(text: str, ctx: dict) -> str:
+    if not text:
+        return ""
+    out = text
+    for k, v in ctx.items():
+        out = out.replace("{{" + k + "}}", str(v) if v is not None else "")
+    return out
+
+
+def _build_ctx(conv: dict, jurado: dict = None, subregion: str = None, terna: dict = None) -> dict:
+    now = datetime.now()
+    return {
+        "convocatoria_nombre": conv.get("nombre", "") if conv else "",
+        "convocatoria_codigo": conv.get("codigo", "") if conv else "",
+        "convocatoria_vigencia": str(conv.get("vigencia", "")) if conv else "",
+        "fecha": f"{now.day} de {MESES_ES[now.month-1]} de {now.year}",
+        "fecha_dia": str(now.day),
+        "fecha_mes": MESES_ES[now.month-1],
+        "fecha_anio": str(now.year),
+        "jurado_nombre": (jurado or {}).get("nombre", ""),
+        "jurado_documento": ((jurado or {}).get("datos") or {}).get("cedula", ""),
+        "subregion": subregion or ", ".join((jurado or {}).get("subregiones") or []) or "",
+        "terna_codigo": (terna or {}).get("codigo", "") if terna else "",
+    }
+
+
+def _is_inc2026(conv: dict) -> bool:
+    return (conv or {}).get("codigo", "").upper() == "INC2026"
+
+
+async def _get_template(db, conv: dict, tipo: str) -> dict:
+    config = conv.get("configuracion") or {}
+    saved = (config.get("acta_templates") or {}).get(tipo)
+    if saved:
+        return saved
+    # Default
+    base = DEFAULT_INC2026_TEMPLATES if _is_inc2026(conv) else DEFAULT_GENERIC_TEMPLATES
+    return base.get(tipo, DEFAULT_GENERIC_TEMPLATES[tipo])
+
+
+# ============================================================
+# CRUD PLANTILLAS
+# ============================================================
+@router.get("/convocatorias/{cid}/acta-templates")
+async def get_acta_templates(cid: str, user: dict = Depends(get_current_user)):
+    db = get_db()
+    conv = await db.convocatorias.find_one({"id": cid}, {"_id": 0})
+    if not conv:
+        raise HTTPException(404, "Convocatoria no encontrada")
+    inc = _is_inc2026(conv)
+    base = DEFAULT_INC2026_TEMPLATES if inc else DEFAULT_GENERIC_TEMPLATES
+    saved = (conv.get("configuracion") or {}).get("acta_templates") or {}
+    uso_subregional = (conv.get("configuracion") or {}).get("uso_acta_subregional", inc)
+    result = {}
+    for tipo in ("individual", "colectiva_terna", "subregional"):
+        if tipo in saved:
+            result[tipo] = {**base.get(tipo, {}), **saved[tipo], "_is_default": False}
+        else:
+            result[tipo] = {**base.get(tipo, {}), "_is_default": True}
+    return {
+        "templates": result,
+        "merge_tags": MERGE_TAGS,
+        "uso_acta_subregional": uso_subregional,
+        "is_inc2026": inc,
+    }
+
+
+@router.patch("/convocatorias/{cid}/acta-templates/{tipo}")
+async def update_acta_template(cid: str, tipo: str, payload: dict = Body(...),
+                                user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    if tipo not in ("individual", "colectiva_terna", "subregional"):
+        raise HTTPException(400, "Tipo inválido")
+    db = get_db()
+    conv = await db.convocatorias.find_one({"id": cid})
+    if not conv:
+        raise HTTPException(404, "Convocatoria no encontrada")
+    allowed = {"encabezado", "considerandos", "certificacion", "tabla_titulo",
+               "tabla_subtitulo", "texto_cierre", "pie_firmantes_titulo"}
+    safe = {k: v for k, v in payload.items() if k in allowed}
+    config = conv.get("configuracion") or {}
+    templates = config.get("acta_templates") or {}
+    templates[tipo] = {**(templates.get(tipo) or {}), **safe}
+    config["acta_templates"] = templates
+    await db.convocatorias.update_one({"id": cid}, {"$set": {"configuracion": config}})
+    await audit(user, "update", "acta_templates", cid, valor_nuevo={"tipo": tipo})
+    return {"ok": True, "tipo": tipo, "template": templates[tipo]}
+
+
+@router.patch("/convocatorias/{cid}/uso-acta-subregional")
+async def toggle_uso_subregional(cid: str, payload: dict = Body(...),
+                                  user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    db = get_db()
+    conv = await db.convocatorias.find_one({"id": cid})
+    if not conv:
+        raise HTTPException(404, "Convocatoria no encontrada")
+    config = conv.get("configuracion") or {}
+    config["uso_acta_subregional"] = bool(payload.get("enabled", False))
+    await db.convocatorias.update_one({"id": cid}, {"$set": {"configuracion": config}})
+    return {"ok": True, "uso_acta_subregional": config["uso_acta_subregional"]}
+
+
+# ============================================================
+# STATUS — Quiénes están listos
+# ============================================================
+@router.get("/actas-pendientes")
+async def list_actas_pendientes(convocatoria_id: str, user: dict = Depends(get_current_user)):
+    """Devuelve el estado de las 3 categorías de actas para la UI."""
+    db = get_db()
+    conv = await db.convocatorias.find_one({"id": convocatoria_id})
+    if not conv:
+        raise HTTPException(404, "Convocatoria no encontrada")
+    config = conv.get("configuracion") or {}
+    inc = _is_inc2026(conv)
+    uso_subregional = bool(config.get("uso_acta_subregional", inc))
+
+    # --- INDIVIDUAL POR JURADO ---
+    jurados = await db.jurados.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(2000)
+    individuales = []
+    for j in jurados:
+        evs = await db.evaluaciones_individuales.find({
+            "convocatoria_id": convocatoria_id, "jurado_id": j["id"], "etapa": {"$ne": "colectiva"}
+        }, {"_id": 0}).to_list(500)
+        total = len(evs)
+        if total == 0:
+            continue
+        finalizadas = sum(1 for e in evs if e.get("estado") in ("Finalizada", "Firmada"))
+        forzada = bool(((j.get("datos") or {}).get("acta_individual_forzada")))
+        firma_url = ((j.get("datos") or {}).get("firma_url"))
+        cedula = ((j.get("datos") or {}).get("cedula"))
+        if forzada or finalizadas >= total:
+            if firma_url:
+                estado = "Emitible"
+            else:
+                estado = "Requiere firma"
+        else:
+            estado = "Pendiente"
+        individuales.append({
+            "jurado_id": j["id"], "jurado_nombre": j["nombre"], "jurado_email": j.get("email"),
+            "subregiones": j.get("subregiones") or [], "documento": cedula,
+            "total": total, "finalizadas": finalizadas, "estado": estado,
+            "forzada": forzada, "tiene_firma": bool(firma_url),
+            "porcentaje": round((finalizadas / total) * 100) if total else 0,
+        })
+
+    # --- COLECTIVA POR TERNA ---
+    ternas = await db.ternas.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(500)
+    colectivas = []
+    for t in ternas:
+        evs_col = await db.evaluaciones_colectivas.find({
+            "convocatoria_id": convocatoria_id, "terna_id": t["id"]
+        }, {"_id": 0}).to_list(500)
+        total = len(evs_col)
+        if total == 0:
+            continue
+        cerradas = sum(1 for e in evs_col if e.get("estado") in ("Cerrada", "Firmada"))
+        firmas = (t.get("datos") or {}).get("firmas_acta_colectiva") or {}
+        integrantes = t.get("integrantes") or []
+        firmas_completas = sum(1 for i in integrantes if firmas.get(i.get("jurado_id")))
+        if cerradas >= total and firmas_completas >= len(integrantes) and integrantes:
+            estado = "Emitible"
+        elif cerradas >= total:
+            estado = "Falta firma terna"
+        else:
+            estado = "Pendiente"
+        colectivas.append({
+            "terna_id": t["id"], "terna_codigo": t["codigo"], "terna_nombre": t.get("nombre"),
+            "subregion": t.get("subregion"), "integrantes": len(integrantes),
+            "total": total, "cerradas": cerradas, "firmas": firmas_completas,
+            "estado": estado, "porcentaje": round((cerradas / total) * 100) if total else 0,
+        })
+
+    # --- SUBREGIONAL (solo si uso_acta_subregional=True) ---
+    subregionales = []
+    if uso_subregional:
+        # Agrupar por subregion
+        subregiones = sorted({s for j in jurados for s in (j.get("subregiones") or [])})
+        for sub in subregiones:
+            # Buscar propuestas de esa subregión
+            propuestas_sub = await db.propuestas.find({
+                "convocatoria_id": convocatoria_id,
+                "$or": [{"subregion": sub}, {"datos.subregion": sub}]
+            }, {"_id": 0}).to_list(2000)
+            propuestas_ids = [p["id"] for p in propuestas_sub]
+            if not propuestas_ids:
+                continue
+            evs_col = await db.evaluaciones_colectivas.find({
+                "convocatoria_id": convocatoria_id, "propuesta_id": {"$in": propuestas_ids}
+            }, {"_id": 0}).to_list(2000)
+            total = len(propuestas_ids)
+            cerradas = sum(1 for e in evs_col if e.get("estado") in ("Cerrada", "Firmada"))
+            sub_doc = await db.actas_subregionales.find_one({
+                "convocatoria_id": convocatoria_id, "subregion": sub
+            }, {"_id": 0})
+            firmas = (sub_doc or {}).get("firmas") or {}
+            jurados_sub = [j for j in jurados if sub in (j.get("subregiones") or [])]
+            firmadas = sum(1 for j in jurados_sub if firmas.get(j["id"]))
+            if cerradas >= total and firmadas >= len(jurados_sub) and jurados_sub:
+                estado = "Emitible"
+            elif cerradas >= total:
+                estado = "Falta firmar"
+            else:
+                estado = "Pendiente"
+            subregionales.append({
+                "subregion": sub, "total": total, "cerradas": cerradas,
+                "jurados": len(jurados_sub), "firmas": firmadas,
+                "estado": estado, "porcentaje": round((cerradas / total) * 100) if total else 0,
+            })
+
+    return {
+        "individual": individuales, "colectiva_terna": colectivas, "subregional": subregionales,
+        "uso_acta_subregional": uso_subregional, "is_inc2026": inc,
+    }
+
+
+# ============================================================
+# FORZAR ACTIVACIÓN INDIVIDUAL
+# ============================================================
+@router.post("/actas/individual-jurado/{jurado_id}/forzar")
+async def forzar_acta_individual(jurado_id: str,
+                                  user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    db = get_db()
+    jur = await db.jurados.find_one({"id": jurado_id})
+    if not jur:
+        raise HTTPException(404, "Jurado no encontrado")
+    datos = jur.get("datos") or {}
+    datos["acta_individual_forzada"] = True
+    datos["acta_individual_forzada_at"] = now_iso()
+    datos["acta_individual_forzada_by"] = user["username"]
+    await db.jurados.update_one({"id": jurado_id}, {"$set": {"datos": datos}})
+    await audit(user, "update", "jurados", jurado_id, detalle="acta_individual_forzada")
+    return {"ok": True}
+
+
+# ============================================================
+# FIRMA SUBREGIONAL
+# ============================================================
+@router.post("/actas/subregional/firmar")
+async def firmar_subregional(payload: dict = Body(...), user: dict = Depends(get_current_user)):
+    """Un jurado registra su firma en el acta subregional. payload: {convocatoria_id, subregion}"""
+    cid = payload.get("convocatoria_id")
+    sub = payload.get("subregion")
+    if not cid or not sub:
+        raise HTTPException(400, "Faltan convocatoria_id o subregion")
+    if not user.get("jurado_id"):
+        raise HTTPException(403, "Solo jurados pueden firmar")
+    db = get_db()
+    jur = await db.jurados.find_one({"id": user["jurado_id"]})
+    if not jur:
+        raise HTTPException(404, "Jurado no encontrado")
+    if sub not in (jur.get("subregiones") or []):
+        raise HTTPException(403, "No perteneces a esta subregión")
+    firma_url = (jur.get("datos") or {}).get("firma_url")
+    if not firma_url:
+        raise HTTPException(400, "Carga primero tu firma en Mi Perfil")
+    existing = await db.actas_subregionales.find_one({"convocatoria_id": cid, "subregion": sub})
+    firmas = (existing or {}).get("firmas") or {}
+    firmas[jur["id"]] = {"fecha": now_iso(), "firma_url": firma_url, "nombre": jur["nombre"]}
+    if existing:
+        await db.actas_subregionales.update_one(
+            {"convocatoria_id": cid, "subregion": sub},
+            {"$set": {"firmas": firmas, "updated_at": now_iso()}}
+        )
+    else:
+        await db.actas_subregionales.insert_one({
+            "id": f"actasub-{cid[:6]}-{sub.lower().replace(' ','')[:10]}",
+            "convocatoria_id": cid, "subregion": sub, "firmas": firmas,
+            "created_at": now_iso(),
+        })
+    return {"ok": True, "firmas_totales": len(firmas)}
+
+
+@router.post("/actas/colectiva-terna/{terna_id}/firmar")
+async def firmar_colectiva_terna(terna_id: str, user: dict = Depends(get_current_user)):
+    """Un integrante de la terna firma el acta colectiva por terna."""
+    db = get_db()
+    if not user.get("jurado_id"):
+        raise HTTPException(403, "Solo jurados pueden firmar")
+    terna = await db.ternas.find_one({"id": terna_id})
+    if not terna:
+        raise HTTPException(404, "Terna no encontrada")
+    integrantes = terna.get("integrantes") or []
+    if not any(i.get("jurado_id") == user["jurado_id"] for i in integrantes):
+        raise HTTPException(403, "No perteneces a esta terna")
+    jur = await db.jurados.find_one({"id": user["jurado_id"]})
+    firma_url = (jur.get("datos") or {}).get("firma_url")
+    if not firma_url:
+        raise HTTPException(400, "Carga primero tu firma en Mi Perfil")
+    datos = terna.get("datos") or {}
+    firmas = datos.get("firmas_acta_colectiva") or {}
+    firmas[user["jurado_id"]] = {"fecha": now_iso(), "firma_url": firma_url, "nombre": jur["nombre"]}
+    datos["firmas_acta_colectiva"] = firmas
+    await db.ternas.update_one({"id": terna_id}, {"$set": {"datos": datos}})
+    return {"ok": True, "firmas_totales": len(firmas)}
+
+
+# ============================================================
+# RENDERIZADO PDF — utilidades
+# ============================================================
+def _base_styles():
+    styles = getSampleStyleSheet()
+    return {
+        "title": ParagraphStyle("title", parent=styles["Heading1"], fontSize=13, alignment=TA_CENTER,
+                                spaceAfter=10, textColor=rl_colors.HexColor("#0F5E54"), fontName="Helvetica-Bold"),
+        "h2": ParagraphStyle("h2", parent=styles["Heading2"], fontSize=10.5, alignment=TA_LEFT,
+                             spaceAfter=6, spaceBefore=8, textColor=rl_colors.HexColor("#1A1F2C"), fontName="Helvetica-Bold"),
+        "body": ParagraphStyle("body", parent=styles["BodyText"], fontSize=9.5, leading=13.5,
+                               alignment=TA_JUSTIFY, textColor=rl_colors.HexColor("#1A1F2C")),
+        "small": ParagraphStyle("small", parent=styles["BodyText"], fontSize=8.5, leading=11,
+                                alignment=TA_LEFT, textColor=rl_colors.HexColor("#5E6878")),
+        "meta": ParagraphStyle("meta", parent=styles["BodyText"], fontSize=9, alignment=TA_LEFT,
+                               textColor=rl_colors.HexColor("#3F4856")),
+        "fecha": ParagraphStyle("fecha", parent=styles["BodyText"], fontSize=10, alignment=TA_LEFT,
+                                spaceAfter=10, textColor=rl_colors.HexColor("#1A1F2C"), fontName="Helvetica-Bold"),
+    }
+
+
+def _header_block(elements, ctx, conv, tmpl, st):
+    elements.append(Paragraph(f"FECHA: {ctx['fecha']}", st["fecha"]))
+    encabezado = _render_text(tmpl.get("encabezado", ""), ctx)
+    for line in encabezado.split("\n"):
+        elements.append(Paragraph(line.strip().replace("&", "&amp;"), st["title"]))
+    elements.append(Spacer(1, 8))
+
+
+def _decoded_image(data_url: str, width=4*cm, height=1.6*cm) -> Optional[Image]:
+    try:
+        if not data_url or not data_url.startswith("data:"):
+            return None
+        b64 = data_url.split(",", 1)[1]
+        raw = base64.b64decode(b64)
+        bio = io.BytesIO(raw)
+        img = Image(bio, width=width, height=height, kind="proportional")
+        return img
+    except Exception:
+        return None
+
+
+def _firmantes_table(firmantes: list, st) -> Table:
+    """firmantes: [{nombre, documento, rol, firma_url, terna, subregion}]"""
+    rows = []
+    for f in firmantes:
+        img = _decoded_image(f.get("firma_url"), width=4.5*cm, height=1.7*cm)
+        firma_cell = img if img else Paragraph("<i>Pendiente de firmar</i>", st["small"])
+        info_lines = [
+            Paragraph(f"<b>{f.get('nombre','—')}</b>", st["body"]),
+            Paragraph(f"C.C. {f.get('documento','___________')}", st["small"]),
+        ]
+        if f.get("rol"):
+            info_lines.append(Paragraph(f.get("rol"), st["small"]))
+        if f.get("terna"):
+            info_lines.append(Paragraph(f"Terna: {f['terna']}", st["small"]))
+        if f.get("subregion"):
+            info_lines.append(Paragraph(f"Subregión: {f['subregion']}", st["small"]))
+        rows.append([firma_cell, info_lines])
+    tbl = Table(rows, colWidths=[5.5*cm, 10*cm])
+    tbl.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LINEBELOW", (0, 0), (0, -1), 0.4, rl_colors.HexColor("#5E6878")),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+    ]))
+    return tbl
+
+
+def _build_pdf(tmpl: dict, ctx: dict, conv: dict, tabla_headers: list,
+                tabla_rows: list, firmantes: list) -> bytes:
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm,
+                             topMargin=1.6*cm, bottomMargin=1.6*cm)
+    st = _base_styles()
+    el = []
+    _header_block(el, ctx, conv, tmpl, st)
+
+    # Datos del jurado/subregion (si aplica)
+    if ctx.get("jurado_nombre"):
+        el.append(Paragraph(f"<b>NOMBRE DEL JURADO:</b> {ctx['jurado_nombre']}", st["meta"]))
+        if ctx.get("subregion"):
+            el.append(Paragraph(f"<b>SUBREGIÓN ASIGNADA:</b> {ctx['subregion']}", st["meta"]))
+        el.append(Spacer(1, 8))
+    elif ctx.get("subregion") and not ctx.get("terna_codigo"):
+        el.append(Paragraph(f"<b>SUBREGIÓN:</b> {ctx['subregion']}", st["meta"]))
+        el.append(Spacer(1, 8))
+    if ctx.get("terna_codigo"):
+        el.append(Paragraph(f"<b>TERNA:</b> {ctx['terna_codigo']}{(' · '+ctx['subregion']) if ctx.get('subregion') else ''}", st["meta"]))
+        el.append(Spacer(1, 8))
+
+    el.append(Paragraph("CONSIDERANDO QUE:", st["h2"]))
+    for para in _render_text(tmpl.get("considerandos", ""), ctx).split("\n\n"):
+        if para.strip():
+            el.append(Paragraph(para.strip().replace("&", "&amp;"), st["body"]))
+            el.append(Spacer(1, 4))
+
+    cert_titulo = "COMO TERNA EVALUADORA, CERTIFICAMOS QUE:" if ctx.get("terna_codigo") \
+        else ("COMO EVALUADORES, CERTIFICAMOS QUE:" if not ctx.get("jurado_nombre") and ctx.get("subregion") \
+        else "COMO JURADO EVALUADOR, CERTIFICO QUE:")
+    el.append(Paragraph(cert_titulo, st["h2"]))
+    el.append(Paragraph(_render_text(tmpl.get("certificacion", ""), ctx).replace("&", "&amp;"), st["body"]))
+    el.append(Spacer(1, 10))
+
+    # Tabla
+    el.append(Paragraph(tmpl.get("tabla_titulo", "RESULTADOS"), st["h2"]))
+    if tmpl.get("tabla_subtitulo"):
+        el.append(Paragraph(f"<i>{_render_text(tmpl['tabla_subtitulo'], ctx)}</i>", st["small"]))
+        el.append(Spacer(1, 4))
+    full_rows = [tabla_headers] + tabla_rows
+    n_cols = len(tabla_headers)
+    # Distribución: primera columna (Nº) angosta
+    page_w = 17 * cm
+    if n_cols == 6:
+        col_widths = [1*cm, 2.5*cm, 2.5*cm, 2.5*cm, 6*cm, 2.5*cm]
+    elif n_cols == 5:
+        col_widths = [1*cm, 3*cm, 3*cm, 7*cm, 3*cm]
+    elif n_cols == 7:
+        col_widths = [0.8*cm, 2.3*cm, 2.2*cm, 2.2*cm, 5.3*cm, 2*cm, 2.2*cm]
+    else:
+        col_widths = [page_w / n_cols] * n_cols
+    tbl = Table(full_rows, colWidths=col_widths, repeatRows=1, hAlign="LEFT")
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#0F5E54")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("GRID", (0, 0), (-1, -1), 0.25, rl_colors.HexColor("#CDE7E1")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor("#F7FAF9")]),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+        ("TOPPADDING", (0, 0), (-1, 0), 6),
+    ]))
+    el.append(tbl)
+    el.append(Spacer(1, 12))
+
+    # Texto cierre
+    for para in _render_text(tmpl.get("texto_cierre", ""), ctx).split("\n\n"):
+        if para.strip():
+            el.append(Paragraph(para.strip().replace("&", "&amp;"), st["body"]))
+            el.append(Spacer(1, 4))
+    el.append(Spacer(1, 16))
+
+    # Firmantes
+    el.append(Paragraph(tmpl.get("pie_firmantes_titulo", "FIRMANTES"), st["h2"]))
+    el.append(_firmantes_table(firmantes, st))
+
+    doc.build(el)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+# ============================================================
+# GENERADORES PDF
+# ============================================================
+@router.get("/actas/individual-jurado/{jurado_id}")
+async def acta_individual_jurado(jurado_id: str, user: dict = Depends(get_current_user)):
+    db = get_db()
+    jur = await db.jurados.find_one({"id": jurado_id})
+    if not jur:
+        raise HTTPException(404, "Jurado no encontrado")
+    conv = await db.convocatorias.find_one({"id": jur["convocatoria_id"]})
+    tmpl = await _get_template(db, conv, "individual")
+    ctx = _build_ctx(conv, jurado=jur)
+
+    evs = await db.evaluaciones_individuales.find({
+        "convocatoria_id": jur["convocatoria_id"], "jurado_id": jurado_id, "etapa": {"$ne": "colectiva"}
+    }, {"_id": 0}).sort("fecha_finalizacion", 1).to_list(500)
+    propuestas_ids = list({e["propuesta_id"] for e in evs})
+    propuestas = await db.propuestas.find({"id": {"$in": propuestas_ids}}, {"_id": 0}).to_list(2000)
+    pmap = {p["id"]: p for p in propuestas}
+
+    rows = []
+    for i, e in enumerate(evs, 1):
+        p = pmap.get(e["propuesta_id"], {})
+        obs = (e.get("observacion_final") or "")[:280]
+        rows.append([
+            str(i),
+            p.get("codigo", "—"),
+            (p.get("datos") or {}).get("municipio", p.get("municipio", "—")),
+            (p.get("organizacion") or (p.get("datos") or {}).get("nombre_organizacion") or "—")[:35],
+            str(e.get("puntaje_total", 0)),
+            obs,
+        ])
+    headers = ["Nº", "Número de Propuesta", "Municipio", "Nombre de la Organización", "Puntaje Asignado", "Observación Técnica Principal"]
+    firmantes = [{
+        "nombre": jur.get("nombre"),
+        "documento": (jur.get("datos") or {}).get("cedula", "___________"),
+        "rol": "Jurado Evaluador",
+        "firma_url": (jur.get("datos") or {}).get("firma_url"),
+        "subregion": ", ".join(jur.get("subregiones") or []),
+    }]
+    pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes)
+    await audit(user, "generate_acta", "actas", jurado_id, detalle="individual_jurado")
+    return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
+                             headers={"Content-Disposition": f'inline; filename="acta_individual_{jur["nombre"].replace(" ","_")}.pdf"'})
+
+
+@router.get("/actas/colectiva-terna/{terna_id}")
+async def acta_colectiva_terna(terna_id: str, user: dict = Depends(get_current_user)):
+    db = get_db()
+    terna = await db.ternas.find_one({"id": terna_id})
+    if not terna:
+        raise HTTPException(404, "Terna no encontrada")
+    conv = await db.convocatorias.find_one({"id": terna["convocatoria_id"]})
+    tmpl = await _get_template(db, conv, "colectiva_terna")
+    ctx = _build_ctx(conv, subregion=terna.get("subregion"), terna=terna)
+
+    evs_col = await db.evaluaciones_colectivas.find({
+        "convocatoria_id": terna["convocatoria_id"], "terna_id": terna_id
+    }, {"_id": 0}).sort("fecha_cierre", 1).to_list(500)
+    propuestas_ids = list({e["propuesta_id"] for e in evs_col})
+    propuestas = await db.propuestas.find({"id": {"$in": propuestas_ids}}, {"_id": 0}).to_list(2000)
+    pmap = {p["id"]: p for p in propuestas}
+
+    rows = []
+    for i, e in enumerate(evs_col, 1):
+        p = pmap.get(e["propuesta_id"], {})
+        rows.append([
+            str(i), p.get("codigo", "—"),
+            (p.get("datos") or {}).get("subregion", terna.get("subregion") or "—"),
+            (p.get("datos") or {}).get("municipio", "—"),
+            (p.get("organizacion") or (p.get("datos") or {}).get("nombre_organizacion") or "—")[:35],
+            str(e.get("puntaje_final", 0)),
+        ])
+    headers = ["Nº", "Número de Propuesta", "Subregión", "Municipio", "Nombre de la Organización", "Puntaje Total Definitivo"]
+    firmas = (terna.get("datos") or {}).get("firmas_acta_colectiva") or {}
+    firmantes = []
+    for integ in terna.get("integrantes") or []:
+        jid = integ.get("jurado_id")
+        jur_obj = await db.jurados.find_one({"id": jid}) if jid else None
+        firma_data = firmas.get(jid) or {}
+        firmantes.append({
+            "nombre": (jur_obj or {}).get("nombre") or integ.get("nombre", "—"),
+            "documento": ((jur_obj or {}).get("datos") or {}).get("cedula", "___________"),
+            "rol": integ.get("rol", "Integrante"),
+            "firma_url": firma_data.get("firma_url") or ((jur_obj or {}).get("datos") or {}).get("firma_url") if firma_data else None,
+            "terna": terna.get("codigo"),
+        })
+    pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes)
+    await audit(user, "generate_acta", "actas", terna_id, detalle="colectiva_terna")
+    return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
+                             headers={"Content-Disposition": f'inline; filename="acta_colectiva_terna_{terna["codigo"]}.pdf"'})
+
+
+@router.get("/actas/subregional")
+async def acta_subregional(convocatoria_id: str, subregion: str,
+                            user: dict = Depends(get_current_user)):
+    db = get_db()
+    conv = await db.convocatorias.find_one({"id": convocatoria_id})
+    if not conv:
+        raise HTTPException(404, "Convocatoria no encontrada")
+    tmpl = await _get_template(db, conv, "subregional")
+    ctx = _build_ctx(conv, subregion=subregion)
+
+    propuestas_sub = await db.propuestas.find({
+        "convocatoria_id": convocatoria_id,
+        "$or": [{"subregion": subregion}, {"datos.subregion": subregion}]
+    }, {"_id": 0}).to_list(2000)
+    propuestas_ids = [p["id"] for p in propuestas_sub]
+    if not propuestas_ids:
+        raise HTTPException(400, f"No hay propuestas en la subregión {subregion}")
+    evs_col = await db.evaluaciones_colectivas.find({
+        "convocatoria_id": convocatoria_id, "propuesta_id": {"$in": propuestas_ids}
+    }, {"_id": 0}).to_list(2000)
+    em = {e["propuesta_id"]: e for e in evs_col}
+
+    rows = []
+    for i, p in enumerate(propuestas_sub, 1):
+        e = em.get(p["id"], {})
+        rows.append([
+            str(i), p.get("codigo", "—"), subregion,
+            (p.get("datos") or {}).get("municipio", "—"),
+            (p.get("organizacion") or (p.get("datos") or {}).get("nombre_organizacion") or "—")[:35],
+            str(e.get("puntaje_final", "—")),
+        ])
+    headers = ["Nº", "Número de Propuesta", "Subregión", "Municipio", "Nombre de la Organización", "Puntaje Total Definitivo"]
+
+    # Firmantes: todos los jurados de la subregión
+    jurados_sub = await db.jurados.find({
+        "convocatoria_id": convocatoria_id, "subregiones": subregion
+    }, {"_id": 0}).to_list(500)
+    acta_doc = await db.actas_subregionales.find_one({"convocatoria_id": convocatoria_id, "subregion": subregion}, {"_id": 0})
+    firmas_reg = (acta_doc or {}).get("firmas") or {}
+    firmantes = []
+    for j in jurados_sub:
+        fd = firmas_reg.get(j["id"]) or {}
+        firmantes.append({
+            "nombre": j.get("nombre"),
+            "documento": (j.get("datos") or {}).get("cedula", "___________"),
+            "rol": "Jurado evaluador",
+            "firma_url": fd.get("firma_url"),
+            "terna": "",
+        })
+    pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes)
+    await audit(user, "generate_acta", "actas", f"sub-{subregion}", detalle=f"subregional:{subregion}")
+    return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
+                             headers={"Content-Disposition": f'inline; filename="acta_subregional_{subregion.replace(" ","_")}.pdf"'})

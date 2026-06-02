@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import SignaturePad from "@/components/SignaturePad";
 import { toast } from "sonner";
-import { Sparkles, Loader2, UserCog, Upload, Image as ImageIcon, FileText, ExternalLink, Trash2 } from "lucide-react";
+import { Sparkles, Loader2, UserCog, Upload, Image as ImageIcon, FileText, ExternalLink, Trash2, PenLine, IdCard } from "lucide-react";
 
 /**
  * MiPerfil: vista para el rol Jurado.
@@ -120,10 +121,36 @@ export default function MiPerfil() {
         <div className="lg:col-span-2 space-y-4">
           <div className="rounded-xl border border-border bg-white p-5">
             <h3 className="font-display font-bold text-[15px] mb-3">Datos de contacto</h3>
-            <div>
-              <Label className="text-xs">Teléfono</Label>
-              <Input value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} className="rounded-lg" data-testid="mi-perfil-telefono" />
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Teléfono</Label>
+                <Input value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} className="rounded-lg" data-testid="mi-perfil-telefono" />
+              </div>
+              <div>
+                <Label className="text-xs flex items-center gap-1.5"><IdCard className="w-3 h-3" />Documento de identidad (C.C.)</Label>
+                <Input
+                  value={form.datos?.cedula || ""}
+                  onChange={(e) => setForm({ ...form, datos: { ...(form.datos || {}), cedula: e.target.value } })}
+                  className="rounded-lg font-mono"
+                  placeholder="Sin puntos ni espacios"
+                  data-testid="mi-perfil-cedula"
+                />
+              </div>
             </div>
+          </div>
+
+          <div className="rounded-xl border border-border bg-white p-5">
+            <h3 className="font-display font-bold text-[15px] mb-1 flex items-center gap-2">
+              <PenLine className="w-4 h-4 text-[#14776A]" />Firma para actas
+            </h3>
+            <p className="text-[11.5px] text-muted-foreground mb-3">
+              Esta firma se imprimirá automáticamente en tus actas (individual, colectiva, subregional). Dibújala con el dedo o ratón, o sube una imagen PNG/JPG transparente.
+            </p>
+            <SignaturePad
+              value={form.datos?.firma_url || null}
+              onChange={(v) => setForm({ ...form, datos: { ...(form.datos || {}), firma_url: v } })}
+              testIdPrefix="mi-perfil-firma"
+            />
           </div>
 
           <div className="rounded-xl border border-border bg-white p-5">

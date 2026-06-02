@@ -144,6 +144,33 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - ✅ **Indicador visual de empate**: filas con mismo `puntaje_total` resaltadas en amarillo claro.
 - ✅ Default `modo=colectivo` + `agrupar_por=subregion` (alineado con la spec: ranking por subregión sobre evaluación colectiva).
 
+### Sistema de Actas configurables — 3 tipos + firmas (Feb 2026 v11)
+**Fase A — Infraestructura de firmas**
+- ✅ Nuevo componente `SignaturePad` (canvas táctil/mouse + subida de imagen PNG/JPG vía `/api/upload/image`).
+- ✅ `MiPerfil` ahora incluye **campo Documento (C.C.)** y sección **"Firma para actas"** con canvas + upload.
+- ✅ `JuradoDetalle` (drawer admin) muestra firma registrada y permite al admin **capturarla en nombre del jurado**.
+- ✅ Datos almacenados en `jurados.datos.firma_url` (data URL base64) y `jurados.datos.cedula`.
+
+**Fase B — Plantillas de Actas configurables**
+- ✅ Nueva tab "Plantillas de Actas" en `/configuracion` con sidebar de 3 tipos (Individual / Colectiva-Terna / Subregional).
+- ✅ 7 campos editables por plantilla: encabezado, considerandos, certificación, tabla_titulo, tabla_subtitulo, texto_cierre, pie_firmantes_titulo.
+- ✅ **11 etiquetas dinámicas** (merge tags) con copiado al portapapeles: `{{convocatoria_nombre}}`, `{{convocatoria_codigo}}`, `{{convocatoria_vigencia}}`, `{{fecha}}`, `{{fecha_dia}}`, `{{fecha_mes}}`, `{{fecha_anio}}`, `{{jurado_nombre}}`, `{{jurado_documento}}`, `{{subregion}}`, `{{terna_codigo}}`.
+- ✅ **Toggle** `uso_acta_subregional` (por convocatoria) — habilitado por default en INC2026.
+- ✅ Seed con **texto literal** de los 3 .docx de Iniciativas 2026 cuando `codigo=INC2026`; placeholder genérico para otras convocatorias.
+
+**Fase C — Generación PDF + Workflow de firma**
+- ✅ `GET /api/actas/individual-jurado/{jurado_id}` → PDF con encabezado · NOMBRE/SUBREGIÓN · CONSIDERANDO QUE · CERTIFICO QUE · tabla (Nº/Propuesta/Municipio/Org/Puntaje/Observación) · cierre · firma del jurado embebida.
+- ✅ `GET /api/actas/colectiva-terna/{terna_id}` → PDF de los 3 integrantes con firmas embebidas.
+- ✅ `GET /api/actas/subregional?convocatoria_id=...&subregion=...` → PDF firmable por todos los jurados de la subregión.
+- ✅ `POST /api/actas/individual-jurado/{jid}/forzar` → admin marca el acta como emitible aun sin todas las evaluaciones finalizadas.
+- ✅ `POST /api/actas/colectiva-terna/{tid}/firmar` y `POST /api/actas/subregional/firmar` → cada jurado registra su firma (requiere firma cargada en Mi Perfil).
+- ✅ Endpoint de estado `GET /api/actas-pendientes` devuelve estado de los 3 tipos: Pendiente / Requiere firma / Falta firmar / Emitible.
+
+**Fase D — UI rediseñada `/actas`**
+- ✅ 3 tabs: Individuales (9) · Colectivas (Terna) (1) · Subregionales (6 INC2026) — la última se oculta si `uso_acta_subregional=false`.
+- ✅ Banner explicativo por tab + tabla con avance (barra de progreso), documento del jurado, estado de firma, badges de estado y acciones contextuales (Forzar / Firmar / Descargar PDF).
+- ✅ Dialog de confirmación al forzar acta individual.
+
 ## Backlog / próximas tareas
 
 ### P0 (cierre de funcionalidad clave)

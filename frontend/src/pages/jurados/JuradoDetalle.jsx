@@ -1,17 +1,37 @@
-import React from "react";
+import React, { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/PageHeader";
-import { UserCog, Mail, Phone, MapPin, FileText, ExternalLink, Pencil } from "lucide-react";
+import { UserCog, Mail, Phone, MapPin, FileText, ExternalLink, Pencil, IdCard, PenLine } from "lucide-react";
+import { api, formatApiError } from "@/lib/api";
+import { toast } from "sonner";
+import SignaturePad from "@/components/SignaturePad";
 
 /**
  * Vista de detalle del jurado (solo lectura, accesible para cualquier rol autenticado).
  * Muestra foto, datos completos, perfil, hoja de vida descargable y campos extra dinámicos.
  */
-export default function JuradoDetalle({ open, onOpenChange, jurado, campos, onEdit, canEdit }) {
+export default function JuradoDetalle({ open, onOpenChange, jurado, campos, onEdit, canEdit, onUpdate }) {
+  const [editingFirma, setEditingFirma] = useState(false);
+  const [savingFirma, setSavingFirma] = useState(false);
   if (!jurado) return null;
   const BASE_KEYS = new Set(["nombre", "email", "telefono", "perfil", "subregiones"]);
   const extras = campos.filter((c) => !BASE_KEYS.has(c.nombre_interno));
+  const cedula = jurado.datos?.cedula;
+  const firma = jurado.datos?.firma_url;
+
+  const saveAdminFirma = async (dataUrl) => {
+    setSavingFirma(true);
+    try {
+      const newDatos = { ...(jurado.datos || {}), firma_url: dataUrl };
+      await api.patch(`/jurados/${jurado.id}`, { datos: newDatos });
+      toast.success(dataUrl ? "Firma cargada" : "Firma eliminada");
+      onUpdate && onUpdate({ ...jurado, datos: newDatos });
+      setEditingFirma(false);
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail) || "Error al guardar firma");
+    } finally { setSavingFirma(false); }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -40,7 +60,40 @@ export default function JuradoDetalle({ open, onOpenChange, jurado, campos, onEd
             <div className="grid sm:grid-cols-2 gap-3">
               <InfoRow icon={Mail} label="Email">{jurado.email}</InfoRow>
               <InfoRow icon={Phone} label="Teléfono">{jurado.telefono || <em className="text-muted-foreground">No registrado</em>}</InfoRow>
+              <InfoRow icon={IdCard} label="Documento (C.C.)"><span className="font-mono">{cedula || <em className="text-muted-foreground">No registrado</em>}</span></InfoRow>
             </div>
+          </section>
+
+          {/* Firma */}
+          <section>
+            <h3 className="text-[11px] uppercase tracking-[0.14em] font-display font-bold text-[#14776A] mb-2 flex items-center gap-1.5">
+              <PenLine className="w-3.5 h-3.5" />Firma registrada
+            </h3>
+            {editingFirma && canEdit ? (
+              <SignaturePad
+                value={firma || null}
+                onChange={saveAdminFirma}
+                testIdPrefix="jur-detail-firma"
+              />
+            ) : (
+              <div className="flex items-center gap-3 flex-wrap">
+                {firma ? (
+                  <div className="border border-border rounded-lg p-2 bg-white">
+                    <img src={firma} alt="Firma" className="h-20 max-w-[260px] object-contain" data-testid="jur-detail-firma-img" />
+                  </div>
+                ) : (
+                  <div className="text-[12.5px] italic text-muted-foreground border border-dashed border-border rounded-lg px-4 py-3">
+                    Sin firma registrada. El jurado puede cargarla desde <span className="font-semibold">Mi Perfil</span>.
+                  </div>
+                )}
+                {canEdit && (
+                  <Button size="sm" variant="outline" onClick={() => setEditingFirma(true)} disabled={savingFirma}
+                          className="gap-1.5 rounded-sm" data-testid="jur-detail-firma-edit-btn">
+                    <PenLine className="w-3.5 h-3.5" /> {firma ? "Reemplazar firma" : "Capturar firma"}
+                  </Button>
+                )}
+              </div>
+            )}
           </section>
 
           {/* Subregiones */}

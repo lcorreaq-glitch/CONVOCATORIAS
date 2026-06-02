@@ -1,0 +1,36 @@
+{
+  "summary": "Tested KRINOS Actas module (Phase A+B+C+D): backend endpoints (templates, listing, forzar, PDFs, firma workflow) and frontend pages (Plantillas de Actas tab, Actas tab, MiPerfil firma section, JuradoDetalle drawer). All 8 backend pytest cases pass. Frontend renders the expected structure on all 4 surfaces verified via Playwright. Two minor frontend deviations found vs spec (testid visibility on canvas when firma exists, and button labels differ).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "MiPerfil / SignaturePad", "issue": "data-testid='mi-perfil-firma-canvas' is not present in the DOM when the jurado already has a stored firma_url (the canvas is replaced by the preview image). The spec required the canvas to be present. Tests/automation that always look for the canvas testid will fail when a signature exists. Suggestion: render the canvas inside a hidden container or always expose the testid (e.g., on the wrapper)", "selector": "[data-testid='mi-perfil-firma-canvas']", "priority": "LOW"},
+      {"component": "MiPerfil / SignaturePad", "issue": "Spec expected buttons 'Borrar / Subir imagen / Guardar firma'. Actual buttons are 'Volver a dibujar / Subir imagen / Eliminar' and saving is delegated to the global 'Guardar cambios' button at the bottom of the page. Functional but label/divergence from spec.", "selector": "button (Borrar / Guardar firma not found)", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Configuracion → Plantillas de Actas", "issues": ["React hydration warning in console: '<button> cannot be a descendant of <button>'. The tipo card (button) contains a switch which is also rendered as a <button>. Cosmetic, but should be refactored (e.g., make the card a div with role='button' or move the switch outside the card)."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_actas.py", "/app/test_reports/pytest/test_actas.xml"],
+  "action_items": [
+    "(Optional) Always expose mi-perfil-firma-canvas testid (or use it on the SignaturePad wrapper) so automated tests work whether or not a firma already exists.",
+    "(Optional) Reconcile MiPerfil firma buttons with spec wording ('Borrar' / 'Guardar firma') or update the spec.",
+    "(Optional) Fix nested-button hydration warning in PlantillasActasPanel (tipo card contains a Switch)."
+  ],
+  "critical_code_review_comments": [
+    "routes_actas.py is ~800 lines and includes endpoint handlers, PDF rendering helpers, default templates, signature merging, etc. Recommend splitting into routes_actas.py + actas_pdf.py + actas_templates.py for maintainability (>700 line guideline).",
+    "Default acta templates are duplicated in code as long string literals; consider moving to a JSON/YAML resource for easier editing by non-devs.",
+    "auth/me does not return jurado_id; testers and other consumers must call /api/jurados/me. Consider including jurado_id in /api/auth/me payload for consistency."
+  ],
+  "updated_files": ["/app/backend/tests/test_actas.py"],
+  "success_rate": {"backend": "100%", "frontend": "95%"},
+  "test_credentials": "Admin lcorreaq/Chocolate2026!; Jurado yicell.gonzalez@fodc.org.co/Jurado2026!",
+  "seed_data_creation": "Test set firma_url for jurado yicell via PATCH /api/jurados/me (tiny 1x1 PNG). Existing signature remains in DB.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend test_actas.py covers templates GET/PATCH, uso-subregional toggle, actas-pendientes shape, forzar + PDF (individual / colectiva / subregional), and signing workflow (colectiva + subregional). Jurado yicell belongs to subregions Bajo Cauca/Nordeste/Occidente, NOT Urabá (T1 Urabá terna therefore excluded for colectiva path - test signs colectiva only if jurado is integrante). Subregional signing was exercised successfully. All PDFs return application/pdf with %PDF magic bytes. Plantilla 'individual' tabla_titulo is restored to 'PUNTAJES ASIGNADOS EN EL APLICATIVO' after the persistence test. Uso_acta_subregional left enabled (true) as required.",
+  "rca of the issue": "n/a - all features working. Frontend deviations are minor labels/testid placement only."
+}

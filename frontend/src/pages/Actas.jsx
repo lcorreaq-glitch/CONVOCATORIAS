@@ -1,93 +1,301 @@
 import React, { useEffect, useState } from "react";
-import { api, API_BASE, openPdf } from "@/lib/api";
+import { api, formatApiError, openPdf } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader, { Badge } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
-import { FileText, Download } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { toast } from "sonner";
+import { FileText, Download, Zap, PenLine, Map, Users, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
+
+const ESTADO_TONE = {
+  "Emitible": "success",
+  "Pendiente": "muted",
+  "Requiere firma": "warning",
+  "Falta firma terna": "warning",
+  "Falta firmar": "warning",
+};
 
 export default function Actas() {
-  const { activeConvocatoriaId } = useAuth();
-  const [evals, setEvals] = useState([]);
-  const [colectivas, setColectivas] = useState([]);
-  const [propuestas, setPropuestas] = useState([]);
+  const { activeConvocatoriaId, user } = useAuth();
+  const [data, setData] = useState(null);
+  const [tab, setTab] = useState("individual");
+  const [busy, setBusy] = useState(false);
+  const [confirmForzar, setConfirmForzar] = useState(null);
 
-  useEffect(() => {
+  const isAdmin = ["admin_general", "admin_convocatoria"].includes(user?.role);
+  const isJurado = user?.role === "jurado";
+
+  const load = async () => {
     if (!activeConvocatoriaId) return;
-    api.get(`/evaluaciones-individuales?convocatoria_id=${activeConvocatoriaId}`).then((r) => setEvals(r.data));
-    api.get(`/evaluaciones-colectivas?convocatoria_id=${activeConvocatoriaId}`).then((r) => setColectivas(r.data));
-    api.get(`/propuestas?convocatoria_id=${activeConvocatoriaId}`).then((r) => setPropuestas(r.data));
-  }, [activeConvocatoriaId]);
+    try {
+      const r = await api.get(`/actas-pendientes?convocatoria_id=${activeConvocatoriaId}`);
+      setData(r.data);
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail) || "Error al cargar actas");
+    }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [activeConvocatoriaId]);
 
-  const propMap = Object.fromEntries(propuestas.map((p) => [p.id, p]));
+  const forzarIndividual = async (jurId) => {
+    setBusy(true);
+    try {
+      await api.post(`/actas/individual-jurado/${jurId}/forzar`);
+      toast.success("Acta individual activada");
+      await load();
+      setConfirmForzar(null);
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail) || "Error");
+    } finally { setBusy(false); }
+  };
+
+  const firmarColectiva = async (ternaId) => {
+    setBusy(true);
+    try {
+      await api.post(`/actas/colectiva-terna/${ternaId}/firmar`);
+      toast.success("Firma registrada");
+      await load();
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail) || "Error");
+    } finally { setBusy(false); }
+  };
+
+  const firmarSubregional = async (sub) => {
+    setBusy(true);
+    try {
+      await api.post(`/actas/subregional/firmar`, { convocatoria_id: activeConvocatoriaId, subregion: sub });
+      toast.success(`Firma registrada en ${sub}`);
+      await load();
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail) || "Error");
+    } finally { setBusy(false); }
+  };
 
   if (!activeConvocatoriaId) return <div className="p-10 text-muted-foreground">Selecciona una convocatoria.</div>;
-
-  const finalizadas = evals.filter((e) => ["Finalizada", "Firmada"].includes(e.estado));
-  const colCerradas = colectivas.filter((e) => ["Cerrada", "Firmada"].includes(e.estado));
+  if (!data) return <div className="p-10 text-muted-foreground">Cargando actas…</div>;
 
   return (
     <div className="flex-1 p-8 lg:p-10">
       <PageHeader
         eyebrow="Documentos oficiales"
         title="Actas"
-        subtitle="Genera actas oficiales en PDF a partir de evaluaciones finalizadas, evaluaciones colectivas cerradas o rankings producidos."
+        subtitle="Genera y firma las actas oficiales del proceso. El texto institucional se personaliza desde Configuración → Plantillas de Actas."
       />
 
-      <div className="grid lg:grid-cols-2 gap-6">
-        <section>
-          <h3 className="font-display font-bold text-lg mb-3">Actas individuales · disponibles ({finalizadas.length})</h3>
-          <div className="border border-border rounded-sm bg-white overflow-hidden">
-            <table className="w-full dense-table">
-              <thead><tr><th>Propuesta</th><th>Estado</th><th>Puntaje</th><th></th></tr></thead>
-              <tbody>
-                {finalizadas.map((e) => {
-                  const p = propMap[e.propuesta_id];
-                  return (
-                    <tr key={e.id}>
-                      <td><div className="font-mono text-xs text-muted-foreground">{p?.codigo}</div><div className="font-semibold">{p?.nombre}</div></td>
-                      <td><Badge tone="success">{e.estado}</Badge></td>
-                      <td className="font-mono tabular-nums">{e.puntaje_total}</td>
-                      <td className="text-right">
-                        <Button size="sm" variant="outline" className="rounded-sm gap-1.5" onClick={() => openPdf(`/actas/individual/${e.id}`)} data-testid={`acta-ind-${e.id}`}>
-                          <Download className="w-3.5 h-3.5" />PDF
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {!finalizadas.length && <tr><td colSpan={4} className="text-center text-sm text-muted-foreground py-6">No hay evaluaciones individuales finalizadas.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </section>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="rounded-sm bg-secondary p-1">
+          <TabsTrigger value="individual" className="rounded-sm gap-2" data-testid="actas-tab-individual">
+            <FileText className="w-3.5 h-3.5" /> Individuales <span className="font-mono text-[10.5px] opacity-70">({data.individual.length})</span>
+          </TabsTrigger>
+          <TabsTrigger value="colectiva" className="rounded-sm gap-2" data-testid="actas-tab-colectiva">
+            <Users className="w-3.5 h-3.5" /> Colectivas (Terna) <span className="font-mono text-[10.5px] opacity-70">({data.colectiva_terna.length})</span>
+          </TabsTrigger>
+          {data.uso_acta_subregional && (
+            <TabsTrigger value="subregional" className="rounded-sm gap-2" data-testid="actas-tab-subregional">
+              <Map className="w-3.5 h-3.5" /> Subregionales <span className="font-mono text-[10.5px] opacity-70">({data.subregional.length})</span>
+            </TabsTrigger>
+          )}
+        </TabsList>
 
-        <section>
-          <h3 className="font-display font-bold text-lg mb-3">Actas colectivas · disponibles ({colCerradas.length})</h3>
+        {/* INDIVIDUAL */}
+        <TabsContent value="individual" className="mt-6">
+          <IntroBanner
+            icon={FileText}
+            text="Una acta por jurado. Se genera cuando completa todas sus evaluaciones individuales (o el admin la fuerza). Requiere que el jurado tenga su firma cargada en Mi Perfil."
+          />
           <div className="border border-border rounded-sm bg-white overflow-hidden">
             <table className="w-full dense-table">
-              <thead><tr><th>Propuesta</th><th>Estado</th><th>Puntaje colectivo</th><th></th></tr></thead>
+              <thead><tr><th>Jurado</th><th>Subregión</th><th>Documento</th><th>Avance</th><th>Firma</th><th>Estado</th><th></th></tr></thead>
               <tbody>
-                {colCerradas.map((e) => {
-                  const p = propMap[e.propuesta_id];
+                {data.individual.map((r) => {
+                  const isMine = user?.jurado_id === r.jurado_id;
+                  const canDownload = r.estado === "Emitible" || (r.estado === "Requiere firma" && isAdmin);
                   return (
-                    <tr key={e.id}>
-                      <td><div className="font-mono text-xs text-muted-foreground">{p?.codigo}</div><div className="font-semibold">{p?.nombre}</div></td>
-                      <td><Badge tone="success">{e.estado}</Badge></td>
-                      <td className="font-mono tabular-nums">{e.puntaje_final}</td>
-                      <td className="text-right">
-                        <Button size="sm" variant="outline" className="rounded-sm gap-1.5" onClick={() => openPdf(`/actas/colectiva/${e.id}`)} data-testid={`acta-col-${e.id}`}>
-                          <Download className="w-3.5 h-3.5" />PDF
-                        </Button>
+                    <tr key={r.jurado_id}>
+                      <td>
+                        <div className="font-semibold">{r.jurado_nombre}</div>
+                        <div className="text-[11px] text-muted-foreground">{r.jurado_email}</div>
+                      </td>
+                      <td className="text-xs">{(r.subregiones || []).join(", ") || "—"}</td>
+                      <td className="font-mono text-xs">{r.documento || "—"}</td>
+                      <td>
+                        <div className="flex items-center gap-2">
+                          <div className="w-20 h-1.5 bg-secondary rounded-full overflow-hidden">
+                            <div className="h-full bg-[#14776A]" style={{ width: `${r.porcentaje}%` }}></div>
+                          </div>
+                          <span className="font-mono text-xs">{r.finalizadas}/{r.total}</span>
+                        </div>
+                      </td>
+                      <td>{r.tiene_firma ? <Badge tone="success">Cargada</Badge> : <Badge tone="warning">Falta</Badge>}</td>
+                      <td>
+                        <Badge tone={ESTADO_TONE[r.estado] || "default"}>{r.estado}</Badge>
+                        {r.forzada && <span className="ml-1 text-[10px] text-amber-700 font-semibold">· forzada</span>}
+                      </td>
+                      <td className="text-right space-x-1.5">
+                        {r.estado === "Pendiente" && isAdmin && (
+                          <Button size="sm" variant="outline" onClick={() => setConfirmForzar(r)} className="gap-1 rounded-sm text-[11px] h-7" data-testid={`actas-ind-forzar-${r.jurado_id}`}>
+                            <Zap className="w-3 h-3" /> Forzar
+                          </Button>
+                        )}
+                        {canDownload && (
+                          <Button size="sm" variant="outline" onClick={() => openPdf(`/actas/individual-jurado/${r.jurado_id}`)} className="gap-1 rounded-sm text-[11px] h-7" data-testid={`actas-ind-pdf-${r.jurado_id}`}>
+                            <Download className="w-3 h-3" /> PDF
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   );
                 })}
-                {!colCerradas.length && <tr><td colSpan={4} className="text-center text-sm text-muted-foreground py-6">No hay evaluaciones colectivas cerradas.</td></tr>}
+                {!data.individual.length && (
+                  <tr><td colSpan={7} className="text-center py-8 text-muted-foreground text-sm">Sin actas individuales pendientes.</td></tr>
+                )}
               </tbody>
             </table>
           </div>
-        </section>
-      </div>
+        </TabsContent>
+
+        {/* COLECTIVA TERNA */}
+        <TabsContent value="colectiva" className="mt-6">
+          <IntroBanner
+            icon={Users}
+            text="Una acta por terna. Se genera al cerrar todas las evaluaciones colectivas de la terna. Cada integrante debe firmar antes de descargar el PDF final."
+          />
+          <div className="border border-border rounded-sm bg-white overflow-hidden">
+            <table className="w-full dense-table">
+              <thead><tr><th>Terna</th><th>Subregión</th><th>Integrantes</th><th>Avance</th><th>Firmas</th><th>Estado</th><th></th></tr></thead>
+              <tbody>
+                {data.colectiva_terna.map((r) => {
+                  const canDownload = r.estado === "Emitible";
+                  return (
+                    <tr key={r.terna_id}>
+                      <td>
+                        <div className="font-mono text-xs text-muted-foreground">{r.terna_codigo}</div>
+                        <div className="font-semibold">{r.terna_nombre || "—"}</div>
+                      </td>
+                      <td className="text-xs">{r.subregion || "—"}</td>
+                      <td className="text-xs">{r.integrantes}</td>
+                      <td>
+                        <div className="flex items-center gap-2">
+                          <div className="w-20 h-1.5 bg-secondary rounded-full overflow-hidden">
+                            <div className="h-full bg-[#14776A]" style={{ width: `${r.porcentaje}%` }}></div>
+                          </div>
+                          <span className="font-mono text-xs">{r.cerradas}/{r.total}</span>
+                        </div>
+                      </td>
+                      <td className="font-mono text-xs">{r.firmas}/{r.integrantes}</td>
+                      <td><Badge tone={ESTADO_TONE[r.estado] || "default"}>{r.estado}</Badge></td>
+                      <td className="text-right space-x-1.5">
+                        {(r.estado === "Falta firma terna" || r.estado === "Emitible") && isJurado && (
+                          <Button size="sm" variant="outline" onClick={() => firmarColectiva(r.terna_id)} disabled={busy} className="gap-1 rounded-sm text-[11px] h-7" data-testid={`actas-col-firmar-${r.terna_id}`}>
+                            <PenLine className="w-3 h-3" /> Firmar
+                          </Button>
+                        )}
+                        {canDownload && (
+                          <Button size="sm" variant="outline" onClick={() => openPdf(`/actas/colectiva-terna/${r.terna_id}`)} className="gap-1 rounded-sm text-[11px] h-7" data-testid={`actas-col-pdf-${r.terna_id}`}>
+                            <Download className="w-3 h-3" /> PDF
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!data.colectiva_terna.length && (
+                  <tr><td colSpan={7} className="text-center py-8 text-muted-foreground text-sm">Sin actas colectivas por terna.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </TabsContent>
+
+        {/* SUBREGIONAL */}
+        {data.uso_acta_subregional && (
+          <TabsContent value="subregional" className="mt-6">
+            <IntroBanner
+              icon={Map}
+              text="Una acta por subregión. Se genera cuando todas las evaluaciones colectivas de la subregión están cerradas. Todos los jurados que evaluaron iniciativas de la subregión deben firmar."
+            />
+            <div className="border border-border rounded-sm bg-white overflow-hidden">
+              <table className="w-full dense-table">
+                <thead><tr><th>Subregión</th><th>Propuestas</th><th>Avance</th><th>Firmas</th><th>Estado</th><th></th></tr></thead>
+                <tbody>
+                  {data.subregional.map((r) => {
+                    const canDownload = r.estado === "Emitible" || isAdmin;
+                    return (
+                      <tr key={r.subregion}>
+                        <td className="font-semibold">{r.subregion}</td>
+                        <td className="font-mono text-xs">{r.total}</td>
+                        <td>
+                          <div className="flex items-center gap-2">
+                            <div className="w-20 h-1.5 bg-secondary rounded-full overflow-hidden">
+                              <div className="h-full bg-[#14776A]" style={{ width: `${r.porcentaje}%` }}></div>
+                            </div>
+                            <span className="font-mono text-xs">{r.cerradas}/{r.total}</span>
+                          </div>
+                        </td>
+                        <td className="font-mono text-xs">{r.firmas}/{r.jurados}</td>
+                        <td><Badge tone={ESTADO_TONE[r.estado] || "default"}>{r.estado}</Badge></td>
+                        <td className="text-right space-x-1.5">
+                          {(r.estado === "Falta firmar" || r.estado === "Emitible") && isJurado && (
+                            <Button size="sm" variant="outline" onClick={() => firmarSubregional(r.subregion)} disabled={busy} className="gap-1 rounded-sm text-[11px] h-7" data-testid={`actas-sub-firmar-${r.subregion}`}>
+                              <PenLine className="w-3 h-3" /> Firmar
+                            </Button>
+                          )}
+                          {canDownload && (
+                            <Button size="sm" variant="outline" onClick={() => openPdf(`/actas/subregional?convocatoria_id=${activeConvocatoriaId}&subregion=${encodeURIComponent(r.subregion)}`)} className="gap-1 rounded-sm text-[11px] h-7" data-testid={`actas-sub-pdf-${r.subregion}`}>
+                              <Download className="w-3 h-3" /> PDF
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!data.subregional.length && (
+                    <tr><td colSpan={6} className="text-center py-8 text-muted-foreground text-sm">Sin actas subregionales pendientes.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </TabsContent>
+        )}
+      </Tabs>
+
+      {/* Dialog confirmación forzar */}
+      <Dialog open={!!confirmForzar} onOpenChange={(o) => !o && setConfirmForzar(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-amber-600" />
+              Forzar activación de acta
+            </DialogTitle>
+          </DialogHeader>
+          {confirmForzar && (
+            <div className="space-y-3">
+              <p className="text-[13px]">
+                El jurado <strong>{confirmForzar.jurado_nombre}</strong> tiene <strong>{confirmForzar.finalizadas} de {confirmForzar.total}</strong> evaluaciones finalizadas.
+              </p>
+              <div className="bg-amber-50 border border-amber-200 rounded-sm p-3 text-[12px] text-amber-900">
+                <strong>¿Estás seguro?</strong> Al forzar la activación, el sistema marca el acta como emitible aunque no todas las evaluaciones estén finalizadas. El jurado aún necesita su firma cargada.
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={() => setConfirmForzar(null)} className="rounded-sm">Cancelar</Button>
+                <Button onClick={() => forzarIndividual(confirmForzar.jurado_id)} disabled={busy} className="bg-amber-600 hover:bg-amber-700 rounded-sm gap-2" data-testid="actas-ind-forzar-confirm">
+                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                  Sí, forzar
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function IntroBanner({ icon: Icon, text }) {
+  return (
+    <div className="mb-4 rounded-lg border border-[#CDE7E1] bg-gradient-to-br from-[#F0F7F5] to-white p-3 flex items-start gap-2.5">
+      <Icon className="w-4 h-4 text-[#0F5E54] mt-0.5 shrink-0" />
+      <p className="text-[12.5px] text-[#1A1F2C] leading-relaxed">{text}</p>
     </div>
   );
 }

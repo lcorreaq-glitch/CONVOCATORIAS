@@ -11,6 +11,7 @@ import CamposPanel from "./configuracion/CamposPanel";
 import CatalogosPanel from "./configuracion/CatalogosPanel";
 import CriteriosPanel from "./configuracion/CriteriosPanel";
 import DesempatesPanel from "./configuracion/DesempatesPanel";
+import PlantillasActasPanel from "./configuracion/PlantillasActasPanel";
 import AccionesGlobales from "./configuracion/AccionesGlobales";
 
 export default function Configuracion() {
@@ -102,6 +103,7 @@ export default function Configuracion() {
           <TabsTrigger value="catalogos" className="rounded-sm" data-testid="tab-catalogos">Catálogos ({catalogos.length})</TabsTrigger>
           <TabsTrigger value="criterios" className="rounded-sm" data-testid="tab-criterios">Criterios ({criterios.length})</TabsTrigger>
           <TabsTrigger value="desempates" className="rounded-sm" data-testid="tab-desempates">Desempates ({desempates.length})</TabsTrigger>
+          <TabsTrigger value="plantillas" className="rounded-sm" data-testid="tab-plantillas">Plantillas de Actas</TabsTrigger>
         </TabsList>
 
         <TabsContent value="resumen" className="mt-6">
@@ -139,6 +141,9 @@ export default function Configuracion() {
         </TabsContent>
         <TabsContent value="desempates" className="mt-6">
           <DesempatesPanel desempates={desempates} convId={activeConvocatoriaId} reload={reload} criterios={criterios} campos={campos} />
+        </TabsContent>
+        <TabsContent value="plantillas" className="mt-6">
+          <PlantillasActasPanel convId={activeConvocatoriaId} />
         </TabsContent>
       </Tabs>
     </div>
