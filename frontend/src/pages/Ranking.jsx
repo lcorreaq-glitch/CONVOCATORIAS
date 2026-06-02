@@ -58,7 +58,7 @@ export default function Ranking() {
                 <SelectItem value="__general__">General</SelectItem>
               </SelectContent>
             </Select>
-            <Button onClick={generar} className="bg-[#059669] hover:bg-[#047857] rounded-sm gap-2" data-testid={TID.generarRankingBtn}>
+            <Button onClick={generar} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2" data-testid={TID.generarRankingBtn}>
               <Sparkles className="w-4 h-4" /> Generar
             </Button>
             {active && <Button onClick={acta} variant="outline" className="rounded-sm gap-2"><FileText className="w-4 h-4" />Acta PDF</Button>}
@@ -69,7 +69,7 @@ export default function Ranking() {
       {rankings.length > 0 && (
         <div className="mb-4 flex items-center gap-2 flex-wrap">
           {rankings.map((r) => (
-            <button key={r.id} onClick={() => setActive(r)} className={`px-3 py-1 rounded-sm text-xs font-mono border transition-colors ${active?.id === r.id ? "bg-emerald-50 border-emerald-300 text-emerald-700" : "bg-white border-border hover:bg-secondary"}`}>
+            <button key={r.id} onClick={() => setActive(r)} className={`px-3 py-1 rounded-sm text-xs font-mono border transition-colors ${active?.id === r.id ? "bg-[#F0F7F5] border-[#CDE7E1] text-[#0F5E54]" : "bg-white border-border hover:bg-secondary"}`}>
               {new Date(r.fecha_generacion).toLocaleString("es-CO")} · {r.agrupacion}
             </button>
           ))}
@@ -95,7 +95,7 @@ export default function Ranking() {
                   {g.items.map((it) => (
                     <tr key={it.propuesta_id}>
                       <td className="font-display font-black text-lg tabular-nums">
-                        {it.puesto === 1 ? <span className="inline-flex items-center gap-1 text-emerald-700"><Crown className="w-4 h-4" />{it.puesto}</span> : it.puesto}
+                        {it.puesto === 1 ? <span className="inline-flex items-center gap-1 text-[#0F5E54]"><Crown className="w-4 h-4" />{it.puesto}</span> : it.puesto}
                       </td>
                       <td className="font-mono text-xs">{it.codigo}</td>
                       <td className="font-semibold">{it.nombre}</td>

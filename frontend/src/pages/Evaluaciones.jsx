@@ -62,7 +62,7 @@ export default function Evaluaciones() {
                       <td className="font-mono tabular-nums">{e.puntaje_total ?? 0} / 100</td>
                       <td className="text-xs text-muted-foreground">{e.fecha_ultima_edicion ? new Date(e.fecha_ultima_edicion).toLocaleString("es-CO") : "—"}</td>
                       <td className="text-right">
-                        <Link to={`/evaluaciones/individual/${e.id}`} data-testid={`open-eval-${e.id}`} className="inline-flex items-center gap-1 text-emerald-700 hover:underline text-xs">
+                        <Link to={`/evaluaciones/individual/${e.id}`} data-testid={`open-eval-${e.id}`} className="inline-flex items-center gap-1 text-[#0F5E54] hover:underline text-xs">
                           Abrir <ArrowRight className="w-3 h-3" />
                         </Link>
                       </td>
@@ -90,7 +90,7 @@ export default function Evaluaciones() {
                       <td><Badge tone={estadoTone(e.estado)}>{e.estado}</Badge></td>
                       <td className="font-mono tabular-nums">{e.puntaje_final ?? 0} / 100</td>
                       <td className="text-right">
-                        <Link to={`/evaluaciones/colectiva/${e.id}`} className="inline-flex items-center gap-1 text-emerald-700 hover:underline text-xs">
+                        <Link to={`/evaluaciones/colectiva/${e.id}`} className="inline-flex items-center gap-1 text-[#0F5E54] hover:underline text-xs">
                           Abrir <ArrowRight className="w-3 h-3" />
                         </Link>
                       </td>

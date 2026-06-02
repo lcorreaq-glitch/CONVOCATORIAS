@@ -92,7 +92,7 @@ function CamposPanel({ campos, convId, reload, catalogos }) {
       <div className="flex justify-end mb-3">
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button className="bg-[#059669] hover:bg-[#047857] rounded-sm gap-2"><Plus className="w-4 h-4" />Nuevo campo</Button>
+            <Button className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2"><Plus className="w-4 h-4" />Nuevo campo</Button>
           </DialogTrigger>
           <DialogContent className="rounded-sm max-w-lg">
             <DialogHeader><DialogTitle className="font-display">Nuevo campo</DialogTitle></DialogHeader>
@@ -116,7 +116,7 @@ function CamposPanel({ campos, convId, reload, catalogos }) {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setOpen(false)} className="rounded-sm">Cancelar</Button>
-              <Button onClick={submit} className="bg-[#059669] hover:bg-[#047857] rounded-sm">Crear</Button>
+              <Button onClick={submit} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm">Crear</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -169,7 +169,7 @@ function CatalogosPanel({ catalogos, convId, reload }) {
     <div>
       <div className="flex justify-end mb-3">
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild><Button className="bg-[#059669] hover:bg-[#047857] rounded-sm gap-2"><Plus className="w-4 h-4" />Nuevo catálogo</Button></DialogTrigger>
+          <DialogTrigger asChild><Button className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2"><Plus className="w-4 h-4" />Nuevo catálogo</Button></DialogTrigger>
           <DialogContent className="rounded-sm max-w-lg">
             <DialogHeader><DialogTitle className="font-display">Nuevo catálogo</DialogTitle></DialogHeader>
             <div className="space-y-3">
@@ -182,7 +182,7 @@ function CatalogosPanel({ catalogos, convId, reload }) {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setOpen(false)} className="rounded-sm">Cancelar</Button>
-              <Button onClick={submit} className="bg-[#059669] hover:bg-[#047857] rounded-sm">Crear</Button>
+              <Button onClick={submit} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm">Crear</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -228,7 +228,7 @@ function CriteriosPanel({ criterios, convId, reload }) {
           Puntaje oficial máximo: <strong className="text-foreground tabular-nums">{totalOficial}</strong>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild><Button className="bg-[#059669] hover:bg-[#047857] rounded-sm gap-2"><Plus className="w-4 h-4" />Nuevo criterio</Button></DialogTrigger>
+          <DialogTrigger asChild><Button className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2"><Plus className="w-4 h-4" />Nuevo criterio</Button></DialogTrigger>
           <DialogContent className="rounded-sm max-w-lg">
             <DialogHeader><DialogTitle className="font-display">Nuevo criterio</DialogTitle></DialogHeader>
             <div className="space-y-3">
@@ -246,7 +246,7 @@ function CriteriosPanel({ criterios, convId, reload }) {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setOpen(false)} className="rounded-sm">Cancelar</Button>
-              <Button onClick={submit} className="bg-[#059669] hover:bg-[#047857] rounded-sm">Crear</Button>
+              <Button onClick={submit} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm">Crear</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

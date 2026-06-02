@@ -8,7 +8,7 @@ export default function ProtectedRoute({ children }) {
   if (user === null) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
+        <Loader2 className="w-6 h-6 animate-spin text-[#14776A]" />
       </div>
     );
   }

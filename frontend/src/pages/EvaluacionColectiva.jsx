@@ -59,14 +59,14 @@ export default function EvaluacionColectiva() {
       <div className="flex items-start justify-between mb-6">
         <div>
           <Link to="/evaluaciones" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-2"><ArrowLeft className="w-4 h-4 mr-1" />Volver</Link>
-          <div className="text-[10px] uppercase tracking-[0.18em] font-display font-bold text-emerald-700">Evaluación colectiva</div>
+          <div className="text-[10px] uppercase tracking-[0.18em] font-display font-bold text-[#0F5E54]">Evaluación colectiva</div>
           <h1 className="font-display font-black text-3xl lg:text-4xl tracking-tight">{propuesta.codigo} · {propuesta.nombre}</h1>
           <p className="text-sm text-muted-foreground mt-1">Terna <strong>{terna?.codigo} · {terna?.nombre}</strong></p>
         </div>
         <div className="flex items-center gap-3">
           <Badge tone={estadoTone(ev.estado)}>{ev.estado}</Badge>
           {!isClosed && <Button onClick={() => save(false)} variant="outline" className="rounded-sm gap-2"><Save className="w-4 h-4" />Guardar</Button>}
-          {!isClosed && <Button onClick={() => save(true)} className="bg-[#059669] hover:bg-[#047857] rounded-sm gap-2"><CheckCircle2 className="w-4 h-4" />Cerrar</Button>}
+          {!isClosed && <Button onClick={() => save(true)} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2"><CheckCircle2 className="w-4 h-4" />Cerrar</Button>}
           <Button onClick={acta} variant="outline" className="rounded-sm gap-2"><FileText className="w-4 h-4" />Acta PDF</Button>
         </div>
       </div>
@@ -104,7 +104,7 @@ export default function EvaluacionColectiva() {
             <div className="space-y-1.5">
               {terna?.integrantes?.map((i) => (
                 <div key={i.jurado_id} className="text-sm flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 bg-emerald-600 rounded-full" /> {i.nombre}
+                  <span className="w-1.5 h-1.5 bg-[#14776A] rounded-full" /> {i.nombre}
                 </div>
               ))}
             </div>

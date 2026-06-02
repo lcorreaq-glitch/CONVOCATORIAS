@@ -42,7 +42,7 @@ export default function Usuarios() {
         subtitle="Gestión de usuarios y roles del sistema. Solo el Administrador General puede crear nuevos usuarios."
         actions={
           <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild><Button className="bg-[#059669] hover:bg-[#047857] rounded-sm gap-2" data-testid="create-user-btn"><Plus className="w-4 h-4" />Nuevo usuario</Button></DialogTrigger>
+            <DialogTrigger asChild><Button className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2" data-testid="create-user-btn"><Plus className="w-4 h-4" />Nuevo usuario</Button></DialogTrigger>
             <DialogContent className="rounded-sm max-w-lg">
               <DialogHeader><DialogTitle className="font-display">Nuevo usuario</DialogTitle></DialogHeader>
               <div className="space-y-3">
@@ -61,7 +61,7 @@ export default function Usuarios() {
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setOpen(false)} className="rounded-sm">Cancelar</Button>
-                <Button onClick={submit} className="bg-[#059669] hover:bg-[#047857] rounded-sm" data-testid="save-user-btn">Crear</Button>
+                <Button onClick={submit} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm" data-testid="save-user-btn">Crear</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>

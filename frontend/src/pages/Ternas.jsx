@@ -71,7 +71,7 @@ export default function Ternas() {
         subtitle="Agrupa jurados en ternas para evaluación colectiva. Asigna propuestas por subregión con un solo clic."
         actions={
           <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild><Button className="bg-[#059669] hover:bg-[#047857] rounded-sm gap-2" data-testid={TID.createBtn}><Plus className="w-4 h-4" />Nueva terna</Button></DialogTrigger>
+            <DialogTrigger asChild><Button className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2" data-testid={TID.createBtn}><Plus className="w-4 h-4" />Nueva terna</Button></DialogTrigger>
             <DialogContent className="rounded-sm max-w-xl">
               <DialogHeader><DialogTitle className="font-display">Nueva terna</DialogTitle></DialogHeader>
               <div className="space-y-3">
@@ -103,7 +103,7 @@ export default function Ternas() {
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setOpen(false)} className="rounded-sm">Cancelar</Button>
-                <Button onClick={submit} className="bg-[#059669] hover:bg-[#047857] rounded-sm" data-testid={TID.saveBtn}>Crear</Button>
+                <Button onClick={submit} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm" data-testid={TID.saveBtn}>Crear</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -125,7 +125,7 @@ export default function Ternas() {
             <div className="space-y-1">
               {t.integrantes?.slice(0, 4).map((i) => (
                 <div key={i.jurado_id} className="text-sm flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 bg-emerald-600 rounded-full" /> {i.nombre}
+                  <span className="w-1.5 h-1.5 bg-[#14776A] rounded-full" /> {i.nombre}
                 </div>
               ))}
             </div>
@@ -151,7 +151,7 @@ export default function Ternas() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAssignOpen(false)} className="rounded-sm">Cancelar</Button>
-            <Button onClick={asignarSubregion} disabled={!selectedSubregion} className="bg-[#059669] hover:bg-[#047857] rounded-sm" data-testid="confirm-assign-subregion">Asignar</Button>
+            <Button onClick={asignarSubregion} disabled={!selectedSubregion} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm" data-testid="confirm-assign-subregion">Asignar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

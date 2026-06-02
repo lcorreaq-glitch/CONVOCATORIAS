@@ -59,7 +59,7 @@ export default function Asignaciones() {
         subtitle="Relaciona propuestas con jurados (evaluación individual) o ternas (evaluación colectiva). Al asignar a un jurado individual, se crea automáticamente una evaluación en estado Borrador."
         actions={
           <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild><Button className="bg-[#059669] hover:bg-[#047857] rounded-sm gap-2"><Plus className="w-4 h-4" />Nueva asignación</Button></DialogTrigger>
+            <DialogTrigger asChild><Button className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2"><Plus className="w-4 h-4" />Nueva asignación</Button></DialogTrigger>
             <DialogContent className="rounded-sm max-w-lg">
               <DialogHeader><DialogTitle className="font-display">Nueva asignación</DialogTitle></DialogHeader>
               <div className="space-y-3">
@@ -101,7 +101,7 @@ export default function Asignaciones() {
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setOpen(false)} className="rounded-sm">Cancelar</Button>
-                <Button onClick={submit} className="bg-[#059669] hover:bg-[#047857] rounded-sm">Crear</Button>
+                <Button onClick={submit} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm">Crear</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>

@@ -63,12 +63,12 @@ export default function Jurados() {
                 <p className="text-xs text-muted-foreground">Cada jurado tendrá usuario con contraseña inicial <code className="font-mono">Jurado2026!</code></p>
                 <DialogFooter>
                   <Button variant="outline" onClick={() => setImportOpen(false)} className="rounded-sm">Cancelar</Button>
-                  <Button onClick={handleImport} disabled={!file} className="bg-[#059669] hover:bg-[#047857] rounded-sm">Importar</Button>
+                  <Button onClick={handleImport} disabled={!file} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm">Importar</Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
             <Dialog open={open} onOpenChange={setOpen}>
-              <DialogTrigger asChild><Button className="bg-[#059669] hover:bg-[#047857] rounded-sm gap-2" data-testid={TID.createBtn}><Plus className="w-4 h-4" />Nuevo jurado</Button></DialogTrigger>
+              <DialogTrigger asChild><Button className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2" data-testid={TID.createBtn}><Plus className="w-4 h-4" />Nuevo jurado</Button></DialogTrigger>
               <DialogContent className="rounded-sm max-w-lg">
                 <DialogHeader><DialogTitle className="font-display">Nuevo jurado</DialogTitle></DialogHeader>
                 <div className="space-y-3">
@@ -85,7 +85,7 @@ export default function Jurados() {
                 </div>
                 <DialogFooter>
                   <Button variant="outline" onClick={() => setOpen(false)} className="rounded-sm">Cancelar</Button>
-                  <Button onClick={submit} className="bg-[#059669] hover:bg-[#047857] rounded-sm" data-testid={TID.saveBtn}>Crear</Button>
+                  <Button onClick={submit} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm" data-testid={TID.saveBtn}>Crear</Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>

@@ -72,7 +72,7 @@ export default function EvaluacionIndividual() {
         <div className="flex items-center gap-4">
           <Link to="/evaluaciones" className="text-muted-foreground hover:text-foreground"><ArrowLeft className="w-4 h-4" /></Link>
           <div>
-            <div className="text-[10px] uppercase tracking-[0.16em] font-display font-bold text-emerald-700">Evaluación individual</div>
+            <div className="text-[10px] uppercase tracking-[0.16em] font-display font-bold text-[#0F5E54]">Evaluación individual</div>
             <div className="font-display font-bold text-lg leading-tight">{propuesta.codigo} · {propuesta.nombre}</div>
           </div>
           <Badge tone={estadoTone(ev.estado)}>{ev.estado}</Badge>
@@ -84,12 +84,12 @@ export default function EvaluacionIndividual() {
           </div>
           {!isLocked && <Button onClick={() => save(false)} disabled={saving} variant="outline" className="rounded-sm gap-2" data-testid="save-eval-btn"><Save className="w-4 h-4" />Guardar</Button>}
           {ev.estado !== "Finalizada" && !isLocked && (
-            <Button onClick={() => save(true)} disabled={saving} className="bg-[#059669] hover:bg-[#047857] rounded-sm gap-2" data-testid={TID.finalizarEvalBtn}>
+            <Button onClick={() => save(true)} disabled={saving} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2" data-testid={TID.finalizarEvalBtn}>
               <CheckCircle2 className="w-4 h-4" />Finalizar
             </Button>
           )}
           {ev.estado === "Finalizada" && (
-            <Button onClick={firmar} className="bg-emerald-700 hover:bg-emerald-800 rounded-sm gap-2" data-testid={TID.firmarEvalBtn}><PenLine className="w-4 h-4" />Firmar</Button>
+            <Button onClick={firmar} className="bg-[#0F5E54] hover:bg-[#0B4A42] rounded-sm gap-2" data-testid={TID.firmarEvalBtn}><PenLine className="w-4 h-4" />Firmar</Button>
           )}
           {(ev.estado === "Firmada" || ev.estado === "Finalizada") && (
             <Button onClick={downloadActa} variant="outline" className="rounded-sm gap-2" data-testid="download-acta-btn"><FileText className="w-4 h-4" />Acta PDF</Button>
@@ -139,7 +139,7 @@ export default function EvaluacionIndividual() {
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 font-display font-bold">Documentos</div>
               {propuesta.datos?.link_expediente ? (
                 <a href={propuesta.datos.link_expediente} target="_blank" rel="noreferrer"
-                   className="inline-flex items-center gap-2 px-3 py-2 bg-[#059669] hover:bg-[#047857] text-white rounded-sm text-sm font-semibold transition-colors w-full justify-center">
+                   className="inline-flex items-center gap-2 px-3 py-2 bg-[#14776A] hover:bg-[#0F5E54] text-white rounded-sm text-sm font-semibold transition-colors w-full justify-center">
                   <ExternalLink className="w-4 h-4" /> Abrir expediente (Google Drive)
                 </a>
               ) : (

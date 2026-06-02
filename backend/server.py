@@ -44,7 +44,7 @@ app.add_middleware(
 
 @app.get("/api/")
 async def root():
-    return {"name": "KRINOS API", "version": "1.0.0", "tagline": "Tecnología que impulsa decisiones transparentes."}
+    return {"name": "KRINOS API", "version": "1.0.0", "by": "ELEA", "tagline": "Plataforma Inteligente para Convocatorias y Evaluación."}
 
 
 @app.get("/api/health")

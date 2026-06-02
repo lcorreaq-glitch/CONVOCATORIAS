@@ -78,7 +78,7 @@ export default function Propuestas() {
             </Button>
             <Dialog open={importOpen} onOpenChange={setImportOpen}>
               <DialogTrigger asChild>
-                <Button className="bg-[#059669] hover:bg-[#047857] rounded-sm gap-2" data-testid={TID.importExcelBtn}>
+                <Button className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2" data-testid={TID.importExcelBtn}>
                   <Upload className="w-4 h-4" /> Carga masiva
                 </Button>
               </DialogTrigger>
@@ -89,7 +89,7 @@ export default function Propuestas() {
                   <input type="file" accept=".xlsx" onChange={(e) => setFile(e.target.files?.[0])} data-testid="import-file-input" className="block w-full text-sm" />
                   {importResult && (
                     <div className="text-xs space-y-1 border border-border rounded-sm p-2 bg-secondary">
-                      <div>Creados: <strong className="text-emerald-700">{importResult.creados}</strong></div>
+                      <div>Creados: <strong className="text-[#0F5E54]">{importResult.creados}</strong></div>
                       <div>Rechazados: <strong className="text-red-700">{importResult.rechazados}</strong></div>
                       {importResult.errores?.slice(0, 3).map((e, i) => (
                         <div key={i} className="text-red-700">Fila {e.fila}: {e.error}</div>
@@ -99,7 +99,7 @@ export default function Propuestas() {
                 </div>
                 <DialogFooter>
                   <Button variant="outline" onClick={() => setImportOpen(false)} className="rounded-sm">Cerrar</Button>
-                  <Button onClick={handleImport} disabled={!file} className="bg-[#059669] hover:bg-[#047857] rounded-sm">Importar</Button>
+                  <Button onClick={handleImport} disabled={!file} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm">Importar</Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
@@ -153,7 +153,7 @@ export default function Propuestas() {
                 <td><Badge tone={estadoTone(p.estado)}>{p.estado}</Badge></td>
                 <td>
                   {p.datos?.link_expediente ? (
-                    <a href={p.datos.link_expediente} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-emerald-700 hover:underline text-xs">
+                    <a href={p.datos.link_expediente} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[#0F5E54] hover:underline text-xs">
                       <ExternalLink className="w-3 h-3" /> Abrir
                     </a>
                   ) : <span className="text-muted-foreground text-xs">—</span>}

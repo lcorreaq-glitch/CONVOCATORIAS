@@ -5,7 +5,7 @@ import { TID } from "@/constants/testIds";
 import { api } from "@/lib/api";
 import {
   LayoutDashboard, FolderOpen, FileStack, Users, UsersRound, Workflow,
-  ClipboardCheck, Trophy, FileText, BarChart3, Shield, Settings2, LogOut, ChevronRight,
+  ClipboardCheck, Trophy, FileText, BarChart3, Shield, Settings2, LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -19,7 +19,7 @@ const NAV = [
   { to: "/ternas", label: "Ternas / Grupos", icon: UsersRound, tid: TID.navTernas },
   { to: "/asignaciones", label: "Asignaciones", icon: Workflow, tid: TID.navAsignaciones },
   { to: "/evaluaciones", label: "Evaluaciones", icon: ClipboardCheck, tid: TID.navEvaluaciones },
-  { to: "/ranking", label: "Ranking & Desempates", icon: Trophy, tid: TID.navRanking },
+  { to: "/ranking", label: "Ranking & Resultados", icon: Trophy, tid: TID.navRanking },
   { to: "/actas", label: "Actas", icon: FileText, tid: TID.navActas },
   { to: "/reportes", label: "Reportes", icon: BarChart3, tid: TID.navReportes },
   { to: "/auditoria", label: "Auditoría", icon: Shield, tid: TID.navAuditoria },
@@ -33,9 +33,7 @@ export default function Layout() {
   React.useEffect(() => {
     api.get("/convocatorias").then((r) => {
       setConvs(r.data || []);
-      if (!activeConvocatoriaId && r.data?.length) {
-        setConv(r.data[0].id);
-      }
+      if (!activeConvocatoriaId && r.data?.length) setConv(r.data[0].id);
     }).catch(() => {});
   }, []);
 
@@ -44,33 +42,41 @@ export default function Layout() {
     navigate("/login");
   };
 
+  const activeConv = convs.find((c) => c.id === activeConvocatoriaId);
+  const entidad = activeConv?.entidades?.[0]?.nombre;
+
   return (
-    <div className="min-h-screen flex bg-background krinos-noise">
+    <div className="min-h-screen flex bg-background">
       {/* Sidebar */}
       <aside
         data-testid={TID.sidebar}
-        className="w-64 shrink-0 border-r border-border bg-white flex flex-col"
+        className="w-[260px] shrink-0 border-r border-border bg-white flex flex-col"
       >
-        <div className="px-5 pt-6 pb-4 border-b border-border">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 bg-[#059669] flex items-center justify-center rounded-sm">
-              <span className="font-display font-black text-white text-lg leading-none">K</span>
+        {/* Brand */}
+        <div className="px-5 pt-6 pb-5 border-b border-border">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-[#14776A] flex items-center justify-center shadow-sm">
+              <span className="font-display font-extrabold text-white text-lg leading-none">K</span>
             </div>
             <div className="leading-tight">
-              <div className="font-display font-black text-[17px] tracking-tight">KRINOS</div>
-              <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Decisiones transparentes</div>
+              <div className="font-display font-extrabold text-[18px] tracking-tight text-[#1A1F2C]">KRINOS</div>
+              <div className="text-[10px] uppercase tracking-[0.14em] text-[#5E6878] font-semibold">by ELEA</div>
             </div>
           </div>
+          <p className="mt-3 text-[11.5px] text-[#5E6878] leading-snug">
+            Plataforma Inteligente para Convocatorias y Evaluación
+          </p>
         </div>
 
-        <div className="px-4 py-4 border-b border-border">
-          <label className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground font-display font-bold">
+        {/* Context block */}
+        <div className="px-5 py-4 border-b border-border bg-[#F7F9FB]">
+          <label className="text-[10px] uppercase tracking-[0.14em] text-[#5E6878] font-display font-bold">
             Convocatoria activa
           </label>
           <Select value={activeConvocatoriaId || ""} onValueChange={setConv}>
             <SelectTrigger
               data-testid={TID.convocatoriaSelector}
-              className="mt-1.5 rounded-sm border-border text-[13px] h-9"
+              className="mt-1.5 rounded-lg border-border bg-white text-[13px] h-10 font-medium"
             >
               <SelectValue placeholder="Selecciona…" />
             </SelectTrigger>
@@ -83,9 +89,18 @@ export default function Layout() {
               ))}
             </SelectContent>
           </Select>
+          {entidad && (
+            <div className="mt-3 pt-2.5 border-t border-border">
+              <div className="text-[9.5px] uppercase tracking-[0.14em] text-[#5E6878] font-display font-bold mb-0.5">
+                Entidad
+              </div>
+              <div className="text-[12px] font-semibold text-[#1A1F2C] leading-tight">{entidad}</div>
+            </div>
+          )}
         </div>
 
-        <nav className="flex-1 overflow-y-auto py-2 px-2">
+        {/* Navigation */}
+        <nav className="flex-1 overflow-y-auto py-3 px-3">
           {NAV.map((n) => (
             <NavLink
               key={n.to}
@@ -93,14 +108,14 @@ export default function Layout() {
               end={n.end}
               data-testid={n.tid}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 my-0.5 rounded-sm text-[13px] transition-colors ${
+                `flex items-center gap-3 px-3 py-2.5 my-0.5 rounded-lg text-[13px] transition-colors ${
                   isActive
-                    ? "bg-emerald-50 text-emerald-700 font-semibold"
-                    : "text-foreground/75 hover:bg-secondary hover:text-foreground"
+                    ? "bg-[#E8F3F0] text-[#0F5E54] font-semibold"
+                    : "text-[#3F4856] hover:bg-[#F1F4F7] hover:text-[#1A1F2C]"
                 }`
               }
             >
-              <n.icon className="w-4 h-4 stroke-[1.5]" />
+              <n.icon className="w-[18px] h-[18px] stroke-[1.6]" />
               <span>{n.label}</span>
             </NavLink>
           ))}
@@ -109,31 +124,37 @@ export default function Layout() {
               to="/usuarios"
               data-testid={TID.navUsuarios}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 my-0.5 rounded-sm text-[13px] transition-colors ${
+                `flex items-center gap-3 px-3 py-2.5 my-0.5 rounded-lg text-[13px] transition-colors ${
                   isActive
-                    ? "bg-emerald-50 text-emerald-700 font-semibold"
-                    : "text-foreground/75 hover:bg-secondary hover:text-foreground"
+                    ? "bg-[#E8F3F0] text-[#0F5E54] font-semibold"
+                    : "text-[#3F4856] hover:bg-[#F1F4F7] hover:text-[#1A1F2C]"
                 }`
               }
             >
-              <Users className="w-4 h-4 stroke-[1.5]" />
+              <Users className="w-[18px] h-[18px] stroke-[1.6]" />
               <span>Usuarios</span>
             </NavLink>
           )}
         </nav>
 
-        <div className="border-t border-border p-3">
-          <div className="px-2 mb-2">
-            <div className="text-[13px] font-semibold truncate">{user?.name}</div>
-            <div className="text-[11px] text-muted-foreground truncate">
-              <span className="font-mono">{user?.username}</span> · {user?.role?.replace("_", " ")}
+        {/* User block */}
+        <div className="border-t border-border p-4 bg-[#F7F9FB]">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-9 h-9 rounded-full bg-[#E8F3F0] flex items-center justify-center text-[#0F5E54] font-display font-extrabold text-[13px]">
+              {(user?.name || "?").charAt(0)}
+            </div>
+            <div className="leading-tight min-w-0 flex-1">
+              <div className="text-[13px] font-semibold truncate text-[#1A1F2C]">{user?.name}</div>
+              <div className="text-[11px] text-[#5E6878] truncate capitalize">
+                {user?.role?.replace(/_/g, " ")}
+              </div>
             </div>
           </div>
           <Button
             data-testid={TID.logoutBtn}
             onClick={handleLogout}
             variant="outline"
-            className="w-full h-8 rounded-sm text-[12px] gap-2 border-border hover:bg-secondary"
+            className="w-full h-9 rounded-lg text-[12.5px] gap-2 border-border bg-white hover:bg-[#F1F4F7]"
           >
             <LogOut className="w-3.5 h-3.5" /> Cerrar sesión
           </Button>

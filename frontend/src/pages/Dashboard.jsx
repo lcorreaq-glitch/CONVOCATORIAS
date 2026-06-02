@@ -9,22 +9,26 @@ import {
 
 function Metric({ label, value, icon: Icon, tone = "default", tid, sub }) {
   const toneCls =
-    tone === "primary" ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-    : tone === "warning" ? "bg-amber-50 text-amber-700 border-amber-200"
-    : "bg-white text-foreground border-border";
+    tone === "primary" ? "bg-[#F0F7F5] border-[#CDE7E1]"
+    : tone === "warning" ? "bg-[#FFFBEB] border-[#FDE68A]"
+    : "bg-white border-[#E2E7EC]";
+  const iconCls =
+    tone === "primary" ? "text-[#14776A]"
+    : tone === "warning" ? "text-[#B45309]"
+    : "text-[#5E6878]";
   return (
-    <div data-testid={tid} className={`border rounded-sm p-5 ${toneCls}`}>
+    <div data-testid={tid} className={`border rounded-xl p-5 shadow-card transition-shadow hover:shadow-md ${toneCls}`}>
       <div className="flex items-start justify-between">
         <div>
-          <div className="text-[10px] uppercase tracking-[0.16em] font-display font-bold text-muted-foreground">
+          <div className="text-[10.5px] uppercase tracking-[0.14em] font-display font-bold text-[#5E6878]">
             {label}
           </div>
-          <div className="font-display font-black text-4xl tracking-tight mt-2 tabular-nums">
+          <div className="font-display font-extrabold text-[36px] tracking-tight mt-2 tabular-nums text-[#1A1F2C] leading-none">
             {value ?? "—"}
           </div>
-          {sub && <div className="text-xs text-muted-foreground mt-1">{sub}</div>}
+          {sub && <div className="text-xs text-[#5E6878] mt-2">{sub}</div>}
         </div>
-        <Icon className="w-5 h-5 stroke-[1.5] opacity-50 mt-1" />
+        <Icon className={`w-5 h-5 stroke-[1.6] mt-1 ${iconCls}`} />
       </div>
     </div>
   );
@@ -50,32 +54,39 @@ export default function Dashboard() {
   }
 
   return (
-    <div data-testid={TID.dashboardRoot} className="flex-1 p-8 lg:p-10">
+    <div data-testid={TID.dashboardRoot} className="flex-1 p-8 lg:p-10 max-w-[1480px]">
       {/* Header */}
       <div className="flex items-start justify-between gap-6 mb-10 pb-6 border-b border-border">
         <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] font-display font-bold text-emerald-700 mb-1.5">
-            Tablero de control
+          <div className="text-[11px] uppercase tracking-[0.16em] font-display font-bold text-[#14776A] mb-1.5">
+            Tablero principal
           </div>
-          <h1 className="font-display font-black text-4xl lg:text-5xl tracking-tight">
+          <h1 className="font-display font-extrabold text-[36px] lg:text-[44px] tracking-tight text-[#1A1F2C] leading-tight">
             {conv?.nombre || "Dashboard"}
           </h1>
-          <p className="text-muted-foreground text-sm mt-2">
-            <span className="font-mono text-xs">{conv?.codigo}</span> · {conv?.vigencia} · Estado{" "}
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold">
+          <div className="flex items-center gap-2.5 text-[13px] text-[#5E6878] mt-2.5 flex-wrap">
+            <span className="font-mono text-xs px-2 py-0.5 bg-[#F1F4F7] rounded text-[#3F4856]">{conv?.codigo}</span>
+            <span>Vigencia {conv?.vigencia}</span>
+            <span className="w-1 h-1 rounded-full bg-[#CBD2DA]" />
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#F0F7F5] text-[#0F5E54] border border-[#CDE7E1] text-[11.5px] font-semibold">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#14776A]" />
               {conv?.estado}
             </span>
-            {conv?.etapa_actual && <> · Etapa <strong className="text-foreground">{conv.etapa_actual}</strong></>}
-          </p>
+            {conv?.etapa_actual && (
+              <>
+                <span className="w-1 h-1 rounded-full bg-[#CBD2DA]" />
+                <span>Etapa <strong className="text-[#1A1F2C] font-semibold">{conv.etapa_actual}</strong></span>
+              </>
+            )}
+          </div>
         </div>
-        <div className="text-right text-xs text-muted-foreground font-mono">
+        <div className="text-right text-xs text-[#5E6878]">
           <div>{new Date().toLocaleDateString("es-CO", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</div>
-          <div className="mt-1">{(conv?.entidades?.[0]?.nombre) || ""}</div>
         </div>
       </div>
 
-      {/* Top metrics: control room grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      {/* Top metrics */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <Metric tid={TID.metricTotalPropuestas} label="Total propuestas" value={data?.total_propuestas} icon={FileStack} tone="primary" />
         <Metric tid={TID.metricHabilitadas} label="Habilitadas" value={data?.habilitadas} icon={CheckCircle2} />
         <Metric label="No habilitadas" value={data?.no_habilitadas} icon={AlertCircle} tone="warning" />
@@ -92,40 +103,45 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-10">
         <Metric tid={TID.metricJurados} label="Jurados activos" value={data?.jurados_activos} icon={Users} />
         <Metric tid={TID.metricTernas} label="Ternas activas" value={data?.ternas_activas} icon={UsersRound} />
-        <div className="border rounded-sm p-5 bg-white border-border">
-          <div className="text-[10px] uppercase tracking-[0.16em] font-display font-bold text-muted-foreground">
+        <div className="border border-[#E2E7EC] bg-white rounded-xl p-5 shadow-card">
+          <div className="text-[10.5px] uppercase tracking-[0.14em] font-display font-bold text-[#5E6878]">
             Tasa de avance
           </div>
-          <div className="font-display font-black text-4xl mt-2 tabular-nums">
+          <div className="font-display font-extrabold text-[36px] mt-2 tabular-nums text-[#1A1F2C] leading-none">
             {data ? Math.round(
               (data.evaluaciones_individuales_finalizadas /
                 Math.max(1, data.evaluaciones_individuales_finalizadas + data.evaluaciones_individuales_pendientes)) * 100
-            ) : 0}%
+            ) : 0}<span className="text-2xl text-[#5E6878]">%</span>
           </div>
-          <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-            <TrendingUp className="w-3 h-3" /> sobre evaluaciones individuales
+          <div className="text-xs text-[#5E6878] mt-2 flex items-center gap-1.5">
+            <TrendingUp className="w-3.5 h-3.5 stroke-[1.6]" /> sobre evaluaciones individuales
           </div>
         </div>
       </div>
 
-      {/* Subregiones */}
-      <div className="border border-border rounded-sm bg-white p-6">
-        <div className="flex items-center gap-2 mb-5">
-          <MapPin className="w-4 h-4 stroke-[1.5] text-muted-foreground" />
-          <h3 className="font-display font-bold text-base">Distribución por subregión</h3>
+      {/* Subregions */}
+      <div className="border border-[#E2E7EC] rounded-xl bg-white p-6 shadow-card">
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-2.5">
+            <MapPin className="w-4 h-4 stroke-[1.6] text-[#14776A]" />
+            <h3 className="font-display font-bold text-base text-[#1A1F2C]">Distribución de propuestas por subregión</h3>
+          </div>
+          <span className="text-[11px] uppercase tracking-wider text-[#5E6878] font-semibold">
+            Top 6
+          </span>
         </div>
         {data?.avance_subregion?.length ? (
-          <div className="space-y-3">
+          <div className="space-y-3.5">
             {data.avance_subregion.map((s) => {
               const max = Math.max(...data.avance_subregion.map((x) => x.total), 1);
               const pct = (s.total / max) * 100;
               return (
                 <div key={s.subregion} className="grid grid-cols-[180px_1fr_60px] gap-4 items-center">
-                  <div className="text-sm">{s.subregion}</div>
-                  <div className="h-2 bg-secondary rounded-sm overflow-hidden">
-                    <div className="h-full bg-emerald-600 transition-all" style={{ width: `${pct}%` }} />
+                  <div className="text-[13.5px] font-medium text-[#3F4856]">{s.subregion}</div>
+                  <div className="h-2 bg-[#F1F4F7] rounded-full overflow-hidden">
+                    <div className="h-full bg-[#14776A] rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
                   </div>
-                  <div className="text-sm tabular-nums text-right font-mono">{s.total}</div>
+                  <div className="text-[14px] tabular-nums text-right font-mono font-semibold text-[#1A1F2C]">{s.total}</div>
                 </div>
               );
             })}

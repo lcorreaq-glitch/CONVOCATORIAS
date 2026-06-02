@@ -43,7 +43,7 @@ export default function Convocatorias() {
         actions={canCreate && (
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-              <Button data-testid={TID.createBtn} className="bg-[#059669] hover:bg-[#047857] rounded-sm gap-2">
+              <Button data-testid={TID.createBtn} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2">
                 <Plus className="w-4 h-4" /> Nueva convocatoria
               </Button>
             </DialogTrigger>
@@ -60,7 +60,7 @@ export default function Convocatorias() {
               </div>
               <DialogFooter>
                 <Button data-testid={TID.cancelBtn} variant="outline" className="rounded-sm" onClick={() => setOpen(false)}>Cancelar</Button>
-                <Button data-testid={TID.saveBtn} onClick={onCreate} className="bg-[#059669] hover:bg-[#047857] rounded-sm">Crear</Button>
+                <Button data-testid={TID.saveBtn} onClick={onCreate} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm">Crear</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -72,14 +72,14 @@ export default function Convocatorias() {
           <div
             key={c.id}
             data-testid={`conv-card-${c.codigo}`}
-            className="border border-border rounded-sm bg-white p-5 hover:border-emerald-300 transition-colors cursor-pointer group"
+            className="border border-border rounded-sm bg-white p-5 hover:border-[#CDE7E1] transition-colors cursor-pointer group"
             onClick={() => setConv(c.id)}
           >
             <div className="flex items-start justify-between mb-3">
               <div className="font-mono text-[11px] text-muted-foreground">{c.codigo}</div>
               <Badge tone={estadoTone(c.estado)}>{c.estado}</Badge>
             </div>
-            <div className="font-display font-bold text-lg leading-tight group-hover:text-emerald-700 transition-colors">{c.nombre}</div>
+            <div className="font-display font-bold text-lg leading-tight group-hover:text-[#0F5E54] transition-colors">{c.nombre}</div>
             <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{c.descripcion}</p>
             <div className="mt-4 pt-3 border-t border-border flex items-center gap-3 text-[11px] text-muted-foreground">
               <span>Vigencia <strong className="text-foreground">{c.vigencia}</strong></span>
