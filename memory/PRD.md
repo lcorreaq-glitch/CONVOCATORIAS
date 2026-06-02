@@ -217,6 +217,20 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - ✅ **Merge de plantilla con default**: `_get_template` ahora hace `{...default, ...saved_no_vacios}`. Si el admin edita solo 1 campo (ej. `tabla_titulo`), los demás textos (considerandos, certificación, cierre) siguen siendo el default INC2026 oficial. Antes se borraban todos cuando se guardaba un PATCH parcial.
 - ✅ Verificado vía OCR del PDF: los 4 considerandos (a/b/c/d) aparecen completos, certificación incluye los 5 criterios y los 5 puntos PDET/Río Atrato/Río Cauca, columnas sin solapamientos, footer al borde inferior.
 
+### Motor de Dashboards Inteligentes — FASE 1 (Feb 2026 v16)
+- ✅ Backend `routes_dashboards.py` con motor `GET /api/dashboards?convocatoria_id=...` que devuelve dashboards visibles según rol + datos pre-resueltos.
+- ✅ **RBAC por rol**: admin_general/admin_convocatoria/supervisor ven los 5 dashboards globales; jurado solo ve "Mi panel de evaluación"; integrante_terna ve avance_terna.
+- ✅ **6 tipos de widgets**: `kpi` (counter coloreado), `progress` (barra + % grande), `pie` (recharts), `bar` (recharts horizontal stacked done/pending), `ranking` (lista con medallas), `stats` (4 mini cards), `progress_multi` (barras por entidad).
+- ✅ **5 dashboards INC2026 derivados automáticamente**:
+  - Avance general (KPIs propuestas/jurados/ternas, progress eval ind/col, pie estado propuestas)
+  - Avance por jurado (carga de trabajo + Top jurados por avance)
+  - Avance por terna (carga + progress multi)
+  - Distribución territorial (subregión, municipio top 10) — solo si campo `subregion` existe
+  - Resultados (stats puntajes + Top 10 ranking)
+- ✅ **Vista jurado**: "Mi panel de evaluación" con KPIs Mis Asignadas/Pendientes/Finalizadas + Avance Personal + Promedio emitido.
+- ✅ Frontend `Dashboard.jsx` reescrito completamente con `recharts` instalado. UI con grid responsive 1/2/3/4 columnas + cards con borde verde institucional.
+- ✅ Verificado e2e: admin ve 5 dashboards + jurado ve solo el suyo (RBAC funcional).
+
 ## Backlog / próximas tareas
 
 ### P0 (cierre de funcionalidad clave)

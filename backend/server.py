@@ -23,6 +23,7 @@ from routes_ai import router as ai_router
 from routes_permissions import router as permissions_router
 from routes_upload import router as upload_router
 from routes_actas import router as actas_router
+from routes_dashboards import router as dashboards_router
 
 
 @asynccontextmanager
@@ -69,6 +70,7 @@ app.include_router(ai_router)
 app.include_router(permissions_router)
 app.include_router(upload_router)
 app.include_router(actas_router)
+app.include_router(dashboards_router)
 
 
 logging.basicConfig(level=logging.INFO,
