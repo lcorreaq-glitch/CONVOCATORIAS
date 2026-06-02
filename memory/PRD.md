@@ -211,6 +211,12 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 **Endpoints**:
 - (sin cambios, solo extensión en `/api/evaluaciones-colectivas?mias=true` ya existente).
 
+### Fix PDF actas: footer fijo + headers tabla + merge plantilla (Feb 2026 v15)
+- ✅ **Footer al pie absoluto**: ahora se dibuja vía `canvas onPage` callback de ReportLab, garantizando que aparezca pegado al borde inferior de CADA página, sin importar la cantidad de contenido. Se reserva `bottomMargin=3.2cm` cuando hay footer image.
+- ✅ **Headers de tabla con `Paragraph`** (en lugar de strings): wrappean automáticamente sin solaparse con la columna vecina. Columnas redimensionadas (6 cols: 0.9/2.5/2.3/4.2/2.4/4.7 cm).
+- ✅ **Merge de plantilla con default**: `_get_template` ahora hace `{...default, ...saved_no_vacios}`. Si el admin edita solo 1 campo (ej. `tabla_titulo`), los demás textos (considerandos, certificación, cierre) siguen siendo el default INC2026 oficial. Antes se borraban todos cuando se guardaba un PATCH parcial.
+- ✅ Verificado vía OCR del PDF: los 4 considerandos (a/b/c/d) aparecen completos, certificación incluye los 5 criterios y los 5 puntos PDET/Río Atrato/Río Cauca, columnas sin solapamientos, footer al borde inferior.
+
 ## Backlog / próximas tareas
 
 ### P0 (cierre de funcionalidad clave)

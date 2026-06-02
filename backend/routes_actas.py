@@ -242,12 +242,18 @@ def _is_inc2026(conv: dict) -> bool:
 
 
 async def _get_template(db, conv: dict, tipo: str) -> dict:
+    """Devuelve la plantilla efectiva del acta haciendo merge del default + lo guardado.
+    Si el admin solo editó un campo, los demás siguen siendo el default (no quedan vacíos)."""
     config = conv.get("configuracion") or {}
-    saved = (config.get("acta_templates") or {}).get(tipo)
-    if saved:
-        return saved
+    saved = (config.get("acta_templates") or {}).get(tipo) or {}
     base = DEFAULT_INC2026_TEMPLATES if _is_inc2026(conv) else DEFAULT_GENERIC_TEMPLATES
-    return base.get(tipo, DEFAULT_GENERIC_TEMPLATES[tipo])
+    default = base.get(tipo, DEFAULT_GENERIC_TEMPLATES[tipo])
+    # Merge: default + saved (saved sobrescribe solo los campos no vacíos)
+    merged = dict(default)
+    for k, v in saved.items():
+        if v not in (None, ""):
+            merged[k] = v
+    return merged
 
 
 def _get_branding(conv: dict) -> dict:
@@ -607,11 +613,42 @@ def _header_block(elements, ctx, conv, tmpl, st, branding):
 
 
 def _footer_block(elements, branding, st):
-    """Bloque de pie de página con imagen institucional (logo, firma de entidad, etc.)."""
-    footer_img = _decoded_image((branding or {}).get("footer_image_url"), width=17*cm, height=2.2*cm)
-    if footer_img:
-        elements.append(Spacer(1, 14))
-        elements.append(footer_img)
+    """DEPRECATED: el footer se dibuja ahora vía canvas en cada página (ver _make_footer_drawer)."""
+    return None
+
+
+def _make_footer_drawer(branding: dict, footer_height_cm: float = 2.4):
+    """Devuelve una función onPage(canvas, doc) que dibuja la imagen footer en el pie de cada página."""
+    footer_url = (branding or {}).get("footer_image_url")
+    if not footer_url or not footer_url.startswith("data:"):
+        return None
+    try:
+        b64 = footer_url.split(",", 1)[1]
+        raw = base64.b64decode(b64)
+    except Exception:
+        return None
+
+    def _on_page(canv, doc):
+        try:
+            from reportlab.lib.utils import ImageReader
+            from reportlab.lib.pagesizes import A4
+            page_w, _ = A4
+            img = ImageReader(io.BytesIO(raw))
+            iw, ih = img.getSize()
+            target_w = 17 * cm
+            ratio = target_w / iw
+            target_h = ih * ratio
+            max_h = footer_height_cm * cm
+            if target_h > max_h:
+                target_h = max_h
+                target_w = iw * (target_h / ih)
+            x = (page_w - target_w) / 2
+            y = 0.6 * cm  # margen inferior
+            canv.drawImage(img, x, y, width=target_w, height=target_h, mask="auto", preserveAspectRatio=True)
+        except Exception:
+            pass
+
+    return _on_page
 
 
 def _decoded_image(data_url: str, width=4*cm, height=1.6*cm) -> Optional[Image]:
@@ -657,8 +694,10 @@ def _firmantes_table(firmantes: list, st) -> Table:
 def _build_pdf(tmpl: dict, ctx: dict, conv: dict, tabla_headers: list,
                 tabla_rows: list, firmantes: list, branding: dict = None) -> bytes:
     buf = io.BytesIO()
+    has_footer = bool((branding or {}).get("footer_image_url"))
+    bottom_margin = 3.2 * cm if has_footer else 1.6 * cm  # espacio reservado para el footer fijo
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm,
-                             topMargin=1.6*cm, bottomMargin=1.6*cm)
+                             topMargin=1.6*cm, bottomMargin=bottom_margin)
     st = _base_styles()
     el = []
     _header_block(el, ctx, conv, tmpl, st, branding or {})
@@ -689,34 +728,39 @@ def _build_pdf(tmpl: dict, ctx: dict, conv: dict, tabla_headers: list,
     el.append(Paragraph(_render_text(tmpl.get("certificacion", ""), ctx).replace("&", "&amp;"), st["body"]))
     el.append(Spacer(1, 10))
 
-    # Tabla
+    # Tabla — headers como Paragraph para que wrappeen correctamente
     el.append(Paragraph(tmpl.get("tabla_titulo", "RESULTADOS"), st["h2"]))
     if tmpl.get("tabla_subtitulo"):
         el.append(Paragraph(f"<i>{_render_text(tmpl['tabla_subtitulo'], ctx)}</i>", st["small"]))
         el.append(Spacer(1, 4))
-    full_rows = [tabla_headers] + tabla_rows
+    header_style = ParagraphStyle("th", fontSize=8.5, leading=10, alignment=TA_CENTER,
+                                   textColor=rl_colors.white, fontName="Helvetica-Bold")
+    cell_style = ParagraphStyle("td", fontSize=8.2, leading=10, alignment=TA_LEFT,
+                                 textColor=rl_colors.HexColor("#1A1F2C"))
+    hdr_row = [Paragraph(str(h).replace("&", "&amp;"), header_style) for h in tabla_headers]
+    body_rows = [[Paragraph(str(c).replace("&", "&amp;"), cell_style) if not hasattr(c, "wrap") else c for c in r]
+                 for r in tabla_rows]
+    full_rows = [hdr_row] + body_rows
     n_cols = len(tabla_headers)
-    # Distribución: primera columna (Nº) angosta
     page_w = 17 * cm
     if n_cols == 6:
-        col_widths = [1*cm, 2.5*cm, 2.5*cm, 2.5*cm, 6*cm, 2.5*cm]
+        col_widths = [0.9*cm, 2.5*cm, 2.3*cm, 4.2*cm, 2.4*cm, 4.7*cm]
     elif n_cols == 5:
-        col_widths = [1*cm, 3*cm, 3*cm, 7*cm, 3*cm]
+        col_widths = [0.9*cm, 2.7*cm, 2.7*cm, 7.7*cm, 3*cm]
     elif n_cols == 7:
-        col_widths = [0.8*cm, 2.3*cm, 2.2*cm, 2.2*cm, 5.3*cm, 2*cm, 2.2*cm]
+        col_widths = [0.8*cm, 2.3*cm, 2.2*cm, 2.2*cm, 4.5*cm, 2.2*cm, 2.8*cm]
     else:
         col_widths = [page_w / n_cols] * n_cols
     tbl = Table(full_rows, colWidths=col_widths, repeatRows=1, hAlign="LEFT")
     tbl.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#0F5E54")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
         ("GRID", (0, 0), (-1, -1), 0.25, rl_colors.HexColor("#CDE7E1")),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor("#F7FAF9")]),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
-        ("TOPPADDING", (0, 0), (-1, 0), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+        ("TOPPADDING", (0, 0), (-1, 0), 8),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
     ]))
     el.append(tbl)
     el.append(Spacer(1, 12))
@@ -732,10 +776,12 @@ def _build_pdf(tmpl: dict, ctx: dict, conv: dict, tabla_headers: list,
     el.append(Paragraph(tmpl.get("pie_firmantes_titulo", "FIRMANTES"), st["h2"]))
     el.append(_firmantes_table(firmantes, st))
 
-    # Footer institucional
-    _footer_block(el, branding or {}, st)
-
-    doc.build(el)
+    # Footer institucional fijo al pie de página (callback canvas)
+    footer_drawer = _make_footer_drawer(branding or {})
+    if footer_drawer:
+        doc.build(el, onFirstPage=footer_drawer, onLaterPages=footer_drawer)
+    else:
+        doc.build(el)
     buf.seek(0)
     return buf.getvalue()
 
