@@ -73,6 +73,12 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - 1 convocatoria (INC2026), 9 catálogos, 16 campos, 10 criterios, 7 desempates.
 - **12 propuestas** habilitadas distribuidas en 6 subregiones, **6 jurados** con usuarios asociados, **3 ternas** (T1 Urabá, T2 Oriente, T3 Norte), **24 evaluaciones** individuales en Borrador.
 
+### Filtros dinámicos en /propuestas (Feb 2026 v5)
+- ✅ Eliminados filtros hardcoded (solo subregión). Reemplazados por **filtros dinámicos** que se generan según los campos con `uso_filtro=true`.
+- ✅ `DynamicFilter` component que renderiza el control apropiado según el tipo del campo: lista→Select con catálogo, si_no→3-estados, fecha→date, número→numeric, default→text.
+- ✅ Backend `/api/propuestas?filtros=<JSON>` acepta dict arbitrario `{nombre_interno: valor}` y filtra sobre `datos.<key>`. Soporta arrays con `$in`.
+- ✅ Botón "Limpiar filtros" visible cuando hay al menos uno activo. Hint cuando no hay campos con uso_filtro.
+
 ### Flags editables `uso_propuesta` + `uso_lista` y columnas dinámicas (Feb 2026 v4)
 - ✅ Eliminado el badge fijo `propuesta` en Configuración → Campos. Reemplazado por **2 flags editables**:
   - **`form propuesta`** (verde) — controla si el campo aparece en el formulario de Propuesta.
