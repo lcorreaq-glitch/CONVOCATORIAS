@@ -1,0 +1,41 @@
+{
+  "summary": "Iteración 5 (UX rediseño 'Usar otra como plantilla'). Backend regresión 4/4 OK (resumen/export/clonar/import). Frontend: 10/11 features verificadas OK. UN BUG ALTO encontrado: en /convocatorias, al hacer click en la tarjeta 'Desde una plantilla' (start-from-template) el Dialog se CIERRA en vez de mostrar la lista de plantillas, debido a que el Dialog `open` solo acepta step===1||step===2 pero el handler asigna step='choose-template' (string).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Convocatorias.jsx — wizard 'Nueva convocatoria'",
+        "issue": "Click en 'Desde una plantilla' (data-testid=start-from-template) cierra el Dialog en lugar de avanzar a la lista de template-choice-*. Root cause: <Dialog open={step === 1 || step === 2}> no incluye el valor 'choose-template'. Fix: `open={step === 1 || step === 2 || step === 'choose-template'}` (línea ~140 de /app/frontend/src/pages/Convocatorias.jsx).",
+        "selector": "[data-testid='start-from-template']",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "PlantillaWizard / Nueva convocatoria Dialog", "issues": ["Console warning recurrente: 'Missing Description or aria-describedby={undefined} for DialogContent'. Falta <DialogDescription> en los Dialogs de PlantillaWizard.jsx y Convocatorias.jsx (impacto de accesibilidad)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_plantilla_regression.py",
+    "/app/test_reports/pytest/plantilla_regression.xml"
+  ],
+  "action_items": [
+    "FIX HIGH: en /app/frontend/src/pages/Convocatorias.jsx línea ~140, cambiar el Dialog open a `open={step === 1 || step === 2 || step === 'choose-template'}` para que al elegir 'Desde una plantilla' el modal continúe abierto y muestre las tarjetas template-choice-*. Sin este fix, el flujo end-to-end de crear convocatoria desde plantilla queda roto desde la primera tarjeta.",
+    "OPCIONAL: Agregar <DialogDescription> en PlantillaWizard.jsx y en el Dialog 'Nueva convocatoria' de Convocatorias.jsx para silenciar el warning de accesibilidad de Radix."
+  ],
+  "critical_code_review_comments": [
+    "Bug de estado-máquina en Convocatorias.jsx: se mezclan valores numéricos (0,1,2,3) con strings ('choose-template') en `step`, lo que provoca que el Dialog open evaluado como `step===1||step===2` excluya el sub-estado de selección de plantilla. Sugerencia: usar un enum de strings ('closed'|'mode'|'choose-template'|'form'|'done') o agregar explícitamente la condición.",
+    "PlantillaWizard.jsx — el preselectedSourceId salta directo al paso 2; correcto. Pero NOTA: cuando preselectedSourceId está set y el usuario hace click en wizard-back, esa opción se oculta (correcto). Sin embargo, si la convocatoria preseleccionada YA no existe en la lista de convocatorias retornada, `source` queda undefined y el paso 2 no renderiza nada. Considerar un fallback que vuelva a paso 1.",
+    "Convocatorias.jsx usa `confirm()` nativo para eliminar — inconsistente con resto del módulo (ya señalado en iter 4 para CatalogosPanel)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_plantilla_regression.py (NUEVO – 4 tests de regresión sobre los endpoints resumen/export/clonar/import)"
+  ],
+  "success_rate": {"backend": "100% (4/4 regresión)", "frontend": "91% (10/11 features; bug alto en start-from-template)"},
+  "test_credentials": "lcorreaq / Chocolate2026!",
+  "seed_data_creation": "Durante la prueba se ejecutó un clonar real desde 'prueba' (43 items) hacia INC2026 en modo 'agregar'. Resultado: 7 desempates copiados + 36 omitidos por nombre duplicado. INC2026 ahora muestra Desempates(21) en vez de Desempates(14). Si esto afecta tests posteriores, considerar limpiar desempates con sufijo duplicado.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Después del fix del Dialog open: probar el flujo completo: /convocatorias → Nueva convocatoria → Desde una plantilla → seleccionar template-choice-INC2026 → completar formulario → Crear y abrir plantilla → wizard debe abrirse en paso 2 con preselectedSourceId=INC2026 → wizard-confirm. TestIds confirmados funcionando: plantilla-btn, export-config-btn, advanced-menu-btn, import-config-trigger, plantilla-source-{codigo}, preview-{campos|catalogos|criterios|desempates}, toggle-advanced, wizard-back, wizard-confirm, wizard-close, start-blank, start-from-template, conv-template-{codigo}. El testId del botón crear es 'create-entity-button' (TID.createBtn).",
+  "rca of the issue": "Bug start-from-template: La máquina de estados de Convocatorias.jsx mezcla números y strings para `step`. El Dialog está controlado por `open={step === 1 || step === 2}`. El botón Desde una plantilla hace `setStep('choose-template')`. Resultado: Dialog.open pasa a false → Radix dispara onOpenChange(false) → el handler resetea step a 0 (`if (!v) setStep(0)`). El sub-render `{step === 'choose-template' && ...}` nunca se monta porque el DialogContent ya no está. Reproduce: login → /convocatorias → click 'Nueva convocatoria' → click 'Desde una plantilla'. Esperado: aparece lista de template-choice-*. Real: dialog se cierra y vuelve a la página de convocatorias. Fix mínimo (1 línea): incluir `step === 'choose-template'` en la expresión `open` del Dialog."
+}
