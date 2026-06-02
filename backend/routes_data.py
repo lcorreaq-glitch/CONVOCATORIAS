@@ -62,6 +62,7 @@ async def create_propuesta(payload: PropuestaIn, user: dict = Depends(require_ro
         doc["codigo"] = f"P-{count + 1:04d}"
     doc["created_at"] = now_iso()
     await db.propuestas.insert_one(doc)
+    doc.pop("_id", None)
     await audit(user, "create", "propuestas", doc["id"], valor_nuevo={"codigo": doc["codigo"]})
     return doc
 
@@ -169,6 +170,7 @@ async def create_jurado(payload: JuradoIn, user: dict = Depends(require_roles("a
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = now_iso()
     await db.jurados.insert_one(doc)
+    doc.pop("_id", None)
 
     if crear_user:
         username = doc["email"].lower()
@@ -288,6 +290,7 @@ async def create_terna(payload: TernaIn, user: dict = Depends(require_roles("adm
         doc["codigo"] = f"T{count + 1}"
     doc["created_at"] = now_iso()
     await db.ternas.insert_one(doc)
+    doc.pop("_id", None)
     await audit(user, "create", "ternas", doc["id"], valor_nuevo={"codigo": doc["codigo"]})
     return doc
 
@@ -345,6 +348,7 @@ async def create_asignacion(payload: AsignacionIn, user: dict = Depends(require_
     doc["estado"] = "Creada"
     doc["created_at"] = now_iso()
     await db.asignaciones.insert_one(doc)
+    doc.pop("_id", None)
 
     # Auto-crear evaluación individual en estado Borrador si tipo=individual
     if doc["tipo_evaluacion"] == "individual" and doc.get("jurado_id"):

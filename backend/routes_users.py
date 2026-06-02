@@ -59,6 +59,7 @@ async def create_user(payload: UserCreate, user: dict = Depends(require_roles("a
     await db.users.insert_one(doc)
     await audit(user, "create", "users", doc["id"], valor_nuevo={"username": doc["username"], "role": doc["role"]})
     doc.pop("password_hash", None)
+    doc.pop("_id", None)
     return doc
 
 

@@ -53,6 +53,7 @@ async def create_convocatoria(payload: ConvocatoriaIn, user: dict = Depends(requ
     doc["created_at"] = now_iso()
     doc["created_by"] = user["username"]
     await db.convocatorias.insert_one(doc)
+    doc.pop("_id", None)
     await audit(user, "create", "convocatorias", doc["id"], valor_nuevo={"codigo": doc["codigo"], "nombre": doc["nombre"]})
     return {**doc}
 
@@ -98,6 +99,7 @@ async def create_catalogo(payload: CatalogoIn, user: dict = Depends(require_role
         v.setdefault("id", str(uuid.uuid4()))
         v.setdefault("activo", True)
     await db.catalogos.insert_one(doc)
+    doc.pop("_id", None)
     await audit(user, "create", "catalogos", doc["id"], valor_nuevo={"nombre": doc["nombre"]})
     return doc
 
@@ -163,6 +165,7 @@ async def create_campo(payload: CampoIn, user: dict = Depends(require_roles("adm
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = now_iso()
     await db.campos.insert_one(doc)
+    doc.pop("_id", None)
     await audit(user, "create", "campos", doc["id"], valor_nuevo={"nombre_interno": doc["nombre_interno"]})
     return doc
 
@@ -214,6 +217,7 @@ async def create_criterio(payload: CriterioIn, user: dict = Depends(require_role
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = now_iso()
     await db.criterios.insert_one(doc)
+    doc.pop("_id", None)
     await audit(user, "create", "criterios", doc["id"], valor_nuevo={"nombre": doc["nombre"]})
     return doc
 
@@ -259,6 +263,7 @@ async def create_desempate(payload: DesempateIn, user: dict = Depends(require_ro
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = now_iso()
     await db.desempates.insert_one(doc)
+    doc.pop("_id", None)
     await audit(user, "create", "desempates", doc["id"], valor_nuevo={"nombre": doc["nombre"]})
     return doc
 

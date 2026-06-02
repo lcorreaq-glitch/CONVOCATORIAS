@@ -156,6 +156,7 @@ async def generar_ranking(convocatoria_id: str, agrupar_por: str = "subregion",
         resultado["grupos"].append({"grupo": g, "items": items, "total": len(items)})
 
     await db.rankings.insert_one(resultado)
+    resultado.pop("_id", None)
     await audit(user, "generate", "rankings", resultado["id"], detalle=f"agrupar_por={agrupar_por}, modo={modo}")
     return resultado
 

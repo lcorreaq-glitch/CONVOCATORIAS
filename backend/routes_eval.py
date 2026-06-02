@@ -166,6 +166,7 @@ async def crear_eval_colectiva(payload: EvalColectivaIn, user: dict = Depends(re
         "propuesta_id": payload.propuesta_id, "terna_id": payload.terna_id
     })
     if existing:
+        existing.pop("_id", None)
         return existing
     # Calcular promedio de las evaluaciones individuales finalizadas
     individuales = await db.evaluaciones_individuales.find({
@@ -199,6 +200,7 @@ async def crear_eval_colectiva(payload: EvalColectivaIn, user: dict = Depends(re
         "created_at": now_iso(),
     }
     await db.evaluaciones_colectivas.insert_one(doc)
+    doc.pop("_id", None)
     await audit(user, "create", "evaluaciones_colectivas", doc["id"])
     return doc
 

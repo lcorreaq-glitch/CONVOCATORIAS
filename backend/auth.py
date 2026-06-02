@@ -175,7 +175,8 @@ async def login(payload: LoginRequest, request: Request, response: Response):
     if not ident:
         raise HTTPException(status_code=400, detail="Usuario requerido")
     ip = request.client.host if request.client else "anon"
-    lock_key = f"{ip}:{ident}"
+    # Use identifier-only key (k8s ingress IPs are unstable)
+    lock_key = ident
     await check_lockout(lock_key)
 
     db = get_db()
