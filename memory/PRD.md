@@ -180,6 +180,14 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - ✅ **Totales con tarjetas semánticas**: oficial verde + diferencial amarillo (no suma).
 - ✅ Banner v1 con grid de 5 criterios cuando es etapa colectiva.
 
+### Branding institucional + Tarjeta de convocatoria en Actas (Feb 2026 v13)
+- ✅ **Header image institucional**: imagen PNG/JPG horizontal subible desde Configuración → Plantillas de Actas. Se renderiza al inicio de cada PDF como banner (17cm × 3.5cm).
+- ✅ **Footer image institucional**: imagen subible que se imprime al final de cada acta (después de firmas).
+- ✅ **Tarjeta de Convocatoria** siempre presente en el PDF: muestra CÓDIGO + NOMBRE + VIGENCIA + ENTIDAD con borde lateral verde institucional. Garantiza que cada acta sea identificable.
+- ✅ Branding almacenado en `convocatoria.configuracion.acta_branding.{header_image_url, footer_image_url}` como data URLs.
+- ✅ Endpoints: `GET /api/convocatorias/{cid}/acta-branding` y `PATCH` (admin). Validado con curl → PDF renderiza el header verde correctamente (verificado vía Gemini OCR del PDF generado).
+- ✅ UI: nuevo bloque "Identidad Gráfica Institucional" en lo alto del panel Plantillas, con uploaders dual (Header / Footer), preview de la imagen cargada y botón "Quitar".
+
 ## Backlog / próximas tareas
 
 ### P0 (cierre de funcionalidad clave)

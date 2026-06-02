@@ -238,9 +238,18 @@ async def _get_template(db, conv: dict, tipo: str) -> dict:
     saved = (config.get("acta_templates") or {}).get(tipo)
     if saved:
         return saved
-    # Default
     base = DEFAULT_INC2026_TEMPLATES if _is_inc2026(conv) else DEFAULT_GENERIC_TEMPLATES
     return base.get(tipo, DEFAULT_GENERIC_TEMPLATES[tipo])
+
+
+def _get_branding(conv: dict) -> dict:
+    """Devuelve {header_image_url, footer_image_url} configurados en la convocatoria."""
+    config = (conv or {}).get("configuracion") or {}
+    branding = config.get("acta_branding") or {}
+    return {
+        "header_image_url": branding.get("header_image_url"),
+        "footer_image_url": branding.get("footer_image_url"),
+    }
 
 
 # ============================================================
@@ -302,6 +311,37 @@ async def toggle_uso_subregional(cid: str, payload: dict = Body(...),
     config["uso_acta_subregional"] = bool(payload.get("enabled", False))
     await db.convocatorias.update_one({"id": cid}, {"$set": {"configuracion": config}})
     return {"ok": True, "uso_acta_subregional": config["uso_acta_subregional"]}
+
+
+@router.get("/convocatorias/{cid}/acta-branding")
+async def get_acta_branding(cid: str, user: dict = Depends(get_current_user)):
+    """Devuelve las imágenes header/footer institucionales del acta."""
+    db = get_db()
+    conv = await db.convocatorias.find_one({"id": cid}, {"_id": 0})
+    if not conv:
+        raise HTTPException(404, "Convocatoria no encontrada")
+    return _get_branding(conv)
+
+
+@router.patch("/convocatorias/{cid}/acta-branding")
+async def update_acta_branding(cid: str, payload: dict = Body(...),
+                                user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    """Guarda imágenes institucionales (data URLs) para header y/o footer del acta.
+    Payload acepta header_image_url y/o footer_image_url (string data URL o None para limpiar)."""
+    db = get_db()
+    conv = await db.convocatorias.find_one({"id": cid})
+    if not conv:
+        raise HTTPException(404, "Convocatoria no encontrada")
+    config = conv.get("configuracion") or {}
+    branding = config.get("acta_branding") or {}
+    if "header_image_url" in payload:
+        branding["header_image_url"] = payload["header_image_url"] or None
+    if "footer_image_url" in payload:
+        branding["footer_image_url"] = payload["footer_image_url"] or None
+    config["acta_branding"] = branding
+    await db.convocatorias.update_one({"id": cid}, {"$set": {"configuracion": config}})
+    await audit(user, "update", "acta_branding", cid)
+    return {"ok": True, "branding": _get_branding({"configuracion": config})}
 
 
 # ============================================================
@@ -519,12 +559,51 @@ def _base_styles():
     }
 
 
-def _header_block(elements, ctx, conv, tmpl, st):
+def _header_block(elements, ctx, conv, tmpl, st, branding):
+    # 1) Header image (imagen institucional, ej. logo + cabezote de la convocatoria)
+    header_img = _decoded_image(branding.get("header_image_url"), width=17*cm, height=3.5*cm) if branding else None
+    if header_img:
+        elements.append(header_img)
+        elements.append(Spacer(1, 8))
+
+    # 2) Card de convocatoria — siempre presente para identificar el documento
+    conv_codigo = (conv or {}).get("codigo", "—")
+    conv_nombre = (conv or {}).get("nombre", "Convocatoria")
+    conv_vigencia = (conv or {}).get("vigencia", "")
+    conv_entidad = (conv or {}).get("entidad", "") or (conv or {}).get("organizacion", "")
+    conv_table = Table([[
+        Paragraph(f"<b>CONVOCATORIA</b>", st["small"]),
+        Paragraph(f"<b>{conv_codigo}</b> · {conv_nombre}{(' · '+str(conv_vigencia)) if conv_vigencia else ''}", st["body"]),
+    ], [
+        Paragraph(f"<b>ENTIDAD</b>", st["small"]) if conv_entidad else Paragraph("", st["small"]),
+        Paragraph(conv_entidad, st["body"]) if conv_entidad else Paragraph("", st["body"]),
+    ]], colWidths=[3.2*cm, 13.8*cm])
+    conv_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), rl_colors.HexColor("#F0F7F5")),
+        ("BOX", (0, 0), (-1, -1), 0.4, rl_colors.HexColor("#CDE7E1")),
+        ("LINEBEFORE", (0, 0), (0, -1), 3, rl_colors.HexColor("#14776A")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    elements.append(conv_table)
+    elements.append(Spacer(1, 10))
+
+    # 3) Fecha + título del acta
     elements.append(Paragraph(f"FECHA: {ctx['fecha']}", st["fecha"]))
     encabezado = _render_text(tmpl.get("encabezado", ""), ctx)
     for line in encabezado.split("\n"):
         elements.append(Paragraph(line.strip().replace("&", "&amp;"), st["title"]))
     elements.append(Spacer(1, 8))
+
+
+def _footer_block(elements, branding, st):
+    """Bloque de pie de página con imagen institucional (logo, firma de entidad, etc.)."""
+    footer_img = _decoded_image((branding or {}).get("footer_image_url"), width=17*cm, height=2.2*cm)
+    if footer_img:
+        elements.append(Spacer(1, 14))
+        elements.append(footer_img)
 
 
 def _decoded_image(data_url: str, width=4*cm, height=1.6*cm) -> Optional[Image]:
@@ -568,13 +647,13 @@ def _firmantes_table(firmantes: list, st) -> Table:
 
 
 def _build_pdf(tmpl: dict, ctx: dict, conv: dict, tabla_headers: list,
-                tabla_rows: list, firmantes: list) -> bytes:
+                tabla_rows: list, firmantes: list, branding: dict = None) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm,
                              topMargin=1.6*cm, bottomMargin=1.6*cm)
     st = _base_styles()
     el = []
-    _header_block(el, ctx, conv, tmpl, st)
+    _header_block(el, ctx, conv, tmpl, st, branding or {})
 
     # Datos del jurado/subregion (si aplica)
     if ctx.get("jurado_nombre"):
@@ -645,6 +724,9 @@ def _build_pdf(tmpl: dict, ctx: dict, conv: dict, tabla_headers: list,
     el.append(Paragraph(tmpl.get("pie_firmantes_titulo", "FIRMANTES"), st["h2"]))
     el.append(_firmantes_table(firmantes, st))
 
+    # Footer institucional
+    _footer_block(el, branding or {}, st)
+
     doc.build(el)
     buf.seek(0)
     return buf.getvalue()
@@ -690,7 +772,7 @@ async def acta_individual_jurado(jurado_id: str, user: dict = Depends(get_curren
         "firma_url": (jur.get("datos") or {}).get("firma_url"),
         "subregion": ", ".join(jur.get("subregiones") or []),
     }]
-    pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes)
+    pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes, _get_branding(conv))
     await audit(user, "generate_acta", "actas", jurado_id, detalle="individual_jurado")
     return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
                              headers={"Content-Disposition": f'inline; filename="acta_individual_{jur["nombre"].replace(" ","_")}.pdf"'})
@@ -737,7 +819,7 @@ async def acta_colectiva_terna(terna_id: str, user: dict = Depends(get_current_u
             "firma_url": firma_data.get("firma_url") or ((jur_obj or {}).get("datos") or {}).get("firma_url") if firma_data else None,
             "terna": terna.get("codigo"),
         })
-    pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes)
+    pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes, _get_branding(conv))
     await audit(user, "generate_acta", "actas", terna_id, detalle="colectiva_terna")
     return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
                              headers={"Content-Disposition": f'inline; filename="acta_colectiva_terna_{terna["codigo"]}.pdf"'})
@@ -792,7 +874,7 @@ async def acta_subregional(convocatoria_id: str, subregion: str,
             "firma_url": fd.get("firma_url"),
             "terna": "",
         })
-    pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes)
+    pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes, _get_branding(conv))
     await audit(user, "generate_acta", "actas", f"sub-{subregion}", detalle=f"subregional:{subregion}")
     return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
                              headers={"Content-Disposition": f'inline; filename="acta_subregional_{subregion.replace(" ","_")}.pdf"'})

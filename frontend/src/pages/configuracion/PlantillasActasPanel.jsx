@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Save, FileText, Users, Map, Copy, AlertCircle, Sparkles } from "lucide-react";
+import { Save, FileText, Users, Map, Copy, AlertCircle, Sparkles, ImageIcon, Upload, Trash2 } from "lucide-react";
 
 const TIPOS = [
   { key: "individual", label: "Acta Individual", icon: FileText, desc: "Una por jurado · resume sus evaluaciones individuales asignadas." },
@@ -29,13 +29,18 @@ export default function PlantillasActasPanel({ convId }) {
   const [activeTipo, setActiveTipo] = useState("individual");
   const [draft, setDraft] = useState({});
   const [busy, setBusy] = useState(false);
+  const [branding, setBranding] = useState({ header_image_url: null, footer_image_url: null });
 
   const load = async () => {
     if (!convId) return;
     try {
-      const r = await api.get(`/convocatorias/${convId}/acta-templates`);
-      setData(r.data);
-      const t = r.data.templates[activeTipo] || {};
+      const [tpl, br] = await Promise.all([
+        api.get(`/convocatorias/${convId}/acta-templates`),
+        api.get(`/convocatorias/${convId}/acta-branding`),
+      ]);
+      setData(tpl.data);
+      setBranding(br.data || { header_image_url: null, footer_image_url: null });
+      const t = tpl.data.templates[activeTipo] || {};
       setDraft({ ...t });
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail) || "Error al cargar plantillas");
@@ -77,13 +82,68 @@ export default function PlantillasActasPanel({ convId }) {
     toast.success(`${tag} copiado`);
   };
 
+  const uploadBrandingImage = async (kind, file) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { toast.error("Solo imágenes (PNG, JPG)"); return; }
+    const fd = new FormData(); fd.append("file", file);
+    try {
+      const up = await api.post("/upload/image", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      const payload = { [kind]: up.data.data_url };
+      const r = await api.patch(`/convocatorias/${convId}/acta-branding`, payload);
+      setBranding(r.data.branding);
+      toast.success(kind === "header_image_url" ? "Encabezado cargado" : "Pie de página cargado");
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail) || "Error al subir imagen");
+    }
+  };
+
+  const clearBrandingImage = async (kind) => {
+    try {
+      const r = await api.patch(`/convocatorias/${convId}/acta-branding`, { [kind]: null });
+      setBranding(r.data.branding);
+      toast.success("Imagen eliminada");
+    } catch (e) {
+      toast.error("Error al eliminar imagen");
+    }
+  };
+
   if (!data) return <div className="text-muted-foreground text-sm">Cargando plantillas…</div>;
 
   const isDefault = data.templates[activeTipo]?._is_default;
   const tipoConfig = TIPOS.find((t) => t.key === activeTipo);
 
   return (
-    <div className="grid lg:grid-cols-3 gap-6">
+    <div className="space-y-6">
+      {/* BLOQUE: Identidad institucional (header/footer images) */}
+      <div className="border border-[#CDE7E1] rounded-lg bg-gradient-to-br from-[#F0F7F5] to-white p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <ImageIcon className="w-4 h-4 text-[#0F5E54]" />
+          <div className="text-[10px] uppercase tracking-[0.18em] font-display font-bold text-[#0F5E54]">Identidad gráfica institucional</div>
+        </div>
+        <p className="text-[12px] text-[#1A1F2C] mb-4">
+          Sube las imágenes <strong>encabezado</strong> (logo + cabezote institucional) y <strong>pie de página</strong> que aparecerán en TODAS las actas PDF de esta convocatoria. Formato recomendado: PNG horizontal · ancho 1700px aprox. Para INC2026, usa la imagen gráfica oficial de la Gobernación de Antioquia.
+        </p>
+        <div className="grid sm:grid-cols-2 gap-4">
+          <BrandingSlot
+            label="Encabezado (header)"
+            sublabel="Aparece en la parte superior de cada página"
+            value={branding.header_image_url}
+            onUpload={(f) => uploadBrandingImage("header_image_url", f)}
+            onClear={() => clearBrandingImage("header_image_url")}
+            testIdPrefix="acta-header"
+          />
+          <BrandingSlot
+            label="Pie de página (footer)"
+            sublabel="Aparece al final del acta, después de las firmas"
+            value={branding.footer_image_url}
+            onUpload={(f) => uploadBrandingImage("footer_image_url", f)}
+            onClear={() => clearBrandingImage("footer_image_url")}
+            testIdPrefix="acta-footer"
+          />
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-6">
       {/* Sidebar: tipos + merge tags */}
       <div className="lg:col-span-1 space-y-4">
         <div className="space-y-2">
@@ -190,6 +250,35 @@ export default function PlantillasActasPanel({ convId }) {
           </div>
         ))}
       </div>
+      </div>
+    </div>
+  );
+}
+
+function BrandingSlot({ label, sublabel, value, onUpload, onClear, testIdPrefix }) {
+  return (
+    <div className="border border-border bg-white rounded-md p-3">
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div>
+          <div className="text-[12px] font-semibold">{label}</div>
+          <div className="text-[10.5px] text-muted-foreground">{sublabel}</div>
+        </div>
+        {value && (
+          <button onClick={onClear} className="text-red-500 hover:text-red-700 text-[11px] inline-flex items-center gap-1" data-testid={`${testIdPrefix}-clear`}>
+            <Trash2 className="w-3 h-3" /> Quitar
+          </button>
+        )}
+      </div>
+      {value ? (
+        <div className="border border-border rounded-sm bg-[#FAFBFC] p-2">
+          <img src={value} alt={label} className="w-full max-h-24 object-contain" data-testid={`${testIdPrefix}-img`} />
+        </div>
+      ) : (
+        <label className="flex items-center justify-center gap-2 border-2 border-dashed border-[#CDE7E1] rounded-sm bg-[#F0F7F5]/30 hover:bg-[#F0F7F5] cursor-pointer py-6 text-[12px] text-[#0F5E54] font-semibold transition-colors" data-testid={`${testIdPrefix}-upload-label`}>
+          <Upload className="w-4 h-4" /> Subir imagen
+          <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={(e) => onUpload(e.target.files?.[0])} data-testid={`${testIdPrefix}-input`} />
+        </label>
+      )}
     </div>
   );
 }
