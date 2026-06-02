@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Badge } from "@/components/PageHeader";
-import { Database, ListChecks, ClipboardList, Trophy, AlertTriangle, FileText, Boxes, Sparkles } from "lucide-react";
+import { Database, ListChecks, ClipboardList, Trophy, AlertTriangle, FileText, Boxes, Sparkles, Info } from "lucide-react";
 
 /**
  * ResumenPanel: vista panorámica de cómo se vincula la configuración a la convocatoria
@@ -170,6 +170,39 @@ export default function ResumenPanel({ convId, refreshKey, onJump }) {
           </p>
         </div>
       )}
+
+      {/* Referencia: tipos de comparación del sistema */}
+      <details className="rounded-xl border border-border bg-white">
+        <summary className="cursor-pointer list-none p-4 flex items-center justify-between hover:bg-secondary/30 rounded-xl">
+          <div className="flex items-center gap-2 font-display font-bold text-[14px]">
+            <Info className="w-4 h-4 text-[#5E6878]" />
+            ¿Qué tipos de comparación existen para los desempates?
+          </div>
+          <span className="text-[11px] text-muted-foreground">Click para ver</span>
+        </summary>
+        <div className="px-5 pb-5 grid sm:grid-cols-2 gap-2 text-[12.5px]">
+          {[
+            { v: "mayor_valor", label: "Mayor valor primero", hint: "Para criterios o números — el más alto gana." },
+            { v: "menor_valor", label: "Menor valor primero", hint: "Para números — el más bajo gana (ej. costo, edad)." },
+            { v: "fecha_mas_antigua", label: "Fecha más antigua primero", hint: "Para fechas — la más vieja gana." },
+            { v: "fecha_mas_reciente", label: "Fecha más reciente primero", hint: "Para fechas — la más nueva gana." },
+            { v: "hora_mas_antigua", label: "Hora más antigua primero", hint: "Para horas dentro del mismo día." },
+            { v: "hora_mas_reciente", label: "Hora más reciente primero", hint: "Para horas dentro del mismo día." },
+            { v: "sorteo", label: "Sorteo aleatorio", hint: "Última instancia — orden por azar reproducible." },
+          ].map((t) => (
+            <div key={t.v} className="border border-border rounded-lg p-2.5 flex flex-col gap-1">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-[#1A1F2C]">{t.label}</span>
+                <code className="text-[10px] bg-secondary px-1.5 py-0.5 rounded text-muted-foreground">{t.v}</code>
+              </div>
+              <span className="text-[11.5px] text-muted-foreground leading-snug">{t.hint}</span>
+            </div>
+          ))}
+        </div>
+        <div className="px-5 pb-4 -mt-2 text-[11.5px] text-muted-foreground italic">
+          Estos tipos son provistos por el sistema. Para agregar nuevos tipos de comparación se requiere una actualización de la plataforma.
+        </div>
+      </details>
     </div>
   );
 }

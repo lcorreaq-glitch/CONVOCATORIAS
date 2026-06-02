@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogT
 import { toast } from "sonner";
 import { Plus, Settings2, Trash2, Pencil, Link2 } from "lucide-react";
 import SortableTable from "./SortableTable";
+import InlineFlagsEditor from "./InlineFlagsEditor";
 
 const CAMPO_TIPOS = [
   "texto_corto", "texto_largo", "numero", "moneda", "porcentaje", "fecha",
@@ -17,6 +18,15 @@ const CAMPO_TIPOS = [
 ];
 
 const TIPOS_QUE_USAN_CATALOGO = ["lista", "seleccion_multiple"];
+
+const CAMPO_FLAGS = [
+  { key: "obligatorio", label: "obligatorio", tone: "info", help: "El campo no se puede dejar vacío al cargar una propuesta." },
+  { key: "uso_filtro", label: "filtro", tone: "default", help: "Aparece como filtro en listados y reportes." },
+  { key: "uso_ranking", label: "ranking", tone: "success", help: "Aparece como columna en el ranking final." },
+  { key: "uso_desempate", label: "desempate", tone: "warning", help: "Se puede usar como criterio de desempate." },
+  { key: "uso_actas", label: "actas", tone: "info", help: "Se incluye en actas y reportes oficiales." },
+  { key: "editable", label: "editable", tone: "muted", help: "Permite editar el valor después de creada la propuesta." },
+];
 
 export default function CamposPanel({ campos, convId, reload, catalogos }) {
   const [open, setOpen] = useState(false);
@@ -81,14 +91,13 @@ export default function CamposPanel({ campos, convId, reload, catalogos }) {
         );
       } },
     { key: "flags", label: "Se usa en", sortable: false, render: (c) => (
-      <div className="flex gap-1 flex-wrap">
-        <Badge tone="muted">propuesta</Badge>
-        {c.obligatorio && <Badge tone="info">obligatorio</Badge>}
-        {c.uso_filtro && <Badge tone="default">filtro</Badge>}
-        {c.uso_ranking && <Badge tone="success">ranking</Badge>}
-        {c.uso_desempate && <Badge tone="warning">desempate</Badge>}
-        {c.uso_actas && <Badge tone="info">actas</Badge>}
-      </div>
+      <InlineFlagsEditor
+        endpoint={`/campos/${c.id}`}
+        item={c}
+        flags={CAMPO_FLAGS}
+        alwaysOn={[{ label: "propuesta", tone: "muted" }]}
+        onChange={reload}
+      />
     ) },
     { key: "_actions", label: "", width: 80, render: (c) => (
       <div className="text-right space-x-1">

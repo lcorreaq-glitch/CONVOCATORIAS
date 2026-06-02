@@ -3,6 +3,8 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader, { Badge } from "@/components/PageHeader";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Sparkles, Info } from "lucide-react";
 
 import ResumenPanel from "./configuracion/ResumenPanel";
 import CamposPanel from "./configuracion/CamposPanel";
@@ -12,55 +14,81 @@ import DesempatesPanel from "./configuracion/DesempatesPanel";
 import AccionesGlobales from "./configuracion/AccionesGlobales";
 
 export default function Configuracion() {
-  const { activeConvocatoriaId } = useAuth();
+  const { activeConvocatoriaId, setConv } = useAuth();
   const [campos, setCampos] = useState([]);
   const [catalogos, setCatalogos] = useState([]);
   const [criterios, setCriterios] = useState([]);
   const [desempates, setDesempates] = useState([]);
-  const [conv, setConv] = useState(null);
+  const [convs, setConvs] = useState([]);
   const [tab, setTab] = useState("resumen");
+
+  const conv = convs.find((c) => c.id === activeConvocatoriaId);
 
   const reload = async () => {
     if (!activeConvocatoriaId) return;
-    const [c, a, b, cc, d] = await Promise.all([
-      api.get(`/convocatorias/${activeConvocatoriaId}`),
+    const [cs, a, b, cc, d] = await Promise.all([
+      api.get(`/convocatorias`),
       api.get(`/campos?convocatoria_id=${activeConvocatoriaId}`),
       api.get(`/catalogos?convocatoria_id=${activeConvocatoriaId}`),
       api.get(`/criterios?convocatoria_id=${activeConvocatoriaId}`),
       api.get(`/desempates?convocatoria_id=${activeConvocatoriaId}`),
     ]);
-    setConv(c.data);
+    setConvs(cs.data);
     setCampos(a.data); setCatalogos(b.data); setCriterios(cc.data); setDesempates(d.data);
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [activeConvocatoriaId]);
 
   if (!activeConvocatoriaId)
-    return <div className="p-10 text-muted-foreground">Selecciona una convocatoria en la cabecera para configurar.</div>;
+    return <div className="p-10 text-muted-foreground">Selecciona una convocatoria.</div>;
 
   return (
     <div className="flex-1 p-8 lg:p-10">
       <PageHeader
-        eyebrow={conv ? `Configurando: ${conv.codigo}` : "Estructura paramétrica"}
-        title="Configuración"
-        subtitle={
-          conv
-            ? `Todo lo que crees aquí queda vinculado a la convocatoria "${conv.nombre}". Cuando se carguen propuestas o se evalúe, usarán esta estructura.`
-            : "Define los campos de propuestas, catálogos institucionales, criterios de evaluación y reglas de desempate de la convocatoria seleccionada."
-        }
-        actions={conv && (
-          <AccionesGlobales convId={activeConvocatoriaId} convNombre={conv.nombre} onChange={reload} />
-        )}
+        eyebrow="Estructura paramétrica"
+        title="Configuración de Convocatoria"
+        subtitle="Define qué información lleva cada propuesta, qué evalúan los jurados y cómo se resuelven los empates."
+        actions={conv && <AccionesGlobales convId={activeConvocatoriaId} convNombre={conv.nombre} onChange={reload} />}
       />
 
-      {conv && (
-        <div className="mb-6 flex items-center gap-2 flex-wrap text-[12.5px]">
-          <span className="text-muted-foreground">Convocatoria activa:</span>
-          <Badge tone="info">{conv.estado}</Badge>
-          {conv.etapa_actual && <Badge tone="default">etapa: {conv.etapa_actual}</Badge>}
-          <span className="text-muted-foreground ml-2">|</span>
-          <span className="text-muted-foreground">{campos.length} campos · {catalogos.length} catálogos · {criterios.length} criterios · {desempates.length} desempates</span>
+      {/* SWITCHER de convocatoria — siempre visible y claro */}
+      <div className="mb-6 rounded-xl border border-[#CDE7E1] bg-gradient-to-br from-[#F0F7F5] to-white p-4">
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] font-display font-bold text-[#14776A] shrink-0">
+            <Sparkles className="w-3.5 h-3.5" />
+            Estás configurando
+          </div>
+          <Select value={activeConvocatoriaId} onValueChange={setConv}>
+            <SelectTrigger className="rounded-lg bg-white h-11 min-w-[320px] flex-1 max-w-2xl font-semibold text-[14px]" data-testid="conv-switcher">
+              <SelectValue placeholder="Selecciona convocatoria…" />
+            </SelectTrigger>
+            <SelectContent>
+              {convs.map((c) => (
+                <SelectItem key={c.id} value={c.id} className="py-2">
+                  <div className="flex flex-col">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-[11px] text-muted-foreground">{c.codigo}</span>
+                      <span className="font-semibold">{c.nombre}</span>
+                    </div>
+                    <span className="text-[10.5px] text-muted-foreground">{c.estado} · {c.etapa_actual || "—"}</span>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {conv && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge tone="info">{conv.estado}</Badge>
+              {conv.etapa_actual && <Badge tone="default">etapa: {conv.etapa_actual}</Badge>}
+            </div>
+          )}
         </div>
-      )}
+        <p className="mt-3 text-[12px] text-[#5E6878] flex items-start gap-1.5 leading-relaxed">
+          <Info className="w-3.5 h-3.5 mt-0.5 shrink-0 text-[#14776A]" />
+          Todo lo que crees aquí (campos, catálogos, criterios y desempates) queda vinculado a esta convocatoria.
+          Si tienes varias convocatorias, cambia desde aquí o desde el panel lateral.
+          {convs.length > 1 && <span className="ml-1 font-semibold text-[#14776A]">Hay {convs.length} convocatorias disponibles.</span>}
+        </p>
+      </div>
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="rounded-sm bg-secondary p-1">

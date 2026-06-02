@@ -158,9 +158,16 @@ async def update_catalogo(cat_id: str, payload: dict, user: dict = Depends(requi
 @router.delete("/catalogos/{cat_id}")
 async def delete_catalogo(cat_id: str, user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
     db = get_db()
-    await db.catalogos.update_one({"id": cat_id}, {"$set": {"activo": False}})
-    await audit(user, "deactivate", "catalogos", cat_id)
-    return {"ok": True}
+    cat = await db.catalogos.find_one({"id": cat_id})
+    if not cat:
+        raise HTTPException(status_code=404, detail="Catálogo no encontrado")
+    # Bloquear si tiene campos vinculados
+    linked = await db.campos.count_documents({"catalogo_id": cat_id})
+    if linked > 0:
+        raise HTTPException(status_code=409, detail=f"El catálogo está vinculado a {linked} campo(s). Desvincúlalos antes de eliminar.")
+    await db.catalogos.delete_one({"id": cat_id})
+    await audit(user, "delete", "catalogos", cat_id, valor_anterior={"nombre": cat.get("nombre")})
+    return {"ok": True, "deleted": True}
 
 
 # ==================== CAMPOS PERSONALIZADOS ====================

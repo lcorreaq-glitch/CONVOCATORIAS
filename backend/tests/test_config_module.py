@@ -234,3 +234,105 @@ class TestExportImport:
         r = requests.post(f"{API}/convocatorias/{conv_id}/configuracion/import",
                           json={"data": {"krinos_export_version": 999}}, headers=admin_headers)
         assert r.status_code == 400
+
+
+# ---- New in iteration 4: hard delete catalogo with link-check + PATCH campos flags ----
+class TestDeleteCatalogoHardDelete:
+    def test_delete_blocked_when_linked_then_hard_delete_when_unlinked(self, admin_headers, conv_id):
+        # 1) Create new catalogo
+        cat_payload = {
+            "convocatoria_id": conv_id,
+            "nombre": f"TEST_CatHardDel_{uuid.uuid4().hex[:6]}",
+            "descripcion": "tmp para borrado",
+            "valores": [{"nombre": "A"}, {"nombre": "B"}],
+        }
+        r = requests.post(f"{API}/catalogos", json=cat_payload, headers=admin_headers)
+        assert r.status_code in (200, 201), r.text
+        cat_id = r.json()["id"]
+
+        # 2) Create a campo that uses this catalogo
+        ni = f"test_hd_campo_{uuid.uuid4().hex[:5]}"
+        rc = requests.post(f"{API}/campos", json={
+            "convocatoria_id": conv_id,
+            "nombre_visible": "TEST hard delete campo",
+            "nombre_interno": ni,
+            "tipo": "lista",
+            "catalogo_id": cat_id,
+            "orden": 99,
+        }, headers=admin_headers)
+        assert rc.status_code in (200, 201), rc.text
+        campo_id = rc.json()["id"]
+
+        # 3) DELETE must be blocked with 409 + detail mentions "vinculado"
+        rd = requests.delete(f"{API}/catalogos/{cat_id}", headers=admin_headers)
+        assert rd.status_code == 409, rd.text
+        body = rd.json()
+        detail = body.get("detail", "") if isinstance(body, dict) else ""
+        assert "vinculado" in detail.lower(), f"unexpected detail: {detail}"
+
+        # 4) Verify catalogo still exists
+        rg = requests.get(f"{API}/catalogos/{cat_id}", headers=admin_headers)
+        # endpoint may not exist; instead list and check
+        cats = requests.get(f"{API}/catalogos", params={"convocatoria_id": conv_id},
+                            headers=admin_headers).json()
+        assert any(c["id"] == cat_id for c in cats), "catalogo should still exist after blocked delete"
+
+        # 5) Unlink: delete the campo
+        rdc = requests.delete(f"{API}/campos/{campo_id}", headers=admin_headers)
+        assert rdc.status_code in (200, 204)
+
+        # 6) Now hard-delete the catalogo
+        rd2 = requests.delete(f"{API}/catalogos/{cat_id}", headers=admin_headers)
+        assert rd2.status_code == 200, rd2.text
+        body2 = rd2.json()
+        # hard delete contract: returns ok/deleted true
+        assert body2.get("deleted") is True or body2.get("ok") is True
+
+        # 7) Verify it is gone from listing (HARD delete, not soft)
+        cats_after = requests.get(f"{API}/catalogos", params={"convocatoria_id": conv_id},
+                                  headers=admin_headers).json()
+        assert not any(c["id"] == cat_id for c in cats_after), \
+            "catalogo should be hard-deleted (not in listing)"
+
+
+class TestCampoFlagsPatch:
+    """The frontend InlineFlagsEditor calls PATCH /api/campos/{id} with toggled flag."""
+
+    def test_patch_individual_flags_persist(self, admin_headers, conv_id):
+        campos = requests.get(f"{API}/campos", params={"convocatoria_id": conv_id},
+                              headers=admin_headers).json()
+        assert campos, "no campos in seed"
+        target = campos[0]
+        cid = target["id"]
+        flags = ["obligatorio", "uso_filtro", "uso_ranking", "uso_desempate", "uso_actas", "editable"]
+        original = {f: bool(target.get(f, False)) for f in flags}
+
+        try:
+            # Toggle each flag in turn and verify GET reflects it
+            for f in flags:
+                new_val = not original[f]
+                r = requests.patch(f"{API}/campos/{cid}", json={f: new_val}, headers=admin_headers)
+                assert r.status_code in (200, 204), f"PATCH {f} failed: {r.status_code} {r.text}"
+                # Re-fetch and verify persistence
+                after = requests.get(f"{API}/campos", params={"convocatoria_id": conv_id},
+                                     headers=admin_headers).json()
+                t = next(c for c in after if c["id"] == cid)
+                assert bool(t.get(f, False)) == new_val, f"flag {f} did not persist"
+        finally:
+            # Restore originals
+            requests.patch(f"{API}/campos/{cid}", json=original, headers=admin_headers)
+
+
+# ---- Regression: convocatorias listing must include both seed entries ----
+class TestConvocatoriasSwitcher:
+    def test_listing_includes_seed_convocatorias(self, admin_headers):
+        r = requests.get(f"{API}/convocatorias", headers=admin_headers)
+        assert r.status_code == 200
+        items = r.json()
+        nombres = [c.get("nombre") for c in items]
+        codigos = [c.get("codigo") for c in items]
+        assert any(co == "INC2026" for co in codigos), f"INC2026 missing; got codigos={codigos}"
+        # 'prueba' was mentioned in agent_to_agent_context_note
+        assert any((n or "").lower() == "prueba" for n in nombres) or len(items) >= 2, \
+            f"expected at least 2 convocatorias, got nombres={nombres}"
+

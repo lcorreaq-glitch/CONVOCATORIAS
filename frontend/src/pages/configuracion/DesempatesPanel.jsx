@@ -193,13 +193,19 @@ export default function DesempatesPanel({ desempates, convId, reload, criterios 
 
               {f.fuente !== "sorteo" && (
                 <div>
-                  <Label>Tipo de comparación</Label>
+                  <Label className="flex items-center gap-1.5">
+                    Tipo de comparación
+                    <span className="text-[10px] text-muted-foreground font-normal italic">(opciones del sistema)</span>
+                  </Label>
                   <Select value={f.tipo_comparacion} onValueChange={(v) => setF({ ...f, tipo_comparacion: v })}>
                     <SelectTrigger className="rounded-lg"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {TIPOS.filter((t) => t.value !== "sorteo").map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
+                  <p className="text-[10.5px] text-muted-foreground mt-1 leading-snug">
+                    Define cómo se ordenan dos propuestas al comparar. Para fechas/horas usa los tipos correspondientes.
+                  </p>
                 </div>
               )}
 

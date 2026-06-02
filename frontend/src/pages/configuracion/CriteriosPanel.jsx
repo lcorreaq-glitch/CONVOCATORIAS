@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { api, formatApiError } from "@/lib/api";
-import { Badge, EmptyState } from "@/components/PageHeader";
+import { EmptyState } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,6 +9,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogT
 import { toast } from "sonner";
 import { Plus, Trash2, Pencil } from "lucide-react";
 import SortableTable from "./SortableTable";
+import InlineFlagsEditor from "./InlineFlagsEditor";
+
+const CRITERIO_FLAGS = [
+  { key: "oficial", label: "oficial", tone: "success", help: "El puntaje suma al total final." },
+  { key: "diferencial", label: "diferencial", tone: "warning", help: "Información complementaria que no afecta el total." },
+  { key: "obligatorio", label: "obligatorio", tone: "info", help: "El jurado debe diligenciarlo para finalizar." },
+];
 
 export default function CriteriosPanel({ criterios, convId, reload }) {
   const [open, setOpen] = useState(false);
@@ -43,12 +50,16 @@ export default function CriteriosPanel({ criterios, convId, reload }) {
     )},
     { key: "rango", label: "Rango", sortable: true, sortValue: (c) => c.puntaje_max || 0, render: (c) => <span className="font-mono tabular-nums">{c.puntaje_min} – {c.puntaje_max}</span> },
     { key: "ponderacion", label: "Ponderación", sortable: true, render: (c) => <span className="font-mono tabular-nums">{c.ponderacion}</span> },
-    { key: "tipo", label: "Tipo", sortable: true, sortValue: (c) => c.diferencial ? 1 : 0, render: (c) => c.diferencial ? <Badge tone="warning">diferencial</Badge> : <Badge tone="success">oficial (suma al total)</Badge> },
+    { key: "tipo", label: "Configuración", sortable: false, render: (c) => (
+      <InlineFlagsEditor
+        endpoint={`/criterios/${c.id}`}
+        item={c}
+        flags={CRITERIO_FLAGS}
+        onChange={reload}
+      />
+    )},
     { key: "uso", label: "Se usa en", sortable: false, render: () => (
-      <div className="flex gap-1 flex-wrap">
-        <Badge tone="info">eval. individual</Badge>
-        <Badge tone="info">eval. colectiva</Badge>
-      </div>
+      <span className="text-[11px] text-muted-foreground">Todas las evaluaciones (individual + colectiva)</span>
     )},
     { key: "_actions", label: "", width: 80, render: (c) => (
       <div className="text-right space-x-1">
