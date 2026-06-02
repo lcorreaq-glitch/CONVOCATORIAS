@@ -119,11 +119,13 @@ export default function ResumenPanel({ convId, refreshKey, onJump }) {
             Vinculación: catálogos → campos
           </div>
           <div className="space-y-2">
-            {Object.entries(catalogo_usage).map(([catId, usos]) => (
+            {Object.entries(catalogo_usage)
+              .filter(([catId]) => (data.catalogos_by_id && data.catalogos_by_id[catId]))
+              .map(([catId, usos]) => (
               <div key={catId} className="flex items-start gap-3 text-[13px]">
                 <Badge tone="info">catálogo</Badge>
                 <span className="font-semibold text-[#1A1F2C] min-w-[140px]">
-                  {(data.catalogos_by_id && data.catalogos_by_id[catId]) || catId.slice(0, 8)}
+                  {data.catalogos_by_id[catId]}
                 </span>
                 <span className="text-muted-foreground">→ usado por</span>
                 <div className="flex flex-wrap gap-1.5">

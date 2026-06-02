@@ -73,6 +73,14 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - 1 convocatoria (INC2026), 9 catálogos, 16 campos, 10 criterios, 7 desempates.
 - **12 propuestas** habilitadas distribuidas en 6 subregiones, **6 jurados** con usuarios asociados, **3 ternas** (T1 Urabá, T2 Oriente, T3 Norte), **24 evaluaciones** individuales en Borrador.
 
+### Módulo Configuración rediseñado (Feb 2026)
+- ✅ Pestaña **Resumen** con diagrama de flujo de 4 tarjetas, alertas (campos lista sin catálogo / puntaje ≠ 100), mapa visual de vinculaciones catálogo→campo y orden aplicado de desempates.
+- ✅ **Vinculación explícita**: campos tipo `lista`/`seleccion_multiple` ahora seleccionan catálogo desde un dropdown (`catalogo_id`). Desempates ahora referencian una `fuente` (criterio/campo/sorteo) con dropdown.
+- ✅ **Ordenamiento**: drag&drop nativo + botones ↑↓ + sort por columna + búsqueda en cada tabla. Persiste vía `POST /api/{campos|criterios|desempates}/reordenar`.
+- ✅ **Reutilización**: `POST /api/convocatorias/{cid}/configuracion/clonar` con `source_convocatoria_id`, `incluir_*`, `modo` (agregar/reemplazar) y remapeo automático de `catalogo_id`. Export/Import JSON con versión `krinos_export_version: 1`.
+- ✅ **Endpoint resumen**: `GET /api/convocatorias/{cid}/configuracion/resumen` devuelve counts, catalogo_usage, desempate_refs, alertas, stats.
+- ✅ Componentes split: `/app/frontend/src/pages/configuracion/{ResumenPanel,CamposPanel,CatalogosPanel,CriteriosPanel,DesempatesPanel,AccionesGlobales,SortableTable}.jsx`.
+
 ## Testing
 - **Backend**: 39/39 PASS (100%) — ronda 2 tras fix de ObjectId leak y brute-force key.
 - **Frontend**: validación manual con screenshots en login → dashboard → ranking → configuración → reportes.
