@@ -167,48 +167,71 @@ function CamposPanel({ campos, convId, reload, catalogos }) {
 
 function CatalogosPanel({ catalogos, convId, reload }) {
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ nombre: "", descripcion: "", valores: "" });
+  const [editing, setEditing] = useState(null);
+  const blank = { nombre: "", descripcion: "", valores: "" };
+  const [f, setF] = useState(blank);
+  const startEdit = (c) => {
+    setEditing(c);
+    setF({ nombre: c.nombre, descripcion: c.descripcion || "", valores: (c.valores || []).map((v) => v.valor).join("\n") });
+    setOpen(true);
+  };
+  const startNew = () => { setEditing(null); setF(blank); setOpen(true); };
   const submit = async () => {
     try {
       const valores = f.valores.split("\n").map((v) => v.trim()).filter(Boolean).map((v) => ({ valor: v, activo: true }));
-      await api.post("/catalogos", { convocatoria_id: convId, nombre: f.nombre, descripcion: f.descripcion, activo: true, valores });
-      toast.success("Catálogo creado");
-      setOpen(false); reload(); setF({ nombre: "", descripcion: "", valores: "" });
+      if (editing) {
+        await api.patch(`/catalogos/${editing.id}`, { nombre: f.nombre, descripcion: f.descripcion, valores });
+        toast.success("Catálogo actualizado");
+      } else {
+        await api.post("/catalogos", { convocatoria_id: convId, nombre: f.nombre, descripcion: f.descripcion, activo: true, valores });
+        toast.success("Catálogo creado");
+      }
+      setOpen(false); setEditing(null); reload(); setF(blank);
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+  const del = async (id) => {
+    if (!confirm("¿Desactivar catálogo? Los valores quedarán inactivos.")) return;
+    await api.delete(`/catalogos/${id}`); reload();
   };
   return (
     <div>
-      <div className="flex justify-end mb-3">
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild><Button className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2"><Plus className="w-4 h-4" />Nuevo catálogo</Button></DialogTrigger>
-          <DialogContent className="rounded-sm max-w-lg">
-            <DialogHeader><DialogTitle className="font-display">Nuevo catálogo</DialogTitle></DialogHeader>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-[12.5px] text-[#5E6878]">Vinculados a la convocatoria activa.</p>
+        <Dialog open={open} onOpenChange={(v) => { if (!v) { setEditing(null); setF(blank); } setOpen(v); }}>
+          <DialogTrigger asChild><Button onClick={startNew} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg gap-2"><Plus className="w-4 h-4" />Nuevo catálogo</Button></DialogTrigger>
+          <DialogContent className="rounded-lg max-w-lg">
+            <DialogHeader><DialogTitle className="font-display">{editing ? `Editar ${editing.nombre}` : "Nuevo catálogo"}</DialogTitle></DialogHeader>
             <div className="space-y-3">
-              <div><Label>Nombre</Label><Input value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} className="rounded-sm" /></div>
-              <div><Label>Descripción</Label><Input value={f.descripcion} onChange={(e) => setF({ ...f, descripcion: e.target.value })} className="rounded-sm" /></div>
+              <div><Label>Nombre</Label><Input value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} className="rounded-lg" /></div>
+              <div><Label>Descripción</Label><Input value={f.descripcion} onChange={(e) => setF({ ...f, descripcion: e.target.value })} className="rounded-lg" /></div>
               <div>
                 <Label>Valores (uno por línea)</Label>
-                <textarea value={f.valores} onChange={(e) => setF({ ...f, valores: e.target.value })} rows={6} className="w-full border border-border rounded-sm px-3 py-2 text-sm font-mono" />
+                <textarea value={f.valores} onChange={(e) => setF({ ...f, valores: e.target.value })} rows={8} className="w-full border border-border rounded-lg px-3 py-2 text-sm font-mono" />
+                <p className="text-[11px] text-[#5E6878] mt-1">{editing ? "Al guardar se reemplaza la lista de valores con la nueva." : ""}</p>
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setOpen(false)} className="rounded-sm">Cancelar</Button>
-              <Button onClick={submit} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm">Crear</Button>
+              <Button variant="outline" onClick={() => setOpen(false)} className="rounded-lg">Cancelar</Button>
+              <Button onClick={submit} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg">{editing ? "Guardar" : "Crear"}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
       <div className="grid md:grid-cols-2 gap-4">
         {catalogos.map((c) => (
-          <div key={c.id} className="border border-border rounded-sm bg-white p-4">
+          <div key={c.id} className="border border-border rounded-lg bg-white p-4 shadow-card">
             <div className="flex items-center justify-between">
               <div className="font-display font-bold">{c.nombre}</div>
-              <Badge tone={c.activo ? "success" : "muted"}>{c.activo ? "activo" : "inactivo"}</Badge>
+              <div className="flex items-center gap-1">
+                <Badge tone={c.activo ? "success" : "muted"}>{c.activo ? "activo" : "inactivo"}</Badge>
+                <button onClick={() => startEdit(c)} className="text-[#14776A] hover:text-[#0F5E54] p-1" data-testid={`edit-cat-${c.id}`}><Pencil className="w-4 h-4" /></button>
+                <button onClick={() => del(c.id)} className="text-muted-foreground hover:text-red-600 p-1"><Trash2 className="w-4 h-4" /></button>
+              </div>
             </div>
             <p className="text-xs text-muted-foreground mt-1">{c.descripcion}</p>
             <div className="mt-3 flex flex-wrap gap-1.5">
-              {c.valores.slice(0, 10).map((v) => <Badge key={v.id} tone="muted">{v.valor}</Badge>)}
-              {c.valores.length > 10 && <Badge tone="default">+{c.valores.length - 10}</Badge>}
+              {(c.valores || []).slice(0, 10).map((v) => <Badge key={v.id || v.valor} tone="muted">{v.valor}</Badge>)}
+              {(c.valores || []).length > 10 && <Badge tone="default">+{c.valores.length - 10}</Badge>}
             </div>
           </div>
         ))}
