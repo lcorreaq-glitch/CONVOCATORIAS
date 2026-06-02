@@ -553,3 +553,200 @@ async def asignacion_masiva_subregion(payload: AsignacionMasivaIn,
     await audit(user, "bulk_assign", "asignaciones", payload.convocatoria_id,
                 detalle=f"Terna {payload.terna_id} ↔ subregión {payload.subregion}: {creados} propuestas")
     return {"asignaciones_creadas": creados, "propuestas_alcanzadas": len(propuestas)}
+
+
+
+# ==================== ASIGNACIONES: PLANTILLA / IMPORT MASIVO / AUTO ====================
+@router.get("/asignaciones-template")
+async def asignaciones_template(convocatoria_id: str, user: dict = Depends(get_current_user)):
+    """Plantilla XLSX con propuestas y ternas/jurados existentes para asignar."""
+    db = get_db()
+    propuestas = await db.propuestas.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(2000)
+    ternas = await db.ternas.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(500)
+    jurados = await db.jurados.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(2000)
+    wb = Workbook()
+    ws = wb.active; ws.title = "Asignaciones"
+    ws.append(["propuesta_codigo", "tipo_evaluacion", "terna_codigo", "jurado_email", "etapa"])
+    ws.append(["P-0001", "colectiva", "T1", "", "Evaluación Colectiva"])
+    ws.append(["P-0001", "individual", "", "jurado1@ejemplo.co", "Evaluación Individual"])
+    # Hoja referencia
+    ws2 = wb.create_sheet("Propuestas")
+    ws2.append(["código", "nombre", "subregión", "estado"])
+    for p in propuestas:
+        ws2.append([p.get("codigo"), p.get("nombre"), (p.get("datos") or {}).get("subregion"), p.get("estado")])
+    ws3 = wb.create_sheet("Ternas")
+    ws3.append(["código", "nombre", "subregion"])
+    for t in ternas: ws3.append([t.get("codigo"), t.get("nombre"), t.get("subregion")])
+    ws4 = wb.create_sheet("Jurados")
+    ws4.append(["email", "nombre", "subregiones"])
+    for j in jurados: ws4.append([j.get("email"), j.get("nombre"), "; ".join(j.get("subregiones", []))])
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": "attachment; filename=plantilla_asignaciones.xlsx"})
+
+
+@router.post("/asignaciones-import")
+async def import_asignaciones(convocatoria_id: str = Form(...), file: UploadFile = File(...),
+                              user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    db = get_db()
+    content = await file.read()
+    wb = load_workbook(io.BytesIO(content)); ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows: return {"creados": 0, "rechazados": 0, "errores": []}
+    headers = [str(h).strip() if h else "" for h in rows[0]]
+    # cache
+    propuestas = {p["codigo"]: p for p in await db.propuestas.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(5000)}
+    ternas = {t["codigo"]: t for t in await db.ternas.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(500)}
+    jurados = {j["email"]: j for j in await db.jurados.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(2000)}
+    created, errors = 0, []
+    for idx, row in enumerate(rows[1:], start=2):
+        try:
+            data = {headers[i]: row[i] if i < len(row) else None for i in range(len(headers))}
+            pcode = str(data.get("propuesta_codigo") or "").strip()
+            if not pcode or pcode not in propuestas:
+                errors.append({"fila": idx, "error": f"Propuesta no encontrada: {pcode}"}); continue
+            tipo = (data.get("tipo_evaluacion") or "individual").strip().lower()
+            etapa = (data.get("etapa") or ("Evaluación Colectiva" if tipo == "colectiva" else "Evaluación Individual")).strip()
+            doc = {"id": str(uuid.uuid4()), "convocatoria_id": convocatoria_id,
+                   "propuesta_id": propuestas[pcode]["id"],
+                   "tipo_evaluacion": tipo, "etapa": etapa,
+                   "estado": "Creada", "created_at": now_iso()}
+            if tipo == "colectiva":
+                tcode = str(data.get("terna_codigo") or "").strip()
+                if not tcode or tcode not in ternas:
+                    errors.append({"fila": idx, "error": f"Terna no encontrada: {tcode}"}); continue
+                doc["terna_id"] = ternas[tcode]["id"]
+            else:
+                je = str(data.get("jurado_email") or "").strip().lower()
+                if not je or je not in jurados:
+                    errors.append({"fila": idx, "error": f"Jurado no encontrado: {je}"}); continue
+                doc["jurado_id"] = jurados[je]["id"]
+            # check duplicate
+            dup_q = {"convocatoria_id": convocatoria_id, "propuesta_id": doc["propuesta_id"], "tipo_evaluacion": tipo}
+            if "jurado_id" in doc: dup_q["jurado_id"] = doc["jurado_id"]
+            if "terna_id" in doc: dup_q["terna_id"] = doc["terna_id"]
+            if await db.asignaciones.find_one(dup_q):
+                errors.append({"fila": idx, "error": "Asignación duplicada"}); continue
+            await db.asignaciones.insert_one(doc)
+            if tipo == "individual":
+                await db.evaluaciones_individuales.insert_one({
+                    "id": str(uuid.uuid4()), "convocatoria_id": convocatoria_id,
+                    "propuesta_id": doc["propuesta_id"], "jurado_id": doc["jurado_id"],
+                    "asignacion_id": doc["id"], "estado": "Borrador",
+                    "puntajes": {}, "observaciones": {}, "observacion_final": "",
+                    "puntaje_total": 0, "puntaje_diferencial_total": 0,
+                    "created_at": now_iso(),
+                })
+            created += 1
+        except Exception as e:
+            errors.append({"fila": idx, "error": str(e)})
+    await audit(user, "import", "asignaciones", convocatoria_id, detalle=f"creados={created}")
+    return {"creados": created, "rechazados": len(errors), "errores": errors[:100]}
+
+
+class AutoAsignarIn(BaseModel):
+    convocatoria_id: str
+    jurados_por_propuesta: int = 3  # cuántos jurados individuales por propuesta
+    asignar_ternas: bool = True
+    solo_subregion: bool = True  # solo asignar jurados cuya subregión coincida con la de la propuesta (o "Todas")
+    balance_carga: bool = True  # repartir equitativamente
+
+
+@router.post("/asignaciones/auto")
+async def auto_asignar(payload: AutoAsignarIn,
+                       user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    """Asignación automática con criterios:
+    - 'solo_subregion': solo jurados cuya `subregiones[]` contenga la subregión de la propuesta o 'Todas las subregiones'.
+    - 'balance_carga': de los candidatos elegibles toma los jurados con MENOS asignaciones actuales.
+    - 'asignar_ternas': también enlaza la terna correspondiente a la subregión (si existe).
+    Si una propuesta ya tiene N asignaciones individuales, NO se duplican.
+    """
+    db = get_db()
+    propuestas = await db.propuestas.find(
+        {"convocatoria_id": payload.convocatoria_id, "estado": {"$nin": ["Anulada", "No habilitada"]}},
+        {"_id": 0}
+    ).to_list(5000)
+    jurados = await db.jurados.find({"convocatoria_id": payload.convocatoria_id, "estado": "Activo"}, {"_id": 0}).to_list(2000)
+    ternas = await db.ternas.find({"convocatoria_id": payload.convocatoria_id}, {"_id": 0}).to_list(500)
+    # Mapa terna por subregión
+    ternas_by_sub = {t.get("subregion"): t for t in ternas if t.get("subregion")}
+
+    # Carga actual por jurado
+    cur_load = {j["id"]: 0 for j in jurados}
+    async for a in db.asignaciones.find({"convocatoria_id": payload.convocatoria_id,
+                                          "tipo_evaluacion": "individual",
+                                          "estado": {"$ne": "Cancelada"}}):
+        if a.get("jurado_id") in cur_load: cur_load[a["jurado_id"]] += 1
+
+    creados_ind, creados_col, omitidos = 0, 0, 0
+    for p in propuestas:
+        psub = (p.get("datos") or {}).get("subregion")
+        # 1) Asignación colectiva (terna por subregión)
+        if payload.asignar_ternas and psub and psub in ternas_by_sub:
+            terna = ternas_by_sub[psub]
+            already_col = await db.asignaciones.find_one({
+                "convocatoria_id": payload.convocatoria_id, "propuesta_id": p["id"],
+                "tipo_evaluacion": "colectiva"
+            })
+            if not already_col:
+                await db.asignaciones.insert_one({
+                    "id": str(uuid.uuid4()), "convocatoria_id": payload.convocatoria_id,
+                    "propuesta_id": p["id"], "terna_id": terna["id"],
+                    "tipo_evaluacion": "colectiva", "etapa": "Evaluación Colectiva",
+                    "estado": "Creada", "created_at": now_iso(),
+                })
+                creados_col += 1
+
+        # 2) Asignaciones individuales: cuántas faltan
+        actuales = await db.asignaciones.count_documents({
+            "convocatoria_id": payload.convocatoria_id, "propuesta_id": p["id"],
+            "tipo_evaluacion": "individual", "estado": {"$ne": "Cancelada"}
+        })
+        faltan = max(0, payload.jurados_por_propuesta - actuales)
+        if faltan == 0: omitidos += 1; continue
+
+        # Candidatos elegibles
+        elegibles = []
+        for j in jurados:
+            jsubs = j.get("subregiones") or []
+            ok = (not payload.solo_subregion) or (not psub) or (psub in jsubs) or ("Todas las subregiones" in jsubs)
+            if not ok: continue
+            # No re-asignar si ya está
+            already = await db.asignaciones.find_one({
+                "convocatoria_id": payload.convocatoria_id, "propuesta_id": p["id"],
+                "jurado_id": j["id"], "tipo_evaluacion": "individual",
+                "estado": {"$ne": "Cancelada"}
+            })
+            if already: continue
+            elegibles.append(j)
+        # Ordenar por carga creciente
+        if payload.balance_carga:
+            elegibles.sort(key=lambda x: cur_load.get(x["id"], 0))
+        picked = elegibles[:faltan]
+        for j in picked:
+            aid = str(uuid.uuid4())
+            await db.asignaciones.insert_one({
+                "id": aid, "convocatoria_id": payload.convocatoria_id,
+                "propuesta_id": p["id"], "jurado_id": j["id"],
+                "tipo_evaluacion": "individual", "etapa": "Evaluación Individual",
+                "estado": "Creada", "created_at": now_iso(),
+            })
+            await db.evaluaciones_individuales.insert_one({
+                "id": str(uuid.uuid4()), "convocatoria_id": payload.convocatoria_id,
+                "propuesta_id": p["id"], "jurado_id": j["id"],
+                "asignacion_id": aid, "estado": "Borrador",
+                "puntajes": {}, "observaciones": {}, "observacion_final": "",
+                "puntaje_total": 0, "puntaje_diferencial_total": 0,
+                "created_at": now_iso(),
+            })
+            cur_load[j["id"]] = cur_load.get(j["id"], 0) + 1
+            creados_ind += 1
+    await audit(user, "auto_assign", "asignaciones", payload.convocatoria_id,
+                detalle=f"individuales={creados_ind} colectivas={creados_col}")
+    return {
+        "asignaciones_individuales": creados_ind,
+        "asignaciones_colectivas": creados_col,
+        "propuestas_omitidas_ya_completas": omitidos,
+        "propuestas_total": len(propuestas),
+        "jurados_activos": len(jurados),
+    }

@@ -83,6 +83,12 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - ✅ **Ruta `/mi-perfil`** para rol Jurado: ver/editar datos seguros (teléfono, perfil con IA), subir foto y hoja de vida. Datos críticos (nombre, email, subregiones) solo lectura.
 - ✅ **Seed INC2026**: 8 campos jurado + 29 jurados cargados desde el Excel del usuario con normalización de subregiones desordenadas.
 
+### Asignaciones: carga masiva + asignación automática (Feb 2026 v9)
+- ✅ Banner contextual `ConvocatoriaContextBanner` agregado en /asignaciones.
+- ✅ **Plantilla XLSX dinámica** (`GET /api/asignaciones-template`) con hojas auxiliares de referencia: Propuestas, Ternas, Jurados.
+- ✅ **Carga masiva** (`POST /api/asignaciones-import`): admite filas con `propuesta_codigo`, `tipo_evaluacion` (individual/colectiva), `terna_codigo` o `jurado_email`. Detecta duplicados y crea evaluación borrador automáticamente.
+- ✅ **Asignación automática inteligente** (`POST /api/asignaciones/auto`): criterios configurables — N jurados por propuesta, filtrar por subregión, balancear carga, asignar terna por subregión. NO duplica asignaciones existentes. UI con switches para cada criterio + resultado detallado.
+
 ### Módulo Jurados parametrizable + Mi Perfil + IA (Feb 2026 v7 + v8)
 - ✅ v7: Campos por aplica_a, tipo archivo, IA, JuradoForm dinámico, banner, columnas dinámicas, plantilla XLSX dinámica, /mi-perfil, 29 jurados seed.
 - ✅ **v8 — Vista detalle compartida**: nuevo componente `JuradoDetalle` (drawer/Dialog read-only) accesible a cualquier rol autenticado con botón 👁 en cada fila. Muestra avatar, contacto, subregiones, perfil completo, hoja de vida descargable y todos los campos extras. Solo admin ve botón "Editar" en el footer.

@@ -1,21 +1,34 @@
 import React, { useEffect, useState } from "react";
-import { api, formatApiError } from "@/lib/api";
+import { api, formatApiError, downloadFile } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader, { Badge, EmptyState } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Workflow, Trash2 } from "lucide-react";
+import { Plus, Workflow, Trash2, Download, Upload, Sparkles, Loader2 } from "lucide-react";
+import ConvocatoriaContextBanner from "@/components/ConvocatoriaContextBanner";
 
 export default function Asignaciones() {
-  const { activeConvocatoriaId } = useAuth();
+  const { activeConvocatoriaId, user } = useAuth();
   const [asignaciones, setAsignaciones] = useState([]);
   const [propuestas, setPropuestas] = useState([]);
   const [jurados, setJurados] = useState([]);
   const [ternas, setTernas] = useState([]);
   const [open, setOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [autoOpen, setAutoOpen] = useState(false);
+  const [file, setFile] = useState(null);
+  const [importResult, setImportResult] = useState(null);
+  const [autoCfg, setAutoCfg] = useState({ jurados_por_propuesta: 3, solo_subregion: true, asignar_ternas: true, balance_carga: true });
+  const [autoBusy, setAutoBusy] = useState(false);
+  const [autoResult, setAutoResult] = useState(null);
   const [f, setF] = useState({ propuesta_id: "", jurado_id: "", terna_id: "", tipo_evaluacion: "individual" });
+
+  const canEdit = user?.role === "admin_general" || user?.role === "admin_convocatoria";
 
   const load = async () => {
     if (!activeConvocatoriaId) return;
@@ -58,8 +71,23 @@ export default function Asignaciones() {
         title="Asignaciones"
         subtitle="Relaciona propuestas con jurados (evaluación individual) o ternas (evaluación colectiva). Al asignar a un jurado individual, se crea automáticamente una evaluación en estado Borrador."
         actions={
-          <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild><Button className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2"><Plus className="w-4 h-4" />Nueva asignación</Button></DialogTrigger>
+          <>
+            {canEdit && (
+              <>
+                <Button onClick={() => setAutoOpen(true)} variant="outline" className="rounded-sm gap-2 border-[#14776A] text-[#14776A] hover:bg-[#F0F7F5]" data-testid="asig-auto-btn">
+                  <Sparkles className="w-4 h-4" />Asignación automática
+                </Button>
+                <Button variant="outline" className="rounded-sm gap-2" onClick={() => downloadFile(`/asignaciones-template?convocatoria_id=${activeConvocatoriaId}`, "plantilla_asignaciones.xlsx").catch((e) => toast.error(e.message))} data-testid="asig-template-btn">
+                  <Download className="w-4 h-4" />Plantilla
+                </Button>
+                <Button variant="outline" className="rounded-sm gap-2" onClick={() => setImportOpen(true)} data-testid="asig-import-btn">
+                  <Upload className="w-4 h-4" />Carga masiva
+                </Button>
+              </>
+            )}
+            {canEdit && (
+              <Dialog open={open} onOpenChange={setOpen}>
+                <DialogTrigger asChild><Button className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2" data-testid="asig-new-btn"><Plus className="w-4 h-4" />Nueva</Button></DialogTrigger>
             <DialogContent className="rounded-sm max-w-lg">
               <DialogHeader><DialogTitle className="font-display">Nueva asignación</DialogTitle></DialogHeader>
               <div className="space-y-3">
@@ -105,8 +133,12 @@ export default function Asignaciones() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+            )}
+          </>
         }
       />
+
+      <ConvocatoriaContextBanner />
 
       <div className="border border-border rounded-sm bg-white overflow-x-auto">
         <table className="w-full dense-table">
@@ -136,6 +168,113 @@ export default function Asignaciones() {
           </tbody>
         </table>
       </div>
+
+      {/* Dialog: Carga masiva */}
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="rounded-lg max-w-lg">
+          <DialogHeader><DialogTitle className="font-display">Carga masiva de asignaciones</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Descarga primero la plantilla, complétala con propuestas/ternas/jurados y súbela aquí.
+              Cada fila crea una asignación (con la evaluación borrador correspondiente para tipo individual).
+            </p>
+            <input type="file" accept=".xlsx,.xls" onChange={(e) => setFile(e.target.files[0])} className="block w-full text-sm" data-testid="asig-import-file" />
+            {importResult && (
+              <div className={`text-xs p-2 rounded-md ${importResult.rechazados > 0 ? "bg-yellow-50 border border-yellow-200" : "bg-emerald-50 border border-emerald-200"}`}>
+                ✓ {importResult.creados} creadas · ✕ {importResult.rechazados} rechazadas
+                {importResult.errores?.length > 0 && (
+                  <details className="mt-2"><summary className="cursor-pointer">Ver errores</summary>
+                    <ul className="mt-1 space-y-0.5">{importResult.errores.map((e, i) => <li key={i}>· fila {e.fila}: {e.error}</li>)}</ul>
+                  </details>
+                )}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setImportOpen(false); setFile(null); setImportResult(null); }} className="rounded-sm">Cerrar</Button>
+            <Button disabled={!file} onClick={async () => {
+              const fd = new FormData(); fd.append("convocatoria_id", activeConvocatoriaId); fd.append("file", file);
+              try {
+                const r = await api.post("/asignaciones-import", fd, { headers: { "Content-Type": "multipart/form-data" } });
+                setImportResult(r.data); load();
+                toast.success(`Asignaciones creadas: ${r.data.creados}`);
+              } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+            }} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm" data-testid="asig-import-submit">Cargar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Asignación automática */}
+      <Dialog open={autoOpen} onOpenChange={(v) => { setAutoOpen(v); if (!v) setAutoResult(null); }}>
+        <DialogContent className="rounded-lg max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2"><Sparkles className="w-4 h-4 text-[#14776A]" />Asignación automática</DialogTitle>
+            <p className="text-[12.5px] text-muted-foreground mt-1">
+              KRINOS asignará jurados y ternas a las propuestas habilitadas siguiendo los criterios que selecciones.
+              Las asignaciones ya existentes NO se duplican.
+            </p>
+          </DialogHeader>
+          {!autoResult ? (
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs">Jurados individuales por propuesta</Label>
+                <Input type="number" min={1} max={10} value={autoCfg.jurados_por_propuesta} onChange={(e) => setAutoCfg({ ...autoCfg, jurados_por_propuesta: Number(e.target.value) })} className="rounded-sm w-28" data-testid="asig-auto-jpp" />
+              </div>
+              <div className="flex items-center justify-between border border-border rounded-lg p-2.5">
+                <div>
+                  <Label className="text-[13px] font-semibold">Filtrar por subregión</Label>
+                  <p className="text-[11px] text-muted-foreground">Solo asigna jurados cuya subregión coincida con la de la propuesta (o "Todas las subregiones").</p>
+                </div>
+                <Switch checked={autoCfg.solo_subregion} onCheckedChange={(v) => setAutoCfg({ ...autoCfg, solo_subregion: v })} data-testid="asig-auto-subreg" />
+              </div>
+              <div className="flex items-center justify-between border border-border rounded-lg p-2.5">
+                <div>
+                  <Label className="text-[13px] font-semibold">Balancear carga</Label>
+                  <p className="text-[11px] text-muted-foreground">De los candidatos elegibles, prioriza los jurados con menos asignaciones.</p>
+                </div>
+                <Switch checked={autoCfg.balance_carga} onCheckedChange={(v) => setAutoCfg({ ...autoCfg, balance_carga: v })} data-testid="asig-auto-balance" />
+              </div>
+              <div className="flex items-center justify-between border border-border rounded-lg p-2.5">
+                <div>
+                  <Label className="text-[13px] font-semibold">Asignar ternas (colectiva)</Label>
+                  <p className="text-[11px] text-muted-foreground">Enlaza la terna que corresponda a cada subregión.</p>
+                </div>
+                <Switch checked={autoCfg.asignar_ternas} onCheckedChange={(v) => setAutoCfg({ ...autoCfg, asignar_ternas: v })} data-testid="asig-auto-ternas" />
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2 text-[13.5px]">
+              <div className="rounded-lg bg-[#F0F7F5] border border-[#CDE7E1] p-3 text-[#0F5E54] font-semibold">
+                ✓ Proceso completado
+              </div>
+              <ul className="space-y-1">
+                <li>Asignaciones individuales creadas: <strong className="tabular-nums">{autoResult.asignaciones_individuales}</strong></li>
+                <li>Asignaciones colectivas creadas: <strong className="tabular-nums">{autoResult.asignaciones_colectivas}</strong></li>
+                <li>Propuestas ya completas (omitidas): <strong className="tabular-nums">{autoResult.propuestas_omitidas_ya_completas}</strong></li>
+                <li>Total propuestas elegibles: {autoResult.propuestas_total}</li>
+                <li>Jurados activos: {autoResult.jurados_activos}</li>
+              </ul>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAutoOpen(false)} className="rounded-sm">{autoResult ? "Cerrar" : "Cancelar"}</Button>
+            {!autoResult && (
+              <Button disabled={autoBusy} onClick={async () => {
+                setAutoBusy(true);
+                try {
+                  const r = await api.post("/asignaciones/auto", { ...autoCfg, convocatoria_id: activeConvocatoriaId });
+                  setAutoResult(r.data); load();
+                  toast.success(`Asignación automática: ${r.data.asignaciones_individuales} individuales + ${r.data.asignaciones_colectivas} colectivas`);
+                } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+                finally { setAutoBusy(false); }
+              }} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2" data-testid="asig-auto-run">
+                {autoBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {autoBusy ? "Asignando…" : "Ejecutar"}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
