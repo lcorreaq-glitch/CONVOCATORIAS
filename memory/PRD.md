@@ -74,12 +74,15 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - **12 propuestas** habilitadas distribuidas en 6 subregiones, **6 jurados** con usuarios asociados, **3 ternas** (T1 Urabá, T2 Oriente, T3 Norte), **24 evaluaciones** individuales en Borrador.
 
 ### Módulo Configuración rediseñado (Feb 2026)
-- ✅ Pestaña **Resumen** con diagrama de flujo de 4 tarjetas, alertas (campos lista sin catálogo / puntaje ≠ 100), mapa visual de vinculaciones catálogo→campo y orden aplicado de desempates.
-- ✅ **Vinculación explícita**: campos tipo `lista`/`seleccion_multiple` ahora seleccionan catálogo desde un dropdown (`catalogo_id`). Desempates ahora referencian una `fuente` (criterio/campo/sorteo) con dropdown.
-- ✅ **Ordenamiento**: drag&drop nativo + botones ↑↓ + sort por columna + búsqueda en cada tabla. Persiste vía `POST /api/{campos|criterios|desempates}/reordenar`.
-- ✅ **Reutilización**: `POST /api/convocatorias/{cid}/configuracion/clonar` con `source_convocatoria_id`, `incluir_*`, `modo` (agregar/reemplazar) y remapeo automático de `catalogo_id`. Export/Import JSON con versión `krinos_export_version: 1`.
+- ✅ Pestaña **Resumen** con diagrama de flujo, alertas y mapa de vinculaciones + sección de tipos de comparación del sistema.
+- ✅ **Vinculación explícita**: campos tipo lista usan selector de Catálogo; desempates usan selector Criterio/Campo/Sorteo.
+- ✅ **Ordenamiento**: drag&drop nativo + botones ↑↓ + sort por columna + búsqueda. Endpoints `POST /api/{campos|criterios|desempates}/reordenar`.
+- ✅ **Reutilización amigable** (Feb 2026 v2): renombrado "Clonar" → **"Usar como plantilla"** con wizard de 3 pasos (Elegir → Vista previa → Listo). JSON Import/Export movidos a menú "Avanzado". Onboarding al crear convocatoria con tarjetas "En blanco" vs "Desde plantilla". Cada card de Convocatorias tiene botón "✨ Usar otra como plantilla para esta".
+- ✅ **Switcher de convocatoria** prominente en cabecera del módulo (además del sidebar).
+- ✅ **"Se usa en" editable inline** con popover en flags de Campos.
+- ✅ **Catálogos como tabla unificada** con popover de valores, columna "Usado por (campos)" y hard-delete con check de uso.
 - ✅ **Endpoint resumen**: `GET /api/convocatorias/{cid}/configuracion/resumen` devuelve counts, catalogo_usage, desempate_refs, alertas, stats.
-- ✅ Componentes split: `/app/frontend/src/pages/configuracion/{ResumenPanel,CamposPanel,CatalogosPanel,CriteriosPanel,DesempatesPanel,AccionesGlobales,SortableTable}.jsx`.
+- ✅ Componentes split: `/app/frontend/src/pages/configuracion/{ResumenPanel,CamposPanel,CatalogosPanel,CriteriosPanel,DesempatesPanel,AccionesGlobales,SortableTable,InlineFlagsEditor,PlantillaWizard}.jsx`.
 
 ## Testing
 - **Backend**: 39/39 PASS (100%) — ronda 2 tras fix de ObjectId leak y brute-force key.

@@ -137,10 +137,14 @@ export default function Convocatorias() {
       </div>
 
       {/* === ASISTENTE NUEVA CONVOCATORIA === */}
-      <Dialog open={step === 1 || step === 2} onOpenChange={(v) => { if (!v) setStep(0); }}>
+      <Dialog open={step === 1 || step === 2 || step === "choose-template"} onOpenChange={(v) => { if (!v) setStep(0); }}>
         <DialogContent className="rounded-lg max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="font-display">{step === 1 ? "Nueva convocatoria — ¿cómo quieres empezar?" : "Datos básicos"}</DialogTitle>
+            <DialogTitle className="font-display">
+              {step === 1 ? "Nueva convocatoria — ¿cómo quieres empezar?"
+                : step === "choose-template" ? "Elige la convocatoria que usarás como plantilla"
+                : "Datos básicos"}
+            </DialogTitle>
           </DialogHeader>
 
           {step === 1 && (
