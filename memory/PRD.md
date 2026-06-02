@@ -73,6 +73,16 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - 1 convocatoria (INC2026), 9 catálogos, 16 campos, 10 criterios, 7 desempates.
 - **12 propuestas** habilitadas distribuidas en 6 subregiones, **6 jurados** con usuarios asociados, **3 ternas** (T1 Urabá, T2 Oriente, T3 Norte), **24 evaluaciones** individuales en Borrador.
 
+### Módulo Jurados parametrizable + Mi Perfil + IA (Feb 2026 v7)
+- ✅ **Campo `aplica_a` ('propuesta' | 'jurado')** en modelo Campo. Configuración → Campos ahora tiene sub-tabs visibles para alternar.
+- ✅ **Tipo de campo `archivo`** con upload base64 hasta 10MB (PDF, DOCX, XLSX, ZIP, JPG). Endpoint `POST /api/upload/file`.
+- ✅ **IA mejorar redacción**: `POST /api/ai/mejorar-texto` con Emergent LLM Key + GPT-4o. Botón "✨ Mejorar con IA" sobre el campo Perfil en JuradoForm y MiPerfil.
+- ✅ **JuradoForm dinámico**: secciones (Datos personales, Subregiones multiselect, Perfil + IA, Información adicional con campos extra dinámicos + hoja de vida).
+- ✅ **Jurados list rediseñado**: banner contextual, columnas dinámicas (`uso_lista`), filtros estilo Airtable, búsqueda.
+- ✅ **Plantilla XLSX dinámica** según campos jurado configurados. Carga masiva con normalización de subregiones (formato `; o ,`).
+- ✅ **Ruta `/mi-perfil`** para rol Jurado: ver/editar datos seguros (teléfono, perfil con IA), subir foto y hoja de vida. Datos críticos (nombre, email, subregiones) solo lectura.
+- ✅ **Seed INC2026**: 8 campos jurado + 29 jurados cargados desde el Excel del usuario con normalización de subregiones desordenadas.
+
 ### Filtros dinámicos en /propuestas (Feb 2026 v5 + v6)
 - ✅ v5: Filtros dinámicos según campos con `uso_filtro=true`.
 - ✅ **v6 (UX rediseñada estilo Airtable/Notion)**: solo búsqueda + Estado + botón "Filtrar por…" visibles por defecto. Click → Popover con buscador y lista de campos disponibles. Cada filtro elegido se agrega como **chip activo** con su control inline + X. Botón "Limpiar" cuando hay activos. Patrón profesional y manejable incluso con 20+ campos disponibles.
