@@ -188,6 +188,29 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - ✅ Endpoints: `GET /api/convocatorias/{cid}/acta-branding` y `PATCH` (admin). Validado con curl → PDF renderiza el header verde correctamente (verificado vía Gemini OCR del PDF generado).
 - ✅ UI: nuevo bloque "Identidad Gráfica Institucional" en lo alto del panel Plantillas, con uploaders dual (Header / Footer), preview de la imagen cargada y botón "Quitar".
 
+### Actas INC2026 alineadas al .docx oficial + Rediseño Eval Colectiva + Vista Jurado (Feb 2026 v14)
+
+**Actas INC2026 — Texto literal según .docx oficial**:
+- ✅ Individual: certificación menciona los **5 criterios por nombre** (Incidencia e impacto, Participación e inclusión, Fortalecimiento institucional, Capacidad organizativa, Medio ambiente), "hasta 95 puntos posibles", "5 puntos adicionales de priorización territorial (PDET, Sentencia Río Atrato o Río Cauca)" y **PÁRRAFO CRÍTICO sobre enfoques diferenciales** (mujeres, discapacidad, etnias) que NO suman al tope legal de 100 puntos.
+- ✅ Colectiva Terna: certificación con cascada de desempates explícita "(primer registro, mayor impacto, mayor inclusión, enfoque en mujeres, enfoque en discapacidad, enfoque étnico y sorteo, en ese orden)" + "(+5 puntos)" priorización territorial. Tabla cambia "Subregión" por **"Observación Consolidada de la Terna"**.
+- ✅ Subregional: tabla mantiene Subregión + columna observación. Cada firmante muestra su **Terna** asignada.
+- ✅ **INVITADO(A) GARANTE** del proceso: nuevo firmante opcional configurable en `convocatoria.configuracion.invitado_garante` con `{nombre, documento, firma_url, entidad_rol}`. Aparece al final de actas Colectiva-Terna y Subregional con rol "Invitado(a) Garante del Proceso · Acompañamiento Técnico/Control".
+
+**Rediseño `/evaluaciones/colectiva/:id` (mismo patrón que individual)**:
+- ✅ Header sticky con totales y barra · Banda resumen horizontal de propuesta con iconos por campo · **Sub-banda de Terna** con chips de integrantes · Ficha completa en Drawer.
+- ✅ Modalidad 1 (promedio): criterios full-width con barra de progreso por criterio + observación consolidada.
+- ✅ Modalidad 2 (nueva evaluación por terna): tarjeta heroica para iniciar v2 + tabla con avance + card "Resultado definitivo" con puntaje grande.
+
+**Vista jurado optimizada `/evaluaciones`**:
+- ✅ Eyebrow "Mi panel de trabajo" + título "Mis Evaluaciones".
+- ✅ **2 cards heroicas con contadores**: Etapa Individual (verde) + Etapa Colectiva (ámbar) con porcentaje grande, barra de progreso, contador pendientes/terminadas.
+- ✅ **Filtros**: search + select estado (default "Solo pendientes" para jurado) + limpiar filtro.
+- ✅ Botón de fila contextual: "Continuar" (pendiente) o "Abrir" (terminada).
+- ✅ Estados con badges semánticos: Pendiente (reloj ámbar) · Firmada/Bloqueada (candado) · Finalizada (check verde).
+
+**Endpoints**:
+- (sin cambios, solo extensión en `/api/evaluaciones-colectivas?mias=true` ya existente).
+
 ## Backlog / próximas tareas
 
 ### P0 (cierre de funcionalidad clave)

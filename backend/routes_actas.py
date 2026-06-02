@@ -57,8 +57,14 @@ DEFAULT_INC2026_TEMPLATES = {
             "que puedan comprometer mi independencia y objetividad. Desarrollé el estudio y evaluación individual de las "
             "propuestas asignadas en los tiempos estipulados por el cronograma oficial, accediendo a la documentación "
             "exclusivamente a través de la plataforma de la Gobernación de Antioquia. Apliqué los cinco (5) criterios "
-            "técnicos de evaluación, asignando los puntajes numéricos justificados cualitativamente. Comprendo y valido "
-            "que el sistema digital calculó de manera automática los puntos adicionales de priorización territorial. "
+            "técnicos de evaluación (Incidencia e impacto, Participación e inclusión, Fortalecimiento institucional, "
+            "Capacidad organizativa y Medio ambiente), asignando los puntajes numéricos justificados cualitativamente "
+            "(hasta 95 puntos posibles). Comprendo y valido que el sistema digital calculó de manera automática los "
+            "5 puntos adicionales de priorización territorial (municipios PDET, Sentencia Río Atrato o Sentencia Río Cauca). "
+            "Tengo plena claridad y certifico que los puntajes específicos que asigné en el aplicativo para los enfoques "
+            "diferenciales de desempate (mujeres, discapacidad y etnias) NO se suman ni alteran mi calificación técnica "
+            "general de la propuesta (que tiene un tope máximo legal de 100 puntos), ya que su uso en el sistema está "
+            "destinado única y exclusivamente a definir el orden en el ranking general en caso de empate en la línea de corte. "
             "Realicé la calificación con total independencia, transparencia y objetividad, actuando bajo los principios "
             "éticos de la función pública, y me comprometo a guardar estricta reserva y confidencialidad sobre la "
             "información leída."
@@ -98,14 +104,15 @@ DEFAULT_INC2026_TEMPLATES = {
             "imparcialidad y rigor técnico. Durante la sesión revisamos de manera detallada las evaluaciones "
             "individuales consolidadas en el aplicativo y las observaciones cualitativas que las sustentan. "
             "Validamos que el aplicativo digital procesó correctamente los cálculos finales, incluyendo la "
-            "priorización territorial y la aplicación estricta de las reglas de desempate, basándose única y "
-            "exclusivamente en los datos y valoraciones que ingresamos previamente en nuestra evaluación técnica. "
-            "Garantizamos que el proceso de deliberación se desarrolló bajo los principios de legalidad, "
-            "objetividad, transparencia y equidad, y que las decisiones que avalamos representan el consenso del "
-            "cuerpo evaluador de la subregión."
+            "priorización territorial (+5 puntos) y la aplicación estricta de las reglas de desempate "
+            "(primer registro, mayor impacto, mayor inclusión, enfoque en mujeres, enfoque en discapacidad, "
+            "enfoque étnico y sorteo, en ese orden), basándose única y exclusivamente en los datos y "
+            "valoraciones que ingresamos previamente en nuestra evaluación técnica. Garantizamos que el proceso "
+            "de deliberación se desarrolló bajo los principios de legalidad, objetividad, transparencia y equidad, "
+            "y que las decisiones que avalamos representan el consenso del cuerpo evaluador de la subregión."
         ),
         "tabla_titulo": "RESULTADOS CONSOLIDADOS POR EL APLICATIVO",
-        "tabla_subtitulo": "La siguiente tabla oficializa el listado de las propuestas evaluadas por la terna, con el puntaje total definitivo calculado por la plataforma.",
+        "tabla_subtitulo": "La siguiente tabla oficializa el listado de las propuestas evaluadas por la terna, con el puntaje total definitivo calculado por la plataforma y la observación cualitativa de consenso.",
         "texto_cierre": (
             "Este documento se firma el día {{fecha_dia}} del mes de {{fecha_mes}} de {{fecha_anio}}, como "
             "constancia del cierre de la sesión de evaluación colectiva y la validación final de los resultados "
@@ -138,14 +145,15 @@ DEFAULT_INC2026_TEMPLATES = {
             "independencia, imparcialidad y rigor técnico. Durante la sesión revisamos de manera detallada las "
             "evaluaciones individuales consolidadas en el aplicativo y las observaciones cualitativas que las "
             "sustentan. Validamos que el aplicativo digital procesó correctamente los cálculos finales, incluyendo "
-            "la priorización territorial y la aplicación estricta de las reglas de desempate, basándose única y "
-            "exclusivamente en los datos y valoraciones que ingresamos previamente en nuestra evaluación técnica. "
-            "Garantizamos que el proceso de deliberación se desarrolló bajo los principios de legalidad, "
-            "objetividad, transparencia y equidad, y que las decisiones que avalamos representan el consenso del "
-            "cuerpo evaluador de la subregión."
+            "la priorización territorial (+5 puntos) y la aplicación estricta de las reglas de desempate "
+            "(primer registro, mayor impacto, mayor inclusión, enfoque en mujeres, enfoque en discapacidad, "
+            "enfoque étnico y sorteo, en ese orden), basándose única y exclusivamente en los datos y valoraciones "
+            "que ingresamos previamente en nuestra evaluación técnica. Garantizamos que el proceso de deliberación "
+            "se desarrolló bajo los principios de legalidad, objetividad, transparencia y equidad, y que las "
+            "decisiones que avalamos representan el consenso del cuerpo evaluador de la subregión."
         ),
         "tabla_titulo": "RESULTADOS CONSOLIDADOS POR EL APLICATIVO",
-        "tabla_subtitulo": "La siguiente tabla oficializa el listado de las propuestas evaluadas en la subregión, con el puntaje total definitivo calculado por la plataforma.",
+        "tabla_subtitulo": "La siguiente tabla oficializa el listado de las propuestas evaluadas en la subregión, con el puntaje total definitivo calculado por la plataforma y la observación cualitativa de consenso.",
         "texto_cierre": (
             "Este documento se firma el día {{fecha_dia}} del mes de {{fecha_mes}} de {{fecha_anio}}, "
             "como constancia del cierre de la sesión de evaluación colectiva y la validación final de los "
@@ -798,14 +806,15 @@ async def acta_colectiva_terna(terna_id: str, user: dict = Depends(get_current_u
     rows = []
     for i, e in enumerate(evs_col, 1):
         p = pmap.get(e["propuesta_id"], {})
+        obs_consol = (e.get("observacion_consolidada") or e.get("observacion_final") or e.get("observacion") or "")[:200]
         rows.append([
             str(i), p.get("codigo", "—"),
-            (p.get("datos") or {}).get("subregion", terna.get("subregion") or "—"),
             (p.get("datos") or {}).get("municipio", "—"),
             (p.get("organizacion") or (p.get("datos") or {}).get("nombre_organizacion") or "—")[:35],
             str(e.get("puntaje_final", 0)),
+            obs_consol,
         ])
-    headers = ["Nº", "Número de Propuesta", "Subregión", "Municipio", "Nombre de la Organización", "Puntaje Total Definitivo"]
+    headers = ["Nº", "Número de Propuesta", "Municipio", "Nombre de la Organización", "Puntaje Total Definitivo", "Observación Consolidada de la Terna"]
     firmas = (terna.get("datos") or {}).get("firmas_acta_colectiva") or {}
     firmantes = []
     for integ in terna.get("integrantes") or []:
@@ -818,6 +827,16 @@ async def acta_colectiva_terna(terna_id: str, user: dict = Depends(get_current_u
             "rol": integ.get("rol", "Integrante"),
             "firma_url": firma_data.get("firma_url") or ((jur_obj or {}).get("datos") or {}).get("firma_url") if firma_data else None,
             "terna": terna.get("codigo"),
+        })
+    # INVITADO(A) GARANTE DEL PROCESO (opcional, configurado en la convocatoria)
+    garante = ((conv.get("configuracion") or {}).get("invitado_garante") or {})
+    if garante.get("nombre"):
+        firmantes.append({
+            "nombre": garante.get("nombre"),
+            "documento": garante.get("documento", "___________"),
+            "rol": "Invitado(a) Garante del Proceso · Acompañamiento Técnico/Control",
+            "firma_url": garante.get("firma_url"),
+            "subregion": garante.get("entidad_rol", ""),
         })
     pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes, _get_branding(conv))
     await audit(user, "generate_acta", "actas", terna_id, detalle="colectiva_terna")
@@ -858,10 +877,18 @@ async def acta_subregional(convocatoria_id: str, subregion: str,
         ])
     headers = ["Nº", "Número de Propuesta", "Subregión", "Municipio", "Nombre de la Organización", "Puntaje Total Definitivo"]
 
-    # Firmantes: todos los jurados de la subregión
+    # Firmantes: todos los jurados de la subregión + indicación de su terna
     jurados_sub = await db.jurados.find({
         "convocatoria_id": convocatoria_id, "subregiones": subregion
     }, {"_id": 0}).to_list(500)
+    # Mapa jurado_id -> codigo terna
+    ternas_sub = await db.ternas.find({"convocatoria_id": convocatoria_id, "subregion": subregion}, {"_id": 0}).to_list(200)
+    terna_de_jurado = {}
+    for t in ternas_sub:
+        for integ in (t.get("integrantes") or []):
+            jid = integ.get("jurado_id")
+            if jid and jid not in terna_de_jurado:
+                terna_de_jurado[jid] = t.get("codigo", "—")
     acta_doc = await db.actas_subregionales.find_one({"convocatoria_id": convocatoria_id, "subregion": subregion}, {"_id": 0})
     firmas_reg = (acta_doc or {}).get("firmas") or {}
     firmantes = []
@@ -872,7 +899,17 @@ async def acta_subregional(convocatoria_id: str, subregion: str,
             "documento": (j.get("datos") or {}).get("cedula", "___________"),
             "rol": "Jurado evaluador",
             "firma_url": fd.get("firma_url"),
-            "terna": "",
+            "terna": terna_de_jurado.get(j["id"], ""),
+        })
+    # INVITADO(A) GARANTE DEL PROCESO (opcional)
+    garante = ((conv.get("configuracion") or {}).get("invitado_garante") or {})
+    if garante.get("nombre"):
+        firmantes.append({
+            "nombre": garante.get("nombre"),
+            "documento": garante.get("documento", "___________"),
+            "rol": "Invitado(a) Garante del Proceso · Acompañamiento Técnico/Control",
+            "firma_url": garante.get("firma_url"),
+            "subregion": garante.get("entidad_rol", ""),
         })
     pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes, _get_branding(conv))
     await audit(user, "generate_acta", "actas", f"sub-{subregion}", detalle=f"subregional:{subregion}")
