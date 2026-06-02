@@ -181,7 +181,7 @@ export default function Jurados() {
                         ✓ {importResult.creados} creados · ✕ {importResult.rechazados} rechazados
                         {importResult.errores?.length > 0 && (
                           <details className="mt-2"><summary className="cursor-pointer">Ver errores</summary>
-                            <ul className="mt-1 space-y-0.5">{importResult.errores.map((e, i) => <li key={i}>· fila {e.fila}: {e.error}</li>)}</ul>
+                            <ul className="mt-1 space-y-0.5">{importResult.errores.map((e, i) => <li key={`err-${e.fila}-${i}`}>· fila {e.fila}: {e.error}</li>)}</ul>
                           </details>
                         )}
                       </div>

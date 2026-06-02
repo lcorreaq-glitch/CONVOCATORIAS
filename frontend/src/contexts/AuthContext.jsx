@@ -35,7 +35,10 @@ export function AuthProvider({ children }) {
   };
 
   const logout = async () => {
-    try { await api.post("/auth/logout"); } catch {}
+    try { await api.post("/auth/logout"); } catch (e) {
+      // Logout server-side falla silencioso (sesión expirada, red, etc.) — limpiamos cliente igual
+      console.warn("Logout server-side failed:", e?.message);
+    }
     setToken(null);
     setUser(false);
   };

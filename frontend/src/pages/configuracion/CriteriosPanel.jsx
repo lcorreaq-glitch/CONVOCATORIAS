@@ -40,7 +40,9 @@ export default function CriteriosPanel({ criterios, convId, reload }) {
     setSavingMax(true);
     try {
       await api.patch(`/convocatorias/${convId}`, { configuracion: { puntaje_max_evaluacion: val } });
-    } catch { /* ignore */ } finally { setSavingMax(false); }
+    } catch (e) {
+      console.error("CriteriosPanel: no se pudo actualizar puntaje_max", e);
+    } finally { setSavingMax(false); }
   };
 
   const startEdit = (c) => { setEditing(c); setF({ ...blank, ...c }); setOpen(true); };

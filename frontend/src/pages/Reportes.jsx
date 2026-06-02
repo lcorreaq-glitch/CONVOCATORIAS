@@ -54,9 +54,12 @@ export default function Reportes() {
               <table className="w-full dense-table">
                 <thead><tr>{r.cols.map((c) => <th key={c}>{c.replace(/_/g, " ")}</th>)}</tr></thead>
                 <tbody>
-                  {(data[r.key] || []).map((row, i) => (
-                    <tr key={i}>{r.cols.map((c) => <td key={c} className={typeof row[c] === "number" ? "font-mono tabular-nums" : ""}>{row[c] ?? "—"}</td>)}</tr>
-                  ))}
+                  {(data[r.key] || []).map((row, i) => {
+                    const k = row.id || row.codigo || row.email || `${r.key}-${i}`;
+                    return (
+                      <tr key={k}>{r.cols.map((c) => <td key={c} className={typeof row[c] === "number" ? "font-mono tabular-nums" : ""}>{row[c] ?? "—"}</td>)}</tr>
+                    );
+                  })}
                   {!data[r.key]?.length && <tr><td colSpan={r.cols.length} className="text-center text-sm text-muted-foreground py-8">Sin datos</td></tr>}
                 </tbody>
               </table>
