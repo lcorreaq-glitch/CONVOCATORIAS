@@ -139,7 +139,10 @@ function DashboardSection({ dash }) {
 }
 
 function WidgetCard({ widget }) {
-  const span = ["bar", "ranking", "progress_multi", "pie", "comparativo", "time_series"].includes(widget.tipo) ? "lg:col-span-2 xl:col-span-2" : "";
+  // Widgets que necesitan más espacio horizontal
+  let span = "";
+  if (["bar", "comparativo"].includes(widget.tipo)) span = "lg:col-span-3 xl:col-span-4"; // full row
+  else if (["ranking", "progress_multi", "pie", "time_series"].includes(widget.tipo)) span = "lg:col-span-2 xl:col-span-2";
   return (
     <div className={`bg-white border border-border rounded-xl p-4 ${span}`} data-testid={`widget-${widget.id}`}>
       <div className="flex items-center justify-between mb-3">
@@ -203,17 +206,23 @@ function WidgetBody({ widget }) {
     const items = data.items || [];
     if (!items.length) return <div className="text-[12px] text-muted-foreground italic py-4">Sin datos</div>;
     const hasDoneTotal = items[0]?.total !== undefined && items[0]?.done !== undefined;
+    const rowH = 30;
     return (
-      <ResponsiveContainer width="100%" height={Math.max(220, items.length * 22)}>
-        <BarChart data={items} layout="vertical" margin={{ left: 10, right: 20 }}>
-          <XAxis type="number" tick={{ fontSize: 10 }} />
-          <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 10 }} />
-          <Tooltip cursor={{ fill: "#F0F7F5" }} />
+      <ResponsiveContainer width="100%" height={Math.max(240, items.length * rowH + 50)}>
+        <BarChart data={items} layout="vertical" margin={{ left: 4, right: 30, top: 4, bottom: 4 }} barCategoryGap={6}>
+          <CartesianGrid horizontal={false} stroke="#F1F4F7" />
+          <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} />
+          <YAxis type="category" dataKey="name" width={220} interval={0}
+                 tick={{ fontSize: 11, fill: "#1A1F2C" }}
+                 tickFormatter={(v) => (v && v.length > 30 ? v.slice(0, 28) + "…" : v)} />
+          <Tooltip cursor={{ fill: "#F0F7F5" }} contentStyle={{ fontSize: "12px" }} />
           {hasDoneTotal ? (<>
+            <Legend iconSize={10} wrapperStyle={{ fontSize: "11px", paddingTop: 6 }} />
             <Bar dataKey="done" stackId="a" fill="#14776A" name="Finalizadas" />
             <Bar dataKey="pending" stackId="a" fill="#FDE68A" name="Pendientes" />
           </>) : (
-            <Bar dataKey={items[0]?.value !== undefined ? "value" : "total"} fill="#14776A" />
+            <Bar dataKey={items[0]?.value !== undefined ? "value" : "total"} fill="#14776A"
+                 label={{ position: "right", fontSize: 10, fill: "#0F5E54", fontWeight: 600 }} />
           )}
         </BarChart>
       </ResponsiveContainer>
@@ -222,13 +231,18 @@ function WidgetBody({ widget }) {
   if (tipo === "comparativo") {
     const items = data.items || [];
     if (!items.length) return <div className="text-[12px] text-muted-foreground italic py-4">Aún sin evaluaciones cerradas</div>;
+    const rowH = 30;
     return (
-      <ResponsiveContainer width="100%" height={Math.max(220, items.length * 24)}>
-        <BarChart data={items} layout="vertical" margin={{ left: 10, right: 30 }}>
+      <ResponsiveContainer width="100%" height={Math.max(240, items.length * rowH + 40)}>
+        <BarChart data={items} layout="vertical" margin={{ left: 4, right: 40, top: 4, bottom: 4 }} barCategoryGap={6}>
+          <CartesianGrid horizontal={false} stroke="#F1F4F7" />
           <XAxis type="number" tick={{ fontSize: 10 }} domain={[0, 100]} />
-          <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 10 }} />
-          <Tooltip cursor={{ fill: "#F0F7F5" }} />
-          <Bar dataKey="promedio" fill="#3B82F6" name="Promedio" label={{ position: "right", fontSize: 10, fill: "#1E40AF" }} />
+          <YAxis type="category" dataKey="name" width={220} interval={0}
+                 tick={{ fontSize: 11, fill: "#1A1F2C" }}
+                 tickFormatter={(v) => (v && v.length > 30 ? v.slice(0, 28) + "…" : v)} />
+          <Tooltip cursor={{ fill: "#F0F7F5" }} contentStyle={{ fontSize: "12px" }} />
+          <Bar dataKey="promedio" fill="#3B82F6" name="Promedio"
+               label={{ position: "right", fontSize: 11, fill: "#1E40AF", fontWeight: 700 }} />
         </BarChart>
       </ResponsiveContainer>
     );

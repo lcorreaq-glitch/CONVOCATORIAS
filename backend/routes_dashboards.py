@@ -188,9 +188,9 @@ async def _resolve_ds(db, ds: str, cid: str, user: dict) -> Any:
         for j in jurados:
             s = by_jur.get(j["id"], {"total": 0, "done": 0})
             if s["total"]:
-                items.append({"name": j["nombre"][:22], "total": s["total"], "done": s["done"], "pending": s["total"] - s["done"]})
+                items.append({"name": j["nombre"], "total": s["total"], "done": s["done"], "pending": s["total"] - s["done"]})
         items.sort(key=lambda x: -x["total"])
-        return {"items": items[:15]}
+        return {"items": items[:30]}
 
     if ds == "ranking_avance_jurado":
         jurados = await db.jurados.find({"convocatoria_id": cid}, {"_id": 0, "id": 1, "nombre": 1}).to_list(500)
@@ -218,9 +218,9 @@ async def _resolve_ds(db, ds: str, cid: str, user: dict) -> Any:
         items = []
         for j in jurados:
             vals = by_jur.get(j["id"], [])
-            if vals: items.append({"name": j["nombre"][:24], "promedio": round(sum(vals) / len(vals), 1), "n": len(vals)})
+            if vals: items.append({"name": j["nombre"], "promedio": round(sum(vals) / len(vals), 1), "n": len(vals)})
         items.sort(key=lambda x: -x["promedio"])
-        return {"items": items[:15]}
+        return {"items": items[:25]}
 
     if ds == "carga_terna":
         ternas = await db.ternas.find({"convocatoria_id": cid}, {"_id": 0, "id": 1, "codigo": 1, "nombre": 1}).to_list(200)
@@ -229,7 +229,7 @@ async def _resolve_ds(db, ds: str, cid: str, user: dict) -> Any:
         if "asignaciones_colectivas" in collections:
             asigs = await db.asignaciones_colectivas.find({"convocatoria_id": cid}, {"_id": 0, "terna_id": 1}).to_list(2000)
         c = Counter(a["terna_id"] for a in asigs)
-        items = [{"name": f"{t['codigo']} {(t.get('nombre') or '')[:18]}", "total": c.get(t["id"], 0)} for t in ternas]
+        items = [{"name": f"{t['codigo']} · {(t.get('nombre') or '')}", "total": c.get(t["id"], 0)} for t in ternas]
         items.sort(key=lambda x: -x["total"])
         return {"items": items}
 
