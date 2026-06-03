@@ -50,7 +50,7 @@ export default function Layout() {
       {/* Sidebar */}
       <aside
         data-testid={TID.sidebar}
-        className="w-[260px] shrink-0 border-r border-border bg-white flex flex-col"
+        className="w-[260px] shrink-0 border-r border-border bg-white flex flex-col sticky top-0 h-screen self-start"
       >
         {/* Brand */}
         <div className="px-5 pt-6 pb-5 border-b border-border">
@@ -138,7 +138,7 @@ export default function Layout() {
         </nav>
 
         {/* User block */}
-        <div className="border-t border-border p-4 bg-[#F7F9FB]">
+        <div className="border-t border-border p-4 bg-[#F7F9FB] shrink-0">
           <NavLink
             to="/mi-perfil"
             data-testid="nav-mi-perfil"
