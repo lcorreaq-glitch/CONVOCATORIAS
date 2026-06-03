@@ -254,6 +254,38 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 
 ## Backlog / próximas tareas
 
+### v18 — Reset operativo + Delete unificado + Usuarios de prueba (Feb 2026)
+**Backend nuevo** `routes_admin.py`:
+- ✅ `POST /api/admin/reset-datos` — borra propuestas, jurados, ternas, asignaciones, evaluaciones (ind+col), rankings, actas y opcionalmente usuarios/auditoría. Requiere `confirmacion="REINICIAR"`. Preserva configuración (convocatorias, campos, catálogos, criterios, desempates, plantillas, branding).
+- ✅ `POST /api/admin/seed-test-users?convocatoria_id=<id>` — crea/reactiva 8 usuarios de prueba (1 por rol + 3 jurados con registro en `db.jurados` para conformar terna). Password compartida `Pruebas2026!`.
+- ✅ `POST /api/admin/seed-estados-propuesta?convocatoria_id=<id>` — seed idempotente del catálogo "Estados de Propuesta" con 13 valores (Registrada → En revisión documental → Habilitada / No habilitada / Subsanación pendiente → Subsanada → ... → Ganadora / Lista de espera).
+- ✅ `GET /api/admin/credenciales-jurado/{jid}` — consulta usuario asociado a un jurado.
+- ✅ `POST /api/admin/credenciales-jurado/{jid}/reset-password` — genera password segura con `secrets`, devuelve en claro **una sola vez** para envío por correo.
+- ✅ `DELETE /api/admin/{propuestas,jurados,evaluaciones-individuales,evaluaciones-colectivas,rankings}/{id}` — hard-delete con cascada. Borrar jurado también elimina su user, lo pull-fuera de ternas y limpia asignaciones+evals.
+- ✅ `POST /api/jurados` actualizado: devuelve campo `credenciales` `{username, password, rol}` cuando crea un user nuevo.
+
+**Frontend**:
+- ✅ Nueva pestaña **"Sistema"** en `/administracion` con 3 cards: Reiniciar datos (rojo, doble confirmación), Usuarios de prueba (preview de la lista), Catálogo Estados de Propuesta (genera).
+- ✅ Botón **🗑 eliminar** en Propuestas, Jurados, Evaluaciones (individuales + colectivas), Ranking (historial). Asignaciones/Ternas/Usuarios ya tenían.
+- ✅ Botón **🔑 resetear contraseña** en cada fila de Jurados.
+- ✅ Dropdown **editable de Estado** en /propuestas → usa el catálogo "Estados de Propuesta" si existe, con fallback a la lista estática.
+- ✅ Dialog **"Credenciales generadas"** que aparece tras crear un jurado o resetear pwd — muestra usuario + password copiables con botón "Copiar ambas" (una sola vez por seguridad).
+
+**Documentación**:
+- ✅ Carpeta `/app/documentacion/` creada (preparada para subir a GitHub):
+  - `README.md` (índice + inicio rápido + stack)
+  - `01-vision-general.md` · `02-glosario-y-roles.md` · `03-arquitectura.md`
+  - `05-flujo-operativo.md` (orden recomendado de carga + credenciales jurado)
+  - `13-administracion.md` (panel Sistema documentado)
+  - `14-api-reference.md` (referencia REST completa)
+  - `15-mantenimiento.md` (logs, troubleshooting, mongodump)
+
+**Testing (iteración 13)**: 28/28 pytest PASS, 0 issues. Permisos por rol verificados (jurado→403, admin_convocatoria→sin reset, admin_general→todo). Cascadas DELETE verificadas. Idempotencia confirmada.
+
+---
+
+## Backlog / próximas tareas pendientes
+
 ### P0 (cierre de funcionalidad clave)
 - [ ] Pantalla "Mis evaluaciones" optimizada para rol Jurado (vista filtrada por defecto, contador de pendientes).
 - [ ] Expansión del seed `subregion_to_terna` para cubrir Suroeste, Bajo Cauca, Magdalena Medio.
