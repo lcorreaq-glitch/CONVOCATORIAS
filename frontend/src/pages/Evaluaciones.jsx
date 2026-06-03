@@ -11,7 +11,7 @@ import {
   Sparkles, AlertCircle, Target, TrendingUp,
 } from "lucide-react";
 
-const PENDIENTE_STATES = ["Pendiente", "En progreso"];
+const PENDIENTE_STATES = ["Pendiente", "En progreso", "Borrador"];
 const TERMINADAS_STATES = ["Finalizada", "Firmada", "Bloqueada", "Cerrada"];
 
 export default function Evaluaciones() {

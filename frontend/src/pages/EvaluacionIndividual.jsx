@@ -59,9 +59,15 @@ export default function EvaluacionIndividual() {
   const setPunt = (cid, v) => setPuntajes({ ...puntajes, [cid]: v === "" ? "" : parseFloat(v) });
   const setObs = (cid, v) => setObservaciones({ ...observaciones, [cid]: v });
 
+  const isCritPriorizacion = (c) => ((c.nombre_interno || c.nombre || "").toLowerCase()).includes("prioriz");
+  const valorAuto = (c) => (propuesta?.datos?.priorizada ? c.puntaje_max : 0);
+
   const total = (oficial = true) =>
-    criterios.filter((c) => (oficial ? c.oficial : !c.oficial))
-      .reduce((s, c) => s + (parseFloat(puntajes[c.id]) || 0), 0);
+    criterios.filter((c) => (oficial ? c.oficial !== false : c.oficial === false))
+      .reduce((s, c) => {
+        const v = isCritPriorizacion(c) ? valorAuto(c) : parseFloat(puntajes[c.id]) || 0;
+        return s + (v || 0);
+      }, 0);
 
   const save = async (finalize = false) => {
     setSaving(true);
@@ -270,18 +276,25 @@ export default function EvaluacionIndividual() {
         <div className="space-y-3">
           {criterios.map((c) => {
             const sumaRanking = !c.diferencial && c.oficial !== false;
-            const v = puntajes[c.id];
+            const isPriorizacion = ((c.nombre_interno || c.nombre || "").toLowerCase()).includes("prioriz");
+            const isAuto = isPriorizacion; // Solo lectura, valor automático
+            const autoValue = isAuto ? (propuesta.datos?.priorizada ? c.puntaje_max : 0) : null;
+            const v = isAuto ? autoValue : puntajes[c.id];
             const hasValue = v !== "" && v !== undefined && v !== null;
             const pct = hasValue && c.puntaje_max ? Math.min(100, Math.max(0, (Number(v) / c.puntaje_max) * 100)) : 0;
             return (
-              <div key={c.id} className={`rounded-lg border bg-white overflow-hidden shadow-sm ${sumaRanking ? "border-[#CDE7E1]" : "border-[#FDE68A]"}`}>
-                <div className={`h-1 w-full ${sumaRanking ? "bg-[#14776A]" : "bg-[#F59E0B]"}`}></div>
+              <div key={c.id} className={`rounded-lg border bg-white overflow-hidden shadow-sm ${isAuto ? "border-[#3B82F6]/40" : sumaRanking ? "border-[#CDE7E1]" : "border-[#FDE68A]"}`}>
+                <div className={`h-1 w-full ${isAuto ? "bg-[#3B82F6]" : sumaRanking ? "bg-[#14776A]" : "bg-[#F59E0B]"}`}></div>
                 <div className="p-4">
                   <div className="flex items-start gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <h4 className="font-display font-bold text-[14.5px] text-[#1A1F2C]">{c.nombre}</h4>
-                        {sumaRanking ? (
+                        {isAuto ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-[#EFF6FF] text-[#1E40AF] border border-[#BFDBFE]">
+                            <Lock className="w-2.5 h-2.5" /> Automático · {propuesta.datos?.priorizada ? `+${c.puntaje_max} pts (priorizada)` : "0 pts (no priorizada)"}
+                          </span>
+                        ) : sumaRanking ? (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-[#E8F3F0] text-[#0F5E54] border border-[#CDE7E1]">
                             <span className="w-1.5 h-1.5 rounded-full bg-[#14776A]"></span>
                             Suma al ranking · hasta {c.puntaje_max} pts
@@ -293,18 +306,23 @@ export default function EvaluacionIndividual() {
                           </span>
                         )}
                       </div>
-                      {c.descripcion && <p className="text-[12px] text-muted-foreground mt-1 leading-snug">{c.descripcion}</p>}
+                      {isAuto ? (
+                        <p className="text-[12px] text-[#1E40AF] mt-1 leading-snug">
+                          Puntaje asignado automáticamente por el sistema según marcación de la propuesta (PDET / Sentencia Río Atrato / Río Cauca). <strong>El jurado no puede modificarlo.</strong>
+                        </p>
+                      ) : c.descripcion && <p className="text-[12px] text-muted-foreground mt-1 leading-snug">{c.descripcion}</p>}
                     </div>
 
                     <div className="shrink-0 text-right">
                       <Input
                         type="number"
                         data-testid={`eval-input-${c.id}`}
-                        disabled={isLocked}
+                        disabled={isLocked || isAuto}
+                        readOnly={isAuto}
                         min={c.puntaje_min} max={c.puntaje_max} step="0.1"
-                        value={puntajes[c.id] ?? ""}
-                        onChange={(e) => setPunt(c.id, e.target.value)}
-                        className={`w-28 rounded-lg text-right font-display font-extrabold text-[20px] tabular-nums pr-3 ${sumaRanking ? "border-[#CDE7E1] focus-visible:ring-[#14776A]" : "border-[#FDE68A] focus-visible:ring-[#F59E0B]"}`}
+                        value={isAuto ? autoValue : (puntajes[c.id] ?? "")}
+                        onChange={(e) => !isAuto && setPunt(c.id, e.target.value)}
+                        className={`w-28 rounded-lg text-right font-display font-extrabold text-[20px] tabular-nums pr-3 ${isAuto ? "border-[#BFDBFE] bg-[#EFF6FF]/60 text-[#1E40AF] cursor-not-allowed" : sumaRanking ? "border-[#CDE7E1] focus-visible:ring-[#14776A]" : "border-[#FDE68A] focus-visible:ring-[#F59E0B]"}`}
                         placeholder="—"
                       />
                       <div className="text-[10px] mt-1 text-muted-foreground font-mono">rango {c.puntaje_min}–{c.puntaje_max}</div>
@@ -313,7 +331,7 @@ export default function EvaluacionIndividual() {
 
                   {hasValue && (
                     <div className="mt-3 h-1.5 w-full bg-secondary rounded-full overflow-hidden">
-                      <div className={`h-full transition-all ${sumaRanking ? "bg-[#14776A]" : "bg-[#F59E0B]"}`} style={{ width: `${pct}%` }}></div>
+                      <div className={`h-full transition-all ${isAuto ? "bg-[#3B82F6]" : sumaRanking ? "bg-[#14776A]" : "bg-[#F59E0B]"}`} style={{ width: `${pct}%` }}></div>
                     </div>
                   )}
 
@@ -366,6 +384,14 @@ export default function EvaluacionIndividual() {
                 <div className="h-full bg-[#14776A]" style={{ width: `${pctTotal}%` }}></div>
               </div>
             </div>
+            {propuesta.datos?.priorizada && (
+              <div className="rounded-lg border border-[#3B82F6]/30 bg-[#EFF6FF] p-3 flex items-start gap-2">
+                <Lock className="w-3.5 h-3.5 text-[#1E40AF] mt-0.5 shrink-0" />
+                <div className="text-[11.5px] text-[#1E40AF] leading-snug">
+                  Esta propuesta es <strong>priorizada</strong> (PDET / Río Atrato / Río Cauca). El sistema asignó automáticamente el puntaje máximo en el criterio <strong>Priorización</strong> y bloqueó su edición.
+                </div>
+              </div>
+            )}
             <div className="rounded-lg border border-[#FDE68A] bg-[#FFFBEB]/40 p-4">
               <div className="text-[10px] uppercase tracking-wider font-display font-bold text-[#92400E]">Total diferencial</div>
               <div className="font-display font-black text-3xl tabular-nums mt-1 text-[#92400E]">{totalDif.toFixed(1)}</div>

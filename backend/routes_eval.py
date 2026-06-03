@@ -10,6 +10,33 @@ from auth import get_current_user, require_roles, audit
 router = APIRouter(prefix="/api", tags=["evaluations"])
 
 
+async def _apply_priorizacion_automatica(db, payload_puntajes: dict, convocatoria_id: str, propuesta_id: str) -> dict:
+    """Aplica automáticamente el puntaje del criterio 'Priorización' cuando la propuesta
+    está marcada como priorizada en sus datos. El jurado NO puede modificar este valor.
+
+    Reglas:
+      - Si la propuesta tiene `datos.priorizada=true` → puntaje del criterio = `puntaje_max`
+      - Si no → 0
+      - Se busca el criterio cuyo `nombre_interno` o `nombre` contenga 'prioriz' (case-insensitive)
+    """
+    propuesta = await db.propuestas.find_one({"id": propuesta_id}, {"_id": 0, "datos": 1})
+    es_priorizada = bool(((propuesta or {}).get("datos") or {}).get("priorizada"))
+    criterios = await db.criterios.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(100)
+    crit_prior = next((c for c in criterios if "prioriz" in (c.get("nombre_interno") or c.get("nombre") or "").lower()), None)
+    if not crit_prior:
+        return payload_puntajes  # no hay criterio de priorización, devolver tal cual
+    cid = crit_prior["id"]
+    nuevo = dict(payload_puntajes or {})
+    nuevo[cid] = float(crit_prior.get("puntaje_max", 5)) if es_priorizada else 0
+    return nuevo
+
+
+async def _compute_bono_priorizacion(db, convocatoria_id: str, propuesta_id: str) -> float:
+    """DEPRECATED — el bono se aplica ahora sobre el criterio de priorización
+    automáticamente vía _apply_priorizacion_automatica. Devuelve 0 para no doble-contar."""
+    return 0.0
+
+
 # ==================== EVALUACIÓN INDIVIDUAL ====================
 @router.get("/evaluaciones-individuales")
 async def list_eval_individuales(convocatoria_id: Optional[str] = None,
@@ -65,6 +92,11 @@ async def save_eval(eid: str, payload: EvalUpdate, user: dict = Depends(get_curr
     # Validar puntajes contra criterios
     criterios = await db.criterios.find({"convocatoria_id": ev["convocatoria_id"]}, {"_id": 0}).to_list(100)
     crit_map = {c["id"]: c for c in criterios}
+
+    # Aplicar priorización automática: sobrescribe el valor del criterio "Priorización"
+    # antes de validar, para que el jurado no pueda alterar el puntaje automático.
+    payload.puntajes = await _apply_priorizacion_automatica(db, payload.puntajes, ev["convocatoria_id"], ev["propuesta_id"])
+
     total_oficial = 0.0
     total_diferencial = 0.0
     for cid, val in payload.puntajes.items():
@@ -86,10 +118,19 @@ async def save_eval(eid: str, payload: EvalUpdate, user: dict = Depends(get_curr
         "puntajes": payload.puntajes,
         "observaciones": payload.observaciones,
         "observacion_final": payload.observacion_final or "",
-        "puntaje_total": round(total_oficial, 2),
+        "puntaje_criterios": round(total_oficial, 2),
         "puntaje_diferencial_total": round(total_diferencial, 2),
         "fecha_ultima_edicion": now_iso(),
     }
+
+    # Bono automático por priorización territorial (PDET / Sentencia Río Atrato / Río Cauca)
+    # Reglas (configurables en convocatoria.configuracion.bono_priorizacion):
+    #   - puntos: cuántos puntos sumar (default 5)
+    #   - campo_propuesta: nombre del campo booleano en propuesta.datos (default "priorizada")
+    bono_aplicado = await _compute_bono_priorizacion(db, ev["convocatoria_id"], ev["propuesta_id"])
+    updates["bono_priorizacion"] = bono_aplicado
+    updates["puntaje_total"] = round(total_oficial + bono_aplicado, 2)
+
     if ev["estado"] == "Borrador":
         updates["estado"] = "En edición"
         updates["fecha_inicio"] = ev.get("fecha_inicio") or now_iso()
@@ -185,6 +226,7 @@ async def crear_eval_colectiva(payload: EvalColectivaIn, user: dict = Depends(re
     criterios = await db.criterios.find({"convocatoria_id": payload.convocatoria_id}, {"_id": 0}).to_list(100)
     total_of = sum(promedio.get(c["id"], 0) for c in criterios if c.get("oficial", True))
     total_dif = sum(promedio.get(c["id"], 0) for c in criterios if not c.get("oficial", True))
+    bono = await _compute_bono_priorizacion(db, payload.convocatoria_id, payload.propuesta_id)
 
     doc = {
         "id": str(uuid.uuid4()),
@@ -193,7 +235,9 @@ async def crear_eval_colectiva(payload: EvalColectivaIn, user: dict = Depends(re
         "terna_id": payload.terna_id,
         "estado": "Abierta",
         "puntajes": promedio,
-        "puntaje_final": round(total_of, 2),
+        "puntaje_criterios": round(total_of, 2),
+        "bono_priorizacion": bono,
+        "puntaje_final": round(total_of + bono, 2),
         "puntaje_diferencial_total": round(total_dif, 2),
         "observacion_consolidada": "",
         "individuales_relacionadas": [ev["id"] for ev in individuales],
@@ -331,13 +375,16 @@ async def cerrar_con_promedio_v2(eid: str, user: dict = Depends(require_roles("a
     criterios = await db.criterios.find({"convocatoria_id": col["convocatoria_id"]}).to_list(100)
     total_of = sum(promedio.get(c["id"], 0) for c in criterios if c.get("oficial", True))
     total_dif = sum(promedio.get(c["id"], 0) for c in criterios if not c.get("oficial", True))
+    bono = await _compute_bono_priorizacion(db, col["convocatoria_id"], col["propuesta_id"])
 
     await db.evaluaciones_colectivas.update_one(
         {"id": eid},
         {"$set": {
             "estado": "Cerrada",
             "puntajes": promedio,
-            "puntaje_final": round(total_of, 2),
+            "puntaje_criterios": round(total_of, 2),
+            "bono_priorizacion": bono,
+            "puntaje_final": round(total_of + bono, 2),
             "puntaje_diferencial_total": round(total_dif, 2),
             "fuente_definitiva": "promedio_etapa_colectiva",
             "fecha_cierre": now_iso(),
@@ -384,7 +431,10 @@ async def save_eval_colectiva(eid: str, payload: EvalColUpdate, user: dict = Dep
         criterios = await db.criterios.find({"convocatoria_id": ev["convocatoria_id"]}, {"_id": 0}).to_list(100)
         total_of = sum(float(payload.puntajes.get(c["id"], 0)) for c in criterios if c.get("oficial", True))
         total_dif = sum(float(payload.puntajes.get(c["id"], 0)) for c in criterios if not c.get("oficial", True))
-        updates["puntaje_final"] = round(total_of, 2)
+        bono = await _compute_bono_priorizacion(db, ev["convocatoria_id"], ev["propuesta_id"])
+        updates["puntaje_criterios"] = round(total_of, 2)
+        updates["bono_priorizacion"] = bono
+        updates["puntaje_final"] = round(total_of + bono, 2)
         updates["puntaje_diferencial_total"] = round(total_dif, 2)
     if payload.observacion_consolidada is not None:
         updates["observacion_consolidada"] = payload.observacion_consolidada
@@ -408,7 +458,10 @@ async def save_eval_colectiva(eid: str, payload: EvalColUpdate, user: dict = Dep
         criterios = await db.criterios.find({"convocatoria_id": ev["convocatoria_id"]}, {"_id": 0}).to_list(100)
         total_of = sum(float(payload.puntajes.get(c["id"], 0)) for c in criterios if c.get("oficial", True))
         total_dif = sum(float(payload.puntajes.get(c["id"], 0)) for c in criterios if not c.get("oficial", True))
-        updates["puntaje_final"] = round(total_of, 2)
+        bono = await _compute_bono_priorizacion(db, ev["convocatoria_id"], ev["propuesta_id"])
+        updates["puntaje_criterios"] = round(total_of, 2)
+        updates["bono_priorizacion"] = bono
+        updates["puntaje_final"] = round(total_of + bono, 2)
         updates["puntaje_diferencial_total"] = round(total_dif, 2)
     if payload.observacion_consolidada is not None:
         updates["observacion_consolidada"] = payload.observacion_consolidada
