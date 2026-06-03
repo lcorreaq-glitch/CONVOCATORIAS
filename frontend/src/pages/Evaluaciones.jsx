@@ -8,8 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ClipboardCheck, ArrowRight, Clock, CheckCircle2, Lock, Hourglass, Search,
-  Sparkles, AlertCircle, Target, TrendingUp,
+  Sparkles, AlertCircle, Target, TrendingUp, Trash2,
 } from "lucide-react";
+import { toast } from "sonner";
 
 const PENDIENTE_STATES = ["Pendiente", "En progreso", "Borrador"];
 const TERMINADAS_STATES = ["Finalizada", "Firmada", "Bloqueada", "Cerrada"];
@@ -17,6 +18,7 @@ const TERMINADAS_STATES = ["Finalizada", "Firmada", "Bloqueada", "Cerrada"];
 export default function Evaluaciones() {
   const { activeConvocatoriaId, user } = useAuth();
   const isJurado = user?.role === "jurado";
+  const isAdmin = user?.role === "admin_general" || user?.role === "admin_convocatoria";
   const [individuales, setIndividuales] = useState([]);
   const [colectivas, setColectivas] = useState([]);
   const [propuestas, setPropuestas] = useState([]);
@@ -45,6 +47,17 @@ export default function Evaluaciones() {
   const propMap = useMemo(() => Object.fromEntries(propuestas.map((p) => [p.id, p])), [propuestas]);
   const jurMap = useMemo(() => Object.fromEntries(jurados.map((j) => [j.id, j])), [jurados]);
   const ternaMap = useMemo(() => Object.fromEntries(ternas.map((t) => [t.id, t])), [ternas]);
+
+  const deleteEval = async (e, tipo) => {
+    if (!confirm(`¿Eliminar esta evaluación ${tipo} (estado ${e.estado})?\n\nNo se puede deshacer.`)) return;
+    try {
+      const path = tipo === "individual" ? "evaluaciones-individuales" : "evaluaciones-colectivas";
+      await api.delete(`/admin/${path}/${e.id}`);
+      toast.success("Evaluación eliminada");
+      if (tipo === "individual") setIndividuales((arr) => arr.filter((x) => x.id !== e.id));
+      else setColectivas((arr) => arr.filter((x) => x.id !== e.id));
+    } catch (err) { toast.error(err.response?.data?.detail || "Error"); }
+  };
 
   // Contadores para jurado
   const counts = useMemo(() => {
@@ -152,9 +165,11 @@ export default function Evaluaciones() {
           <EvalTable
             evaluaciones={filterEval(individuales)}
             isJurado={isJurado}
+            isAdmin={isAdmin}
             propMap={propMap}
             jurMap={jurMap}
             tipo="individual"
+            onDelete={(e) => deleteEval(e, "individual")}
             emptyHint={isJurado ? "No tienes evaluaciones individuales asignadas en esta convocatoria." : "Sin evaluaciones individuales."}
           />
         </TabsContent>
@@ -165,6 +180,8 @@ export default function Evaluaciones() {
             propMap={propMap}
             ternaMap={ternaMap}
             isJurado={isJurado}
+            isAdmin={isAdmin}
+            onDelete={(e) => deleteEval(e, "colectiva")}
             emptyHint={isJurado ? "Aún no tienes deliberaciones colectivas asignadas." : "Asigna propuestas a ternas para iniciar la deliberación colectiva."}
           />
         </TabsContent>
@@ -235,7 +252,7 @@ function EstadoBadge({ estado }) {
   return <Badge tone={estadoTone(estado)}>{estado}</Badge>;
 }
 
-function EvalTable({ evaluaciones, isJurado, propMap, jurMap, tipo, emptyHint }) {
+function EvalTable({ evaluaciones, isJurado, isAdmin, propMap, jurMap, tipo, emptyHint, onDelete }) {
   if (!evaluaciones.length) {
     return <div className="border border-dashed border-border rounded-lg p-12">
       <EmptyState title="Sin resultados" hint={emptyHint} icon={ClipboardCheck} />
@@ -268,11 +285,14 @@ function EvalTable({ evaluaciones, isJurado, propMap, jurMap, tipo, emptyHint })
                 <td><EstadoBadge estado={e.estado} /></td>
                 <td className="font-mono tabular-nums">{e.puntaje_total ?? 0} <span className="text-muted-foreground">/ 100</span></td>
                 <td className="text-xs text-muted-foreground font-mono">{e.fecha_ultima_edicion ? new Date(e.fecha_ultima_edicion).toLocaleString("es-CO") : "—"}</td>
-                <td className="text-right">
+                <td className="text-right whitespace-nowrap">
                   <Link to={`/evaluaciones/${tipo}/${e.id}`} data-testid={`open-eval-${e.id}`}
                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-sm text-[11px] font-semibold bg-[#14776A] text-white hover:bg-[#0F5E54] transition-colors">
                     {PENDIENTE_STATES.includes(e.estado) ? "Continuar" : "Abrir"} <ArrowRight className="w-3 h-3" />
                   </Link>
+                  {isAdmin && (
+                    <button onClick={() => onDelete(e)} className="ml-1 text-muted-foreground hover:text-red-600 p-1" data-testid={`eval-delete-${e.id}`} title="Eliminar evaluación"><Trash2 className="w-3.5 h-3.5 inline" /></button>
+                  )}
                 </td>
               </tr>
             );
@@ -283,7 +303,7 @@ function EvalTable({ evaluaciones, isJurado, propMap, jurMap, tipo, emptyHint })
   );
 }
 
-function EvalTableColectiva({ evaluaciones, propMap, ternaMap, isJurado, emptyHint }) {
+function EvalTableColectiva({ evaluaciones, propMap, ternaMap, isJurado, isAdmin, emptyHint, onDelete }) {
   if (!evaluaciones.length) {
     return <div className="border border-dashed border-border rounded-lg p-12">
       <EmptyState title="Sin resultados" hint={emptyHint} icon={Sparkles} />
@@ -311,11 +331,14 @@ function EvalTableColectiva({ evaluaciones, propMap, ternaMap, isJurado, emptyHi
                 </td>
                 <td><EstadoBadge estado={e.estado} /></td>
                 <td className="font-mono tabular-nums">{e.puntaje_final ?? 0} <span className="text-muted-foreground">/ 100</span></td>
-                <td className="text-right">
+                <td className="text-right whitespace-nowrap">
                   <Link to={`/evaluaciones/colectiva/${e.id}`}
                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-sm text-[11px] font-semibold bg-[#14776A] text-white hover:bg-[#0F5E54] transition-colors">
                     {PENDIENTE_STATES.includes(e.estado) ? "Continuar" : "Abrir"} <ArrowRight className="w-3 h-3" />
                   </Link>
+                  {isAdmin && (
+                    <button onClick={() => onDelete(e)} className="ml-1 text-muted-foreground hover:text-red-600 p-1" data-testid={`eval-col-delete-${e.id}`} title="Eliminar evaluación colectiva"><Trash2 className="w-3.5 h-3.5 inline" /></button>
+                  )}
                 </td>
               </tr>
             );

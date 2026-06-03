@@ -24,6 +24,7 @@ from routes_permissions import router as permissions_router
 from routes_upload import router as upload_router
 from routes_actas import router as actas_router
 from routes_dashboards import router as dashboards_router
+from routes_admin import router as admin_router
 
 
 @asynccontextmanager
@@ -71,6 +72,7 @@ app.include_router(permissions_router)
 app.include_router(upload_router)
 app.include_router(actas_router)
 app.include_router(dashboards_router)
+app.include_router(admin_router)
 
 
 logging.basicConfig(level=logging.INFO,

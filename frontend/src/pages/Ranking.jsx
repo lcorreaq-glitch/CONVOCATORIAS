@@ -56,6 +56,16 @@ export default function Ranking() {
 
   const acta = () => active && openPdf(`/actas/ranking/${active.id}`);
 
+  const deleteRanking = async (r) => {
+    if (!confirm(`¿Eliminar este ranking generado el ${new Date(r.fecha_generacion).toLocaleString("es-CO")}?\n\nEsta acción no se puede deshacer.`)) return;
+    try {
+      await api.delete(`/admin/rankings/${r.id}`);
+      toast.success("Ranking eliminado");
+      if (active?.id === r.id) setActive(null);
+      load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
   const agrupacionLabel = (key) => ({
     subregion: "Por subregión", linea: "Por línea",
     tipo_organizacion: "Por tipo organización", __general__: "General",
@@ -88,16 +98,16 @@ export default function Ranking() {
                 </div>
                 <div className="max-h-[360px] overflow-y-auto divide-y divide-border">
                   {rankings.map((r) => (
-                    <button key={r.id} onClick={() => setActive(r)}
-                      className={`w-full text-left px-4 py-2.5 hover:bg-secondary transition-colors flex items-center justify-between gap-3 ${active?.id === r.id ? "bg-[#F0F7F5]" : ""}`}>
-                      <div className="min-w-0">
+                    <div key={r.id} className={`w-full px-4 py-2.5 hover:bg-secondary transition-colors flex items-center justify-between gap-3 ${active?.id === r.id ? "bg-[#F0F7F5]" : ""}`}>
+                      <button onClick={() => setActive(r)} className="flex-1 text-left min-w-0">
                         <div className="font-mono text-[11px] text-[#1A1F2C] truncate">{new Date(r.fecha_generacion).toLocaleString("es-CO")}</div>
                         <div className="text-[11px] text-muted-foreground mt-0.5">
                           {agrupacionLabel(r.agrupacion)} · modo {r.modo || "colectivo"}
                         </div>
-                      </div>
+                      </button>
                       {active?.id === r.id && <Badge tone="success">Activo</Badge>}
-                    </button>
+                      <button onClick={() => deleteRanking(r)} className="text-muted-foreground hover:text-red-600 p-1" data-testid={`ranking-delete-${r.id}`} title="Eliminar"><Trash2 className="w-3.5 h-3.5" /></button>
+                    </div>
                   ))}
                 </div>
               </PopoverContent>

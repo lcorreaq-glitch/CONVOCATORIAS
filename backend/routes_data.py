@@ -228,6 +228,7 @@ async def create_jurado(payload: JuradoIn, user: dict = Depends(require_roles("a
     await db.jurados.insert_one(doc)
     doc.pop("_id", None)
 
+    credenciales = None
     if crear_user:
         username = doc["email"].lower()
         existing = await db.users.find_one({"$or": [{"username": username}, {"email": username}]})
@@ -244,7 +245,11 @@ async def create_jurado(payload: JuradoIn, user: dict = Depends(require_roles("a
                 "jurado_id": doc["id"],
                 "created_at": now_iso(),
             })
+            # Devolver credenciales en claro UNA SOLA VEZ para envío por correo
+            credenciales = {"username": username, "password": pwd, "rol": "jurado"}
     await audit(user, "create", "jurados", doc["id"], valor_nuevo={"nombre": doc["nombre"]})
+    if credenciales:
+        doc["credenciales"] = credenciales
     return doc
 
 

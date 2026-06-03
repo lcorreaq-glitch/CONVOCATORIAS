@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Upload, Download, ExternalLink, Search, FileStack, Pencil, X, Filter, ChevronDown } from "lucide-react";
+import { Plus, Upload, Download, ExternalLink, Search, FileStack, Pencil, X, Filter, ChevronDown, Trash2 } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import PropuestaForm from "./propuestas/PropuestaForm";
 import ConvocatoriaContextBanner from "@/components/ConvocatoriaContextBanner";
@@ -190,6 +190,34 @@ export default function Propuestas() {
     }
   };
 
+  const deletePropuesta = async (p) => {
+    if (!confirm(`¿Eliminar la propuesta "${p.codigo} · ${p.nombre}"?\n\nSe borrarán también sus asignaciones y evaluaciones. Esta acción no se puede deshacer.`)) return;
+    try {
+      await api.delete(`/admin/propuestas/${p.id}`);
+      toast.success("Propuesta eliminada");
+      load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const changeEstado = async (p, nuevoEstado) => {
+    try {
+      await api.patch(`/propuestas/${p.id}`, { estado: nuevoEstado });
+      toast.success(`Estado: ${nuevoEstado}`);
+      load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  // Estados de propuesta (vienen del catálogo si existe, sino fallback estático)
+  const [estadosCatalogo, setEstadosCatalogo] = useState([]);
+  useEffect(() => {
+    const cat = catalogos.find((c) => c.nombre === "Estados de Propuesta");
+    if (cat) {
+      setEstadosCatalogo((cat.valores || []).filter((v) => v.activo !== false).map((v) => v.valor));
+    } else {
+      setEstadosCatalogo(["Registrada", "En revisión documental", "Habilitada", "No habilitada", "Subsanación pendiente", "Subsanada", "Asignada", "En evaluación individual", "Rankeada", "Ganadora", "Elegible"]);
+    }
+  }, [catalogos]);
+
   if (!activeConvocatoriaId)
     return <div className="p-10 text-muted-foreground">Selecciona una convocatoria.</div>;
 
@@ -257,7 +285,7 @@ export default function Propuestas() {
             <SelectTrigger className="rounded-md h-9 w-[180px] text-[13px]" data-testid="filter-estado"><SelectValue placeholder="Estado" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="__all__">Todos los estados</SelectItem>
-              {["Registrada", "En revisión documental", "Habilitada", "No habilitada", "Asignada", "En evaluación individual", "Rankeada", "Ganadora", "Elegible"].map((s) => (
+              {estadosCatalogo.map((s) => (
                 <SelectItem key={s} value={s}>{s}</SelectItem>
               ))}
             </SelectContent>
@@ -336,7 +364,18 @@ export default function Propuestas() {
                         {renderCellValue(p.datos?.[c.nombre_interno], c)}
                       </td>
                     ))}
-                    <td><Badge tone={estadoTone(p.estado)}>{p.estado}</Badge></td>
+                    <td>
+                      {canEdit ? (
+                        <Select value={p.estado || "Registrada"} onValueChange={(v) => changeEstado(p, v)}>
+                          <SelectTrigger className="h-7 text-[11.5px] rounded-md min-w-[160px] border-[#E2E7EC]" data-testid={`prop-estado-${p.codigo}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {estadosCatalogo.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      ) : <Badge tone={estadoTone(p.estado)}>{p.estado}</Badge>}
+                    </td>
                     <td>
                       {p.datos?.link_expediente ? (
                         <a href={p.datos.link_expediente} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[#0F5E54] hover:underline text-xs">
@@ -345,13 +384,19 @@ export default function Propuestas() {
                       ) : <span className="text-muted-foreground text-xs">—</span>}
                     </td>
                     {canEdit && (
-                      <td className="text-right">
+                      <td className="text-right whitespace-nowrap">
                         <button
                           onClick={() => { setEditing(p); setFormOpen(true); }}
                           className="text-[#14776A] hover:text-[#0F5E54] p-1"
                           data-testid={`prop-edit-${p.codigo}`}
                           title="Editar propuesta"
                         ><Pencil className="w-4 h-4 inline" /></button>
+                        <button
+                          onClick={() => deletePropuesta(p)}
+                          className="text-muted-foreground hover:text-red-600 p-1 ml-0.5"
+                          data-testid={`prop-delete-${p.codigo}`}
+                          title="Eliminar propuesta"
+                        ><Trash2 className="w-4 h-4 inline" /></button>
                       </td>
                     )}
                   </tr>

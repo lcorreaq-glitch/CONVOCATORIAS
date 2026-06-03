@@ -1,0 +1,42 @@
+{
+  "summary": "Iteración 13 — Pruebas backend del nuevo módulo /api/admin (reset-datos, seed-test-users, seed-estados-propuesta, credenciales-jurado y DELETE en cascada para propuestas/jurados/evaluaciones/rankings). 28/28 pruebas pytest pasaron. Se validó el flujo completo en el orden destructivo recomendado por el agente principal: seed → crear jurado → reset-password → DELETE en cascada → reset-datos → re-seed. Backend reiniciado al final para repoblar datos demo vía lifespan.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_module.py",
+    "/app/test_reports/pytest/iter13_admin.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes_admin.py: en reset-datos cuando incluir_auditoria=false la clave 'auditoria' se omite del resumen — comportamiento correcto y verificado.",
+    "routes_admin.py reset_password_jurado: usa secrets.choice (criptográficamente seguro) y emite hash bcrypt vía hash_password — OK.",
+    "routes_data.create_jurado: cuando el usuario ya existe NO devuelve credenciales (esperado). Verificado.",
+    "DELETE /api/admin/propuestas hace delete_many en evaluaciones individuales/colectivas y asignaciones huérfanas — cascada correcta. Lanza 404 sólo si la propuesta no existía.",
+    "DELETE /api/admin/jurados elimina el jurado, su user (jurado_id match), hace $pull en ternas.integrantes y borra asignaciones+evaluaciones individuales del jurado. Verificado.",
+    "Permisos: jurado → 403 en seed-test-users / delete propuestas / reset-datos. admin_convocatoria puede DELETE pero NO reset-datos (403). admin_general puede todo. Verificado.",
+    "seed-estados-propuesta es idempotente devolviendo ya_existia=true en la segunda llamada.",
+    "Confirmación del reset-datos: 'REINICIAR' obligatorio; cualquier otro string → 400.",
+    "Tras reset-datos con incluir_usuarios=true sólo sobrevive admin_general; admin_general puede loguearse inmediatamente; re-seed test-users restaura los 8 usuarios y login admin_convocatoria funciona.",
+    "Sugerencia (opcional, no crítica): el endpoint POST /api/admin/seed-test-users acepta convocatoria_id como query param; mejor documentar este contrato como Body o query explícito en OpenAPI."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_admin_module.py"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "n/a"
+  },
+  "test_credentials": "admin_general: lcorreaq / Chocolate2026! ; usuarios de prueba (creados por seed-test-users): admin.conv@krinos.test / supervisor@krinos.test / invitado@krinos.test / auditor@krinos.test / integrante@krinos.test / jurado1..3@krinos.test todos con Pruebas2026!",
+  "seed_data_creation": "Tras la ejecución se llamó 'sudo supervisorctl restart backend' para reactivar el lifespan (create_indexes + seed_admin + seed_incentivos_2026 + seed_demo_data). Backend healthy y admin login OK. Datos demo (convocatoria INC2026, propuestas, jurados, etc.) repoblados automáticamente. Los 8 usuarios de prueba quedaron creados en la última corrida de seed-test-users (test_84).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "El módulo /api/admin está completo y todas sus rutas probadas en iter13_admin.xml. Si vas a probar UI de Admin → Sistema, los botones que llaman a /admin/reset-datos, /admin/seed-test-users, /admin/seed-estados-propuesta y los DELETE están integrados con backend funcional. Tras reset-datos los demás módulos quedan vacíos hasta reiniciar el backend (lifespan repobla). El test_admin_module.py es seguro para regresión pero ejecuta un reset destructivo al final — siempre invoca supervisor restart después.",
+  "rca of the issue": "Sin issues. Implementación correcta de todos los endpoints solicitados: confirmación REINICIAR (400 si != 'REINICIAR'), seed idempotente, cascadas DELETE, retorno de credenciales sólo cuando se crea user nuevo, generación de password segura con secrets, permisos por rol verificados."
+}

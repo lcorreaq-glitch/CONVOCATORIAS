@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import {
   Shield, Sparkles, Mail, Users as UsersIcon, Palette,
   CheckCircle2, AlertCircle, ExternalLink, Eye, EyeOff, Save, Send, Info,
+  Wrench, Trash2, RefreshCw, KeyRound, Copy, AlertTriangle, ClipboardList,
 } from "lucide-react";
 
 const MODELS = {
@@ -36,6 +37,7 @@ export default function Administracion() {
           <TabsTrigger value="ia" className="rounded-md gap-2" data-testid="admin-tab-ia"><Sparkles className="w-4 h-4" />IA Asistida</TabsTrigger>
           <TabsTrigger value="sendgrid" className="rounded-md gap-2" data-testid="admin-tab-sendgrid"><Mail className="w-4 h-4" />Correos (SendGrid)</TabsTrigger>
           <TabsTrigger value="branding" className="rounded-md gap-2" data-testid="admin-tab-branding"><Palette className="w-4 h-4" />Imagen gráfica</TabsTrigger>
+          <TabsTrigger value="sistema" className="rounded-md gap-2" data-testid="admin-tab-sistema"><Wrench className="w-4 h-4" />Sistema</TabsTrigger>
         </TabsList>
 
         <TabsContent value="usuarios"><UsersPanel /></TabsContent>
@@ -43,6 +45,7 @@ export default function Administracion() {
         <TabsContent value="ia"><AIPanel /></TabsContent>
         <TabsContent value="sendgrid"><SendGridPanel /></TabsContent>
         <TabsContent value="branding"><BrandingPanel /></TabsContent>
+        <TabsContent value="sistema"><SistemaPanel /></TabsContent>
       </Tabs>
     </div>
   );
@@ -87,6 +90,13 @@ function UsersPanel() {
 
   const toggleActive = async (u) => {
     try { await api.patch(`/users/${u.id}`, { active: !u.active }); load(); }
+    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const deleteUser = async (u) => {
+    if (u.role === "admin_general") { toast.error("No se puede eliminar a un admin_general"); return; }
+    if (!confirm(`¿Desactivar el usuario "${u.username}"?`)) return;
+    try { await api.delete(`/users/${u.id}`); load(); toast.success("Usuario desactivado"); }
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
@@ -150,6 +160,11 @@ function UsersPanel() {
                 <td className="text-right space-x-2">
                   <Button size="sm" variant="outline" className="rounded-lg" onClick={() => startEdit(u)}>Editar</Button>
                   <Button size="sm" variant="outline" className="rounded-lg" onClick={() => toggleActive(u)}>{u.active ? "Desactivar" : "Activar"}</Button>
+                  {u.role !== "admin_general" && (
+                    <Button size="sm" variant="outline" className="rounded-lg text-red-600 hover:bg-red-50 border-red-200" onClick={() => deleteUser(u)} data-testid={`user-delete-${u.username}`}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -571,6 +586,175 @@ function BrandingPanel() {
           </div>
         </div>
       </aside>
+    </div>
+  );
+}
+
+
+// ============== SISTEMA (reset operativo + usuarios de prueba + estados de propuesta) ==============
+import { useAuth } from "@/contexts/AuthContext";
+
+function SistemaPanel() {
+  const { activeConvocatoriaId } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [resetForm, setResetForm] = useState({
+    incluir_usuarios: true, incluir_auditoria: true,
+    convocatoria_id: "", confirmacion: "",
+  });
+  const [resetResult, setResetResult] = useState(null);
+  const [seedResult, setSeedResult] = useState(null);
+  const [estadosResult, setEstadosResult] = useState(null);
+
+  const doReset = async () => {
+    if (resetForm.confirmacion !== "REINICIAR") {
+      toast.error('Debes escribir REINICIAR para confirmar.');
+      return;
+    }
+    if (!confirm("Última confirmación: ¿REINICIAR todos los datos operativos?\n\nSe borrarán propuestas, jurados, ternas, asignaciones, evaluaciones, rankings, actas y usuarios (excepto admin_general).\n\nSe preserva: convocatorias, campos, catálogos, criterios, desempates, plantillas y branding.")) return;
+    setBusy(true);
+    try {
+      const body = {
+        confirmacion: "REINICIAR",
+        incluir_usuarios: resetForm.incluir_usuarios,
+        incluir_auditoria: resetForm.incluir_auditoria,
+        convocatoria_id: resetForm.convocatoria_id || null,
+      };
+      const r = await api.post("/admin/reset-datos", body);
+      setResetResult(r.data);
+      toast.success("Reset completado");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setBusy(false); }
+  };
+
+  const doSeedUsers = async () => {
+    setBusy(true);
+    try {
+      const qs = activeConvocatoriaId ? `?convocatoria_id=${activeConvocatoriaId}` : "";
+      const r = await api.post(`/admin/seed-test-users${qs}`);
+      setSeedResult(r.data);
+      toast.success(`${r.data.creados} creados, ${r.data.actualizados} actualizados`);
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setBusy(false); }
+  };
+
+  const doSeedEstados = async () => {
+    if (!activeConvocatoriaId) { toast.error("Selecciona una convocatoria"); return; }
+    setBusy(true);
+    try {
+      const r = await api.post(`/admin/seed-estados-propuesta?convocatoria_id=${activeConvocatoriaId}`);
+      setEstadosResult(r.data);
+      toast.success(r.data.ya_existia ? "El catálogo ya existía" : "Catálogo creado");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="space-y-6 max-w-5xl">
+      {/* RESET */}
+      <div className="border-l-4 border-red-500 bg-red-50 rounded-r-lg p-5">
+        <div className="flex gap-3 items-start mb-3">
+          <AlertTriangle className="w-6 h-6 text-red-600 mt-0.5 shrink-0" />
+          <div>
+            <h3 className="font-display font-bold text-[16px] text-red-900">Reiniciar datos operativos</h3>
+            <p className="text-[13px] text-red-800 mt-1">
+              Borra <strong>propuestas, jurados, ternas, asignaciones, evaluaciones, rankings y actas</strong>.
+              Preserva: convocatorias, campos, catálogos, criterios, desempates, plantillas de actas y branding.
+              Úsalo solo para el <strong>lanzamiento oficial</strong>.
+            </p>
+          </div>
+        </div>
+        <div className="grid sm:grid-cols-3 gap-3 mt-4 bg-white rounded-md p-4 border border-red-200">
+          <div className="col-span-3 flex items-center gap-3">
+            <Switch checked={resetForm.incluir_usuarios} onCheckedChange={(v) => setResetForm({ ...resetForm, incluir_usuarios: v })} data-testid="reset-incluir-usuarios" />
+            <Label className="text-[13px]">Eliminar también usuarios (excepto Administrador General)</Label>
+          </div>
+          <div className="col-span-3 flex items-center gap-3">
+            <Switch checked={resetForm.incluir_auditoria} onCheckedChange={(v) => setResetForm({ ...resetForm, incluir_auditoria: v })} data-testid="reset-incluir-auditoria" />
+            <Label className="text-[13px]">Eliminar registros de auditoría</Label>
+          </div>
+          <div className="col-span-3">
+            <Label className="text-[12px] font-semibold">Convocatoria (opcional, si vacío afecta todas)</Label>
+            <Input value={resetForm.convocatoria_id} onChange={(e) => setResetForm({ ...resetForm, convocatoria_id: e.target.value })} placeholder={activeConvocatoriaId ? `Por defecto: convocatoria activa (${activeConvocatoriaId})` : "Deja vacío para borrar TODAS las convocatorias"} className="rounded-md font-mono text-[11px]" data-testid="reset-convocatoria-id" />
+            <Button type="button" size="sm" variant="outline" className="rounded-sm text-[11px] h-7 mt-1" onClick={() => setResetForm({ ...resetForm, convocatoria_id: activeConvocatoriaId || "" })}>Usar convocatoria activa</Button>
+          </div>
+          <div className="col-span-3">
+            <Label className="text-[12px] font-semibold text-red-700">Escribe <strong>REINICIAR</strong> para habilitar el botón</Label>
+            <Input value={resetForm.confirmacion} onChange={(e) => setResetForm({ ...resetForm, confirmacion: e.target.value })} placeholder="REINICIAR" className="rounded-md font-mono uppercase" data-testid="reset-confirm-input" />
+          </div>
+        </div>
+        <div className="flex justify-end mt-3">
+          <Button onClick={doReset} disabled={busy || resetForm.confirmacion !== "REINICIAR"} className="bg-red-600 hover:bg-red-700 rounded-md gap-2" data-testid="reset-execute-btn">
+            <Trash2 className="w-4 h-4" /> Reiniciar datos
+          </Button>
+        </div>
+        {resetResult && (
+          <div className="mt-3 bg-white border border-red-200 rounded-md p-3 text-[12px] font-mono">
+            <strong>Resumen:</strong>
+            <ul className="mt-1">{Object.entries(resetResult.resumen || {}).map(([k, v]) => <li key={k}>· {k}: <strong>{v}</strong> borrado(s)</li>)}</ul>
+          </div>
+        )}
+      </div>
+
+      {/* SEED TEST USERS */}
+      <div className="border border-[#E2E7EC] rounded-xl bg-white p-5 shadow-card">
+        <h3 className="font-display font-bold text-[15px] flex items-center gap-2">
+          <UsersIcon className="w-5 h-5 text-[#14776A]" /> Usuarios de prueba por rol
+        </h3>
+        <p className="text-[13px] text-[#5E6878] mt-1">
+          Crea (o reactiva) 1 usuario de prueba por cada rol del sistema + 3 jurados (para conformar terna).
+          Password compartida: <code className="font-mono text-[11px] bg-[#F1F4F7] px-1.5 py-0.5 rounded">Pruebas2026!</code>.
+        </p>
+        <div className="grid sm:grid-cols-2 gap-2 mt-3 text-[12px]">
+          {[
+            ["admin.conv@krinos.test", "Administrador de Convocatoria"],
+            ["supervisor@krinos.test", "Supervisor"],
+            ["invitado@krinos.test", "Invitado de Consulta"],
+            ["auditor@krinos.test", "Auditor"],
+            ["integrante@krinos.test", "Integrante de Terna"],
+            ["jurado1@krinos.test", "Jurado #1"],
+            ["jurado2@krinos.test", "Jurado #2"],
+            ["jurado3@krinos.test", "Jurado #3"],
+          ].map(([email, rol]) => (
+            <div key={email} className="flex items-center justify-between bg-[#FAFBFC] rounded-md px-3 py-1.5 border border-border">
+              <span className="font-mono">{email}</span>
+              <span className="text-muted-foreground">{rol}</span>
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-end mt-4">
+          <Button onClick={doSeedUsers} disabled={busy} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-md gap-2" data-testid="seed-test-users-btn">
+            <RefreshCw className="w-4 h-4" /> Crear / reactivar usuarios de prueba
+          </Button>
+        </div>
+        {seedResult && (
+          <div className="mt-3 bg-emerald-50 border border-emerald-200 rounded-md p-3 text-[12px]">
+            ✓ {seedResult.creados} creados, {seedResult.actualizados} actualizados.
+          </div>
+        )}
+      </div>
+
+      {/* SEED ESTADOS PROPUESTA */}
+      <div className="border border-[#E2E7EC] rounded-xl bg-white p-5 shadow-card">
+        <h3 className="font-display font-bold text-[15px] flex items-center gap-2">
+          <ClipboardList className="w-5 h-5 text-[#14776A]" /> Catálogo "Estados de Propuesta"
+        </h3>
+        <p className="text-[13px] text-[#5E6878] mt-1">
+          Crea (idempotente) el catálogo de estados que se usa en el workflow de habilitación documental:
+          Registrada → En revisión documental → Habilitada / No habilitada / Subsanación pendiente → Subsanada → … → Ganadora.
+          Luego puedes editarlo desde <strong>Configuración → Catálogos</strong>.
+        </p>
+        <div className="flex justify-end mt-3">
+          <Button onClick={doSeedEstados} disabled={busy || !activeConvocatoriaId} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-md gap-2" data-testid="seed-estados-btn">
+            <ClipboardList className="w-4 h-4" /> Generar catálogo en la convocatoria activa
+          </Button>
+        </div>
+        {!activeConvocatoriaId && <p className="mt-2 text-[12px] text-amber-700">Selecciona primero una convocatoria activa en el sidebar.</p>}
+        {estadosResult && (
+          <div className="mt-3 bg-emerald-50 border border-emerald-200 rounded-md p-3 text-[12px]">
+            ✓ {estadosResult.ya_existia ? "El catálogo ya existía" : "Catálogo creado correctamente"}.
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Upload, Download, Users, Pencil, Search, Filter, ChevronDown, X, ExternalLink, Eye } from "lucide-react";
+import { Plus, Upload, Download, Users, Pencil, Search, Filter, ChevronDown, X, ExternalLink, Eye, Trash2, KeyRound, Copy, Mail } from "lucide-react";
 import JuradoForm from "./jurados/JuradoForm";
 import JuradoDetalle from "./jurados/JuradoDetalle";
 import ConvocatoriaContextBanner from "@/components/ConvocatoriaContextBanner";
@@ -93,8 +93,32 @@ export default function Jurados() {
   const [importOpen, setImportOpen] = useState(false);
   const [file, setFile] = useState(null);
   const [importResult, setImportResult] = useState(null);
+  const [credsOpen, setCredsOpen] = useState(false);
+  const [credentials, setCredentials] = useState(null); // {username, password, jurado_nombre}
 
   const canEdit = user?.role === "admin_general" || user?.role === "admin_convocatoria";
+
+  const showCredentials = (creds, nombre) => {
+    setCredentials({ ...creds, jurado_nombre: nombre });
+    setCredsOpen(true);
+  };
+
+  const deleteJurado = async (j) => {
+    if (!confirm(`¿Eliminar al jurado "${j.nombre}"?\n\nSe borrará también su usuario, se desvinculará de las ternas y se cancelarán sus asignaciones y evaluaciones.\n\nEsta acción NO se puede deshacer.`)) return;
+    try {
+      await api.delete(`/admin/jurados/${j.id}`);
+      toast.success("Jurado eliminado");
+      load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const resetPassword = async (j) => {
+    if (!confirm(`¿Resetear la contraseña del jurado "${j.nombre}"?\n\nSe generará una nueva contraseña temporal que podrá copiarse para envío por correo.`)) return;
+    try {
+      const r = await api.post(`/admin/credenciales-jurado/${j.id}/reset-password`, {});
+      showCredentials({ username: r.data.username, password: r.data.password }, j.nombre);
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
 
   const load = () => {
     if (!activeConvocatoriaId) return;
@@ -257,12 +281,26 @@ export default function Jurados() {
                     title="Ver detalle"
                   ><Eye className="w-4 h-4 inline" /></button>
                   {canEdit && (
-                    <button
-                      onClick={() => { setEditing(j); setFormOpen(true); }}
-                      className="text-[#14776A] hover:text-[#0F5E54] p-1 ml-0.5"
-                      data-testid={`jur-edit-${j.id}`}
-                      title="Editar"
-                    ><Pencil className="w-4 h-4 inline" /></button>
+                    <>
+                      <button
+                        onClick={() => { setEditing(j); setFormOpen(true); }}
+                        className="text-[#14776A] hover:text-[#0F5E54] p-1 ml-0.5"
+                        data-testid={`jur-edit-${j.id}`}
+                        title="Editar"
+                      ><Pencil className="w-4 h-4 inline" /></button>
+                      <button
+                        onClick={() => resetPassword(j)}
+                        className="text-amber-600 hover:text-amber-800 p-1 ml-0.5"
+                        data-testid={`jur-reset-pwd-${j.id}`}
+                        title="Resetear contraseña (para envío por correo)"
+                      ><KeyRound className="w-4 h-4 inline" /></button>
+                      <button
+                        onClick={() => deleteJurado(j)}
+                        className="text-muted-foreground hover:text-red-600 p-1 ml-0.5"
+                        data-testid={`jur-delete-${j.id}`}
+                        title="Eliminar jurado"
+                      ><Trash2 className="w-4 h-4 inline" /></button>
+                    </>
                   )}
                 </td>
               </tr>
@@ -279,7 +317,13 @@ export default function Jurados() {
         campos={campos}
         catalogos={catalogos}
         jurado={editing}
-        onSaved={load}
+        onSaved={(resp) => {
+          load();
+          // Si la respuesta trae credenciales generadas (jurado nuevo + usuario creado), mostrarlas
+          if (resp && resp.credenciales) {
+            showCredentials(resp.credenciales, resp.nombre);
+          }
+        }}
       />
       <JuradoDetalle
         open={detailOpen}
@@ -289,6 +333,55 @@ export default function Jurados() {
         canEdit={canEdit}
         onEdit={(j) => { setEditing(j); setFormOpen(true); }}
       />
+
+      {/* Dialog de credenciales generadas */}
+      <Dialog open={credsOpen} onOpenChange={setCredsOpen}>
+        <DialogContent className="rounded-lg max-w-md" data-testid="jur-credentials-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <KeyRound className="w-5 h-5 text-[#14776A]" />
+              Credenciales generadas
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="bg-amber-50 border-l-4 border-amber-500 p-3 text-[12px] text-amber-900 rounded-r-md flex gap-2">
+              <Mail className="w-4 h-4 mt-0.5 shrink-0" />
+              <div>
+                <strong>Esta contraseña se muestra UNA SOLA VEZ.</strong> Cópiala ahora para enviarla por correo institucional al jurado. Luego solo podrás resetearla.
+              </div>
+            </div>
+            {credentials?.jurado_nombre && (
+              <div className="text-[13px]"><span className="text-muted-foreground">Jurado:</span> <strong>{credentials.jurado_nombre}</strong></div>
+            )}
+            <div>
+              <label className="text-[11px] uppercase font-display font-bold text-muted-foreground">Usuario</label>
+              <div className="flex gap-2 mt-1">
+                <Input value={credentials?.username || ""} readOnly className="font-mono text-[12.5px]" data-testid="jur-creds-username" />
+                <Button variant="outline" size="sm" className="rounded-sm" onClick={() => { navigator.clipboard.writeText(credentials?.username || ""); toast.success("Usuario copiado"); }}><Copy className="w-3.5 h-3.5" /></Button>
+              </div>
+            </div>
+            <div>
+              <label className="text-[11px] uppercase font-display font-bold text-muted-foreground">Contraseña temporal</label>
+              <div className="flex gap-2 mt-1">
+                <Input value={credentials?.password || ""} readOnly className="font-mono text-[12.5px]" data-testid="jur-creds-password" />
+                <Button variant="outline" size="sm" className="rounded-sm" onClick={() => { navigator.clipboard.writeText(credentials?.password || ""); toast.success("Contraseña copiada"); }}><Copy className="w-3.5 h-3.5" /></Button>
+              </div>
+            </div>
+            <Button
+              className="w-full bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2"
+              onClick={() => {
+                const txt = `Usuario: ${credentials?.username}\nContraseña: ${credentials?.password}`;
+                navigator.clipboard.writeText(txt);
+                toast.success("Credenciales copiadas en bloque");
+              }}
+              data-testid="jur-creds-copy-all"
+            ><Copy className="w-4 h-4" /> Copiar ambas</Button>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" className="rounded-sm" onClick={() => setCredsOpen(false)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
