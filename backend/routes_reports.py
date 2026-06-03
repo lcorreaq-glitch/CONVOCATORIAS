@@ -15,8 +15,16 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 
 from db import get_db, now_iso
 from auth import get_current_user, require_roles, audit
+from fastapi import Body
 
 router = APIRouter(prefix="/api", tags=["reports"])
+
+
+# Cupos por defecto INC2026 (Iniciativas Antioquia 2026)
+DEFAULT_CUPOS_INC2026_SUBREGION = {
+    "Urabá": 14, "Oriente": 10, "Occidente": 10, "Magdalena Medio": 6,
+    "Bajo Cauca": 10, "Suroeste": 9, "Nordeste": 8, "Valle de Aburrá": 4, "Norte": 9,
+}
 
 
 # ==================== RANKING ====================
@@ -149,11 +157,52 @@ async def generar_ranking(convocatoria_id: str, agrupar_por: str = "subregion",
     resultado = {"grupos": [], "agrupacion": agrupar_por, "modo": modo,
                  "fecha_generacion": now_iso(), "convocatoria_id": convocatoria_id,
                  "id": str(uuid.uuid4()), "estado": "Preliminar"}
+
+    # Cupos de ganadores por grupo (subregión, línea, etc.)
+    # Se configura en convocatoria.configuracion.cupos_ganadores[<agrupacion>] = { grupo_nombre: cantidad }
+    # Ejemplo INC2026: configuracion.cupos_ganadores.subregion = {"Urabá":14, "Oriente":10, ...}
+    conv_doc = await db.convocatorias.find_one({"id": convocatoria_id}, {"_id": 0, "configuracion": 1})
+    cupos_cfg = ((conv_doc or {}).get("configuracion") or {}).get("cupos_ganadores") or {}
+    cupos_grupo = cupos_cfg.get(agrupar_por) or {}
+    incentivos_no_asignados = []  # informe de cupos sobrantes
+    total_cupos_configurados = 0
+    total_ganadores_asignados = 0
+
     for g, items in sorted(grupos.items()):
         items.sort(key=functools.cmp_to_key(cmp))
+        cupo_grupo = int(cupos_grupo.get(g, 0))
+        if cupo_grupo:
+            total_cupos_configurados += cupo_grupo
         for pos, it in enumerate(items, start=1):
             it["puesto"] = pos
-        resultado["grupos"].append({"grupo": g, "items": items, "total": len(items)})
+            if cupo_grupo:
+                if pos <= cupo_grupo:
+                    it["resultado"] = "ganador"
+                else:
+                    it["resultado"] = "lista_espera"
+            else:
+                it["resultado"] = "ganador" if pos == 1 else "elegible"
+        # Cupos vs propuestas reales del grupo
+        ganadores_en_grupo = sum(1 for it in items if it.get("resultado") == "ganador")
+        total_ganadores_asignados += ganadores_en_grupo
+        sobrantes = cupo_grupo - ganadores_en_grupo if cupo_grupo else 0
+        if sobrantes > 0:
+            incentivos_no_asignados.append({
+                "grupo": g, "cupo_configurado": cupo_grupo,
+                "propuestas_disponibles": len(items),
+                "ganadores_asignados": ganadores_en_grupo,
+                "incentivos_sobrantes": sobrantes,
+            })
+        resultado["grupos"].append({
+            "grupo": g, "items": items, "total": len(items),
+            "cupo_ganadores": cupo_grupo if cupo_grupo else None,
+            "ganadores_asignados": ganadores_en_grupo if cupo_grupo else None,
+        })
+
+    resultado["incentivos_no_asignados"] = incentivos_no_asignados
+    resultado["total_cupos_configurados"] = total_cupos_configurados or None
+    resultado["total_ganadores_asignados"] = total_ganadores_asignados if total_cupos_configurados else None
+    resultado["total_incentivos_sobrantes"] = sum(x["incentivos_sobrantes"] for x in incentivos_no_asignados) or 0
 
     await db.rankings.insert_one(resultado)
     resultado.pop("_id", None)
@@ -175,6 +224,50 @@ async def get_ranking(rid: str, user: dict = Depends(get_current_user)):
     if not item:
         raise HTTPException(status_code=404, detail="Ranking no encontrado")
     return item
+
+
+# ============================================================
+# CUPOS DE GANADORES POR GRUPO (subregión, línea, etc.)
+# ============================================================
+@router.get("/convocatorias/{cid}/cupos-ganadores")
+async def get_cupos(cid: str, user: dict = Depends(get_current_user)):
+    db = get_db()
+    conv = await db.convocatorias.find_one({"id": cid}, {"_id": 0, "configuracion": 1, "codigo": 1})
+    if not conv:
+        raise HTTPException(404, "Convocatoria no encontrada")
+    cupos = (conv.get("configuracion") or {}).get("cupos_ganadores") or {}
+    # Si es INC2026 y no hay cupos configurados, devolver los defaults como sugerencia
+    suggested = None
+    if (conv.get("codigo", "").upper() == "INC2026") and not cupos.get("subregion"):
+        suggested = {"subregion": DEFAULT_CUPOS_INC2026_SUBREGION}
+    return {"cupos": cupos, "suggested": suggested}
+
+
+@router.patch("/convocatorias/{cid}/cupos-ganadores")
+async def set_cupos(cid: str, payload: dict = Body(...),
+                     user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    """payload: { agrupacion: 'subregion', cupos: { 'Urabá': 14, ... } } o { reset: true }"""
+    db = get_db()
+    conv = await db.convocatorias.find_one({"id": cid})
+    if not conv:
+        raise HTTPException(404, "Convocatoria no encontrada")
+    config = conv.get("configuracion") or {}
+    cupos_all = config.get("cupos_ganadores") or {}
+    if payload.get("reset"):
+        cupos_all = {}
+    elif payload.get("seed_inc2026"):
+        cupos_all["subregion"] = DEFAULT_CUPOS_INC2026_SUBREGION
+    else:
+        agrup = payload.get("agrupacion")
+        cupos = payload.get("cupos") or {}
+        if not agrup:
+            raise HTTPException(400, "Falta 'agrupacion'")
+        # Sanitizar a ints
+        cupos_all[agrup] = {k: int(v) for k, v in cupos.items() if isinstance(v, (int, float)) and v >= 0}
+    config["cupos_ganadores"] = cupos_all
+    await db.convocatorias.update_one({"id": cid}, {"$set": {"configuracion": config}})
+    await audit(user, "update", "cupos_ganadores", cid)
+    return {"ok": True, "cupos": cupos_all}
 
 
 # ==================== DASHBOARD ====================

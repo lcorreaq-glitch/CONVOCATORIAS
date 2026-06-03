@@ -156,13 +156,56 @@ export default function Ranking() {
         <EmptyState title="Sin rankings generados" hint="Selecciona la agrupación y el modo, luego presiona Generar." icon={Trophy} />
       ) : (
         <div className="space-y-6">
-          <div className="flex items-center gap-3 text-[12px] text-muted-foreground">
+          <div className="flex items-center gap-3 text-[12px] text-muted-foreground flex-wrap">
             <span className="inline-flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> Agrupado: <strong className="text-[#1A1F2C]">{agrupacionLabel(active.agrupacion)}</strong></span>
             <span>·</span>
             <span>Modo: <strong className="text-[#1A1F2C]">{active.modo || "colectivo"}</strong></span>
             <span>·</span>
             <span>Generado: <span className="font-mono text-[11px]">{new Date(active.fecha_generacion).toLocaleString("es-CO")}</span></span>
+            {active.total_cupos_configurados && (
+              <>
+                <span>·</span>
+                <span>Cupos: <strong className="text-[#0F5E54]">{active.total_ganadores_asignados} / {active.total_cupos_configurados}</strong> asignados</span>
+              </>
+            )}
           </div>
+
+          {/* INFORME DE INCENTIVOS NO ASIGNADOS */}
+          {active.incentivos_no_asignados?.length > 0 && (
+            <div className="rounded-xl border border-[#FDE68A] bg-gradient-to-br from-[#FFFBEB] to-white p-5">
+              <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#F59E0B]"></span>
+                    <h3 className="font-display font-bold text-[14px] text-[#92400E]">Informe de incentivos no asignados</h3>
+                  </div>
+                  <p className="text-[11.5px] text-muted-foreground mt-1">
+                    Algunas subregiones tienen menos propuestas habilitadas que el cupo configurado. Los incentivos sobrantes deberán ser reasignados conforme a las políticas de la convocatoria.
+                  </p>
+                </div>
+                <div className="text-right">
+                  <div className="font-display font-black text-3xl tabular-nums text-[#92400E]">{active.total_incentivos_sobrantes}</div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">incentivos sin asignar</div>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full dense-table">
+                  <thead><tr><th>Subregión</th><th className="text-right">Cupo</th><th className="text-right">Propuestas</th><th className="text-right">Ganadores asignados</th><th className="text-right">Sobrantes</th></tr></thead>
+                  <tbody>
+                    {active.incentivos_no_asignados.map((x) => (
+                      <tr key={x.grupo}>
+                        <td className="font-semibold">{x.grupo}</td>
+                        <td className="text-right font-mono">{x.cupo_configurado}</td>
+                        <td className="text-right font-mono">{x.propuestas_disponibles}</td>
+                        <td className="text-right font-mono text-[#0F5E54] font-bold">{x.ganadores_asignados}</td>
+                        <td className="text-right font-mono text-[#92400E] font-bold">{x.incentivos_sobrantes}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
           {active.grupos.map((g) => (
             <GroupTable key={g.grupo} group={g} agrupacion={active.agrupacion} onDetail={(it) => setDetail({ item: it, group: g.grupo })} />
           ))}
@@ -193,19 +236,31 @@ function GroupTable({ group, agrupacion, onDetail }) {
     return map;
   }, [group.items]);
 
+  const hasCupo = group.cupo_ganadores != null;
+  const sobrantes = hasCupo ? (group.cupo_ganadores - group.ganadores_asignados) : 0;
+
   return (
     <div className="border border-border rounded-sm bg-white overflow-hidden">
-      <div className="px-5 py-3 border-b border-border bg-secondary flex items-center justify-between">
+      <div className="px-5 py-3 border-b border-border bg-secondary flex items-center justify-between flex-wrap gap-2">
         <div>
           <div className="text-[10px] uppercase tracking-[0.16em] font-display font-bold text-muted-foreground">{agrupacion}</div>
           <div className="font-display font-bold text-lg">{group.grupo}</div>
         </div>
-        <Badge tone="muted">{group.total} propuestas</Badge>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Badge tone="muted">{group.total} propuestas</Badge>
+          {hasCupo && (
+            <Badge tone={sobrantes > 0 ? "warning" : "success"}>
+              {group.ganadores_asignados} / {group.cupo_ganadores} ganadores
+              {sobrantes > 0 ? ` (${sobrantes} cupos vacantes)` : ""}
+            </Badge>
+          )}
+        </div>
       </div>
       <table className="w-full dense-table" data-testid={TID.rankingTable}>
         <thead>
           <tr>
             <th>Puesto</th>
+            <th>Resultado</th>
             <th>Código</th>
             <th>Propuesta</th>
             <th>Organización</th>
@@ -220,12 +275,29 @@ function GroupTable({ group, agrupacion, onDetail }) {
           {group.items.map((it) => {
             const fuente = FUENTE_LABEL[it.fuente] || { label: it.fuente || "—", tone: "default" };
             const isTied = tieMap[it.propuesta_id];
+            const isGanador = it.resultado === "ganador";
+            const isEspera = it.resultado === "lista_espera";
             return (
-              <tr key={it.propuesta_id} className={isTied ? "bg-[#FFFBEB]/40" : ""}>
+              <tr key={it.propuesta_id} className={isTied ? "bg-[#FFFBEB]/40" : (isGanador && it.puesto <= (group.cupo_ganadores || 9999) ? "bg-[#F0F7F5]/40" : "")}>
                 <td className="font-display font-black text-lg tabular-nums">
                   {it.puesto === 1 ? (
                     <span className="inline-flex items-center gap-1 text-[#0F5E54]"><Crown className="w-4 h-4" />{it.puesto}</span>
                   ) : it.puesto}
+                </td>
+                <td>
+                  {isGanador ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-[#0F5E54] text-white">
+                      <Crown className="w-3 h-3" /> GANADOR
+                    </span>
+                  ) : isEspera ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]">
+                      Lista de espera
+                    </span>
+                  ) : it.resultado === "elegible" ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-[#EFF6FF] text-[#1E40AF] border border-[#BFDBFE]">
+                      Elegible
+                    </span>
+                  ) : <span className="text-muted-foreground">—</span>}
                 </td>
                 <td className="font-mono text-xs">{it.codigo}</td>
                 <td className="font-semibold">{it.nombre}</td>
