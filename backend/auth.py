@@ -213,7 +213,59 @@ async def me(user: dict = Depends(get_current_user)):
     return UserOut(**user)
 
 
-@router.post("/refresh")
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post("/change-password")
+async def change_password(payload: ChangePasswordRequest, current_user: dict = Depends(get_current_user)):
+    """Permite que el usuario autenticado cambie SU propia contraseña.
+    Requiere la contraseña actual + la nueva (mín. 6 caracteres).
+    """
+    if not payload.new_password or len(payload.new_password) < 6:
+        raise HTTPException(status_code=400, detail="La nueva contraseña debe tener al menos 6 caracteres.")
+    if payload.current_password == payload.new_password:
+        raise HTTPException(status_code=400, detail="La nueva contraseña debe ser distinta de la actual.")
+    db = get_db()
+    u = await db.users.find_one({"id": current_user["id"]})
+    if not u:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    if not verify_password(payload.current_password, u["password_hash"]):
+        raise HTTPException(status_code=400, detail="La contraseña actual es incorrecta.")
+    await db.users.update_one(
+        {"id": u["id"]},
+        {"$set": {"password_hash": hash_password(payload.new_password)}},
+    )
+    await audit(u, "change_password", "auth", u["id"], detalle="self-service via /mi-perfil")
+    return {"ok": True, "message": "Contraseña actualizada correctamente."}
+
+
+class UpdateMeRequest(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+
+
+@router.patch("/me")
+async def update_me(payload: UpdateMeRequest, current_user: dict = Depends(get_current_user)):
+    """Permite que el usuario autenticado actualice su nombre y email."""
+    db = get_db()
+    updates = {}
+    if payload.name is not None:
+        updates["name"] = payload.name.strip()
+    if payload.email is not None:
+        new_email = payload.email.strip().lower()
+        # Verificar que no esté usado por otro usuario
+        existing = await db.users.find_one({"email": new_email, "id": {"$ne": current_user["id"]}})
+        if existing:
+            raise HTTPException(status_code=400, detail="Ese correo ya está en uso.")
+        updates["email"] = new_email
+    if not updates:
+        return {"ok": True, "message": "Sin cambios."}
+    await db.users.update_one({"id": current_user["id"]}, {"$set": updates})
+    await audit(current_user, "update", "users", current_user["id"], valor_nuevo=updates)
+    user = await db.users.find_one({"id": current_user["id"]}, {"_id": 0, "password_hash": 0})
+    return user
 async def refresh_token(request: Request, response: Response):
     token = request.cookies.get("refresh_token")
     if not token:

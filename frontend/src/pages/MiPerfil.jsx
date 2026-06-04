@@ -8,20 +8,198 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import SignaturePad from "@/components/SignaturePad";
 import { toast } from "sonner";
-import { Sparkles, Loader2, UserCog, Upload, Image as ImageIcon, FileText, ExternalLink, Trash2, PenLine, IdCard } from "lucide-react";
+import {
+  Sparkles, Loader2, UserCog, Upload, Image as ImageIcon, FileText, ExternalLink,
+  Trash2, PenLine, IdCard, ShieldCheck, KeyRound, Save, Eye, EyeOff, AlertCircle,
+} from "lucide-react";
+
+const ROLE_LABEL = {
+  admin_general: "Administrador General",
+  admin_convocatoria: "Administrador de Convocatoria",
+  supervisor: "Supervisor",
+  jurado: "Jurado",
+  integrante_terna: "Integrante de Terna",
+  invitado: "Invitado de Consulta",
+  auditor: "Auditor",
+};
 
 /**
- * MiPerfil: vista para el rol Jurado.
- * Permite editar campos seguros (telefono, perfil), subir foto y hoja de vida.
- * Datos críticos (email, nombre, subregiones) están solo lectura — los administra el admin.
+ * MiPerfil — vista universal según el rol:
+ *  - Si el usuario es jurado → carga su ficha de jurado (firma, hoja de vida, perfil IA).
+ *  - Si NO es jurado → vista simplificada con datos básicos + cambio de contraseña.
  */
 export default function MiPerfil() {
   const { user } = useAuth();
+  const isJurado = user?.role === "jurado";
+
+  if (!user) {
+    return <div className="p-10 text-muted-foreground">Cargando perfil…</div>;
+  }
+  return isJurado ? <PerfilJurado /> : <PerfilUsuarioGeneral />;
+}
+
+// ===========================================================================
+// Vista para usuarios NO-jurado (admins, supervisores, auditores, invitados...)
+// ===========================================================================
+function PerfilUsuarioGeneral() {
+  const { user, refresh } = useAuth();
+  const [info, setInfo] = useState({ name: "", email: "" });
+  const [pwd, setPwd] = useState({ current: "", next: "", confirm: "" });
+  const [show, setShow] = useState({ current: false, next: false, confirm: false });
+  const [savingInfo, setSavingInfo] = useState(false);
+  const [savingPwd, setSavingPwd] = useState(false);
+
+  useEffect(() => {
+    if (user) setInfo({ name: user.name || "", email: user.email || "" });
+  }, [user]);
+
+  const saveInfo = async () => {
+    setSavingInfo(true);
+    try {
+      await api.patch("/auth/me", { name: info.name, email: info.email });
+      toast.success("Datos actualizados");
+      refresh?.();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setSavingInfo(false); }
+  };
+
+  const savePwd = async () => {
+    if (!pwd.current || !pwd.next) { toast.error("Completa todos los campos"); return; }
+    if (pwd.next.length < 6) { toast.error("La nueva contraseña debe tener al menos 6 caracteres"); return; }
+    if (pwd.next !== pwd.confirm) { toast.error("Las contraseñas no coinciden"); return; }
+    setSavingPwd(true);
+    try {
+      await api.post("/auth/change-password", { current_password: pwd.current, new_password: pwd.next });
+      toast.success("Contraseña actualizada");
+      setPwd({ current: "", next: "", confirm: "" });
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setSavingPwd(false); }
+  };
+
+  const initials = (user.name || user.username || "U").split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+
+  return (
+    <div className="flex-1 p-8 lg:p-10 max-w-5xl">
+      <PageHeader
+        eyebrow="Tu cuenta en KRINOS"
+        title="Mi Perfil"
+        subtitle="Mantén tus datos actualizados y gestiona tu contraseña de acceso."
+      />
+
+      <div className="grid lg:grid-cols-3 gap-6">
+        {/* Sidebar tarjeta de identidad */}
+        <div className="lg:col-span-1 space-y-4">
+          <div className="rounded-xl border border-border bg-white p-5 text-center">
+            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[#14776A] to-[#0F5E54] text-white grid place-items-center mx-auto mb-4 font-display font-extrabold text-3xl shadow-md">
+              {initials}
+            </div>
+            <div className="font-display font-bold text-[17px]">{user.name || user.username}</div>
+            <div className="text-[12px] text-muted-foreground mt-0.5 break-all">{user.email}</div>
+            <div className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-semibold bg-[#F0F7F5] text-[#14776A] px-2.5 py-1 rounded-full border border-[#CDE7E1]">
+              <ShieldCheck className="w-3 h-3" /> {ROLE_LABEL[user.role] || user.role}
+            </div>
+          </div>
+
+          <div className="rounded-xl border-l-4 border-blue-400 bg-blue-50 p-4">
+            <div className="flex gap-2.5">
+              <AlertCircle className="w-4 h-4 text-blue-700 mt-0.5 shrink-0" />
+              <div className="text-[12px] text-[#1A1F2C]">
+                <strong>Consejo de seguridad</strong>
+                <p className="text-[#5E6878] mt-1">Cambia tu contraseña con regularidad y nunca la compartas por correo o chat.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Datos editables + cambio password */}
+        <div className="lg:col-span-2 space-y-4">
+          <div className="rounded-xl border border-border bg-white p-5">
+            <h3 className="font-display font-bold text-[15px] mb-3 flex items-center gap-2">
+              <UserCog className="w-4 h-4 text-[#14776A]" /> Información de la cuenta
+            </h3>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Nombre completo</Label>
+                <Input value={info.name} onChange={(e) => setInfo({ ...info, name: e.target.value })}
+                       className="rounded-lg" data-testid="mi-perfil-name" />
+              </div>
+              <div>
+                <Label className="text-xs">Correo electrónico</Label>
+                <Input type="email" value={info.email} onChange={(e) => setInfo({ ...info, email: e.target.value })}
+                       className="rounded-lg" data-testid="mi-perfil-email" />
+              </div>
+              <div>
+                <Label className="text-xs">Usuario (no editable)</Label>
+                <Input value={user.username} readOnly className="rounded-lg bg-[#F1F4F7] font-mono text-[12.5px]" />
+              </div>
+              <div>
+                <Label className="text-xs">Rol asignado</Label>
+                <Input value={ROLE_LABEL[user.role] || user.role} readOnly className="rounded-lg bg-[#F1F4F7]" />
+              </div>
+            </div>
+            <div className="flex justify-end mt-4">
+              <Button onClick={saveInfo} disabled={savingInfo} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg gap-2" data-testid="mi-perfil-save-info">
+                {savingInfo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Guardar cambios
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-border bg-white p-5">
+            <h3 className="font-display font-bold text-[15px] mb-1 flex items-center gap-2">
+              <KeyRound className="w-4 h-4 text-[#14776A]" /> Cambiar contraseña
+            </h3>
+            <p className="text-[12.5px] text-[#5E6878] mb-4">
+              Necesitarás tu contraseña actual para confirmar el cambio. La nueva debe tener al menos 6 caracteres.
+            </p>
+            <div className="grid gap-3">
+              {[
+                { key: "current", label: "Contraseña actual", placeholder: "Tu contraseña actual" },
+                { key: "next", label: "Nueva contraseña", placeholder: "Mínimo 6 caracteres" },
+                { key: "confirm", label: "Confirmar nueva contraseña", placeholder: "Repite la nueva contraseña" },
+              ].map(({ key, label, placeholder }) => (
+                <div key={key}>
+                  <Label className="text-xs">{label}</Label>
+                  <div className="flex gap-2 mt-1">
+                    <Input
+                      type={show[key] ? "text" : "password"}
+                      value={pwd[key]}
+                      onChange={(e) => setPwd({ ...pwd, [key]: e.target.value })}
+                      placeholder={placeholder}
+                      className="rounded-lg"
+                      data-testid={`mi-perfil-pwd-${key}`}
+                    />
+                    <Button type="button" variant="outline" className="rounded-lg shrink-0" onClick={() => setShow((s) => ({ ...s, [key]: !s[key] }))}>
+                      {show[key] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end mt-4">
+              <Button onClick={savePwd} disabled={savingPwd} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg gap-2" data-testid="mi-perfil-save-pwd">
+                {savingPwd ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
+                Actualizar contraseña
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===========================================================================
+// Vista para Jurado — versión existente con firma, perfil IA, hoja de vida.
+// ===========================================================================
+function PerfilJurado() {
   const [jurado, setJurado] = useState(null);
   const [form, setForm] = useState({ telefono: "", perfil: "", foto_url: "", datos: {} });
   const [busy, setBusy] = useState(false);
   const [improving, setImproving] = useState(false);
-  const [campos, setCampos] = useState([]);
+  const [pwd, setPwd] = useState({ current: "", next: "", confirm: "" });
+  const [savingPwd, setSavingPwd] = useState(false);
+  const [pwdOpen, setPwdOpen] = useState(false);
 
   useEffect(() => {
     api.get("/jurados/me").then(async (r) => {
@@ -31,11 +209,7 @@ export default function MiPerfil() {
         telefono: j.telefono || "", perfil: j.perfil || "",
         foto_url: j.foto_url || "", datos: j.datos || {},
       });
-      if (j.convocatoria_id) {
-        const cr = await api.get(`/campos?convocatoria_id=${j.convocatoria_id}&aplica_a=jurado`);
-        setCampos(cr.data);
-      }
-    }).catch((e) => toast.error("No se pudo cargar tu perfil"));
+    }).catch(() => toast.error("No se pudo cargar tu perfil"));
   }, []);
 
   const submit = async () => {
@@ -80,6 +254,20 @@ export default function MiPerfil() {
     } catch (err) { toast.error(formatApiError(err.response?.data?.detail) || "Error"); }
   };
 
+  const savePwd = async () => {
+    if (!pwd.current || !pwd.next) { toast.error("Completa todos los campos"); return; }
+    if (pwd.next.length < 6) { toast.error("La nueva contraseña debe tener al menos 6 caracteres"); return; }
+    if (pwd.next !== pwd.confirm) { toast.error("Las contraseñas no coinciden"); return; }
+    setSavingPwd(true);
+    try {
+      await api.post("/auth/change-password", { current_password: pwd.current, new_password: pwd.next });
+      toast.success("Contraseña actualizada");
+      setPwd({ current: "", next: "", confirm: "" });
+      setPwdOpen(false);
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setSavingPwd(false); }
+  };
+
   if (!jurado) return <div className="p-10 text-muted-foreground">Cargando perfil…</div>;
 
   return (
@@ -91,7 +279,6 @@ export default function MiPerfil() {
       />
 
       <div className="grid lg:grid-cols-3 gap-6">
-        {/* Sidebar foto + datos básicos solo lectura */}
         <div className="lg:col-span-1 space-y-4">
           <div className="rounded-xl border border-border bg-white p-5 text-center">
             <div className="w-32 h-32 rounded-full overflow-hidden mx-auto bg-secondary border-2 border-[#CDE7E1] mb-3">
@@ -115,9 +302,11 @@ export default function MiPerfil() {
             </div>
             <p className="text-[11px] text-muted-foreground mt-2 italic">Para cambiar tus subregiones contacta al administrador.</p>
           </div>
+          <Button variant="outline" onClick={() => setPwdOpen((v) => !v)} className="w-full rounded-lg gap-2" data-testid="jurado-toggle-pwd">
+            <KeyRound className="w-4 h-4" /> {pwdOpen ? "Ocultar cambio de contraseña" : "Cambiar contraseña"}
+          </Button>
         </div>
 
-        {/* Datos editables */}
         <div className="lg:col-span-2 space-y-4">
           <div className="rounded-xl border border-border bg-white p-5">
             <h3 className="font-display font-bold text-[15px] mb-3">Datos de contacto</h3>
@@ -187,8 +376,26 @@ export default function MiPerfil() {
             )}
           </div>
 
+          {pwdOpen && (
+            <div className="rounded-xl border border-border bg-white p-5">
+              <h3 className="font-display font-bold text-[15px] mb-1 flex items-center gap-2"><KeyRound className="w-4 h-4 text-[#14776A]" />Cambiar contraseña</h3>
+              <p className="text-[12.5px] text-muted-foreground mb-3">Mínimo 6 caracteres.</p>
+              <div className="grid sm:grid-cols-3 gap-3">
+                <div><Label className="text-xs">Actual</Label><Input type="password" value={pwd.current} onChange={(e) => setPwd({ ...pwd, current: e.target.value })} className="rounded-lg" /></div>
+                <div><Label className="text-xs">Nueva</Label><Input type="password" value={pwd.next} onChange={(e) => setPwd({ ...pwd, next: e.target.value })} className="rounded-lg" /></div>
+                <div><Label className="text-xs">Confirmar</Label><Input type="password" value={pwd.confirm} onChange={(e) => setPwd({ ...pwd, confirm: e.target.value })} className="rounded-lg" /></div>
+              </div>
+              <div className="flex justify-end mt-3">
+                <Button onClick={savePwd} disabled={savingPwd} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg gap-2">
+                  {savingPwd ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />} Actualizar
+                </Button>
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-end">
-            <Button onClick={submit} disabled={busy} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg" data-testid="mi-perfil-save">
+            <Button onClick={submit} disabled={busy} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg gap-2" data-testid="mi-perfil-save">
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               {busy ? "Guardando…" : "Guardar cambios"}
             </Button>
           </div>
