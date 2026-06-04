@@ -120,6 +120,15 @@ export default function Jurados() {
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
+  const sendWelcomeJurado = async (j) => {
+    if (!confirm(`Enviar correo de bienvenida a "${j.nombre}" (${j.email})?\n\nNo afecta su contraseña. El jurado podrá usar "Recuperar contraseña" si la olvidó.`)) return;
+    try {
+      const r = await api.post(`/admin/credenciales-jurado/${j.id}/send-welcome`, { base_url: window.location.origin });
+      if (r.data.ok) toast.success(`Correo enviado a ${j.email}`);
+      else toast.warning(r.data.message || "Servicio de correo no configurado.");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
   const load = () => {
     if (!activeConvocatoriaId) return;
     api.get(`/jurados?convocatoria_id=${activeConvocatoriaId}`).then((r) => setItems(r.data));
@@ -294,6 +303,12 @@ export default function Jurados() {
                         data-testid={`jur-reset-pwd-${j.id}`}
                         title="Resetear contraseña (para envío por correo)"
                       ><KeyRound className="w-4 h-4 inline" /></button>
+                      <button
+                        onClick={() => sendWelcomeJurado(j)}
+                        className="text-[#1D4ED8] hover:text-[#0F5E54] p-1 ml-0.5"
+                        data-testid={`jur-welcome-${j.id}`}
+                        title="Enviar correo de bienvenida"
+                      ><Mail className="w-4 h-4 inline" /></button>
                       <button
                         onClick={() => deleteJurado(j)}
                         className="text-muted-foreground hover:text-red-600 p-1 ml-0.5"

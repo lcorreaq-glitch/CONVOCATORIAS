@@ -175,6 +175,8 @@ async def get_credenciales_jurado(jurado_id: str,
 
 class ResetPasswordPayload(BaseModel):
     nueva_password: Optional[str] = None  # si no, se autogenera
+    enviar_correo: bool = False
+    base_url: Optional[str] = None
 
 
 @router.post("/credenciales-jurado/{jurado_id}/reset-password")
@@ -193,17 +195,62 @@ async def reset_password_jurado(jurado_id: str, payload: ResetPasswordPayload,
         await db.users.update_one({"id": existing["id"]},
                                   {"$set": {"password_hash": hash_password(nueva),
                                             "active": True}})
+        target_id = existing["id"]
     else:
+        target_id = str(uuid.uuid4())
         await db.users.insert_one({
-            "id": str(uuid.uuid4()),
+            "id": target_id,
             "username": username, "email": username, "name": jur["nombre"],
             "password_hash": hash_password(nueva), "role": "jurado", "active": True,
             "convocatoria_roles": [{"convocatoria_id": jur["convocatoria_id"], "role": "jurado"}],
             "jurado_id": jur["id"], "created_at": now_iso(),
         })
     await audit(user, "reset_password", "jurados", jurado_id, detalle=f"email={username}")
+
+    # Envío opcional del correo de bienvenida con la nueva contraseña
+    email_result = None
+    if payload.enviar_correo:
+        from email_service import send_email, render_welcome, log_email
+        base = payload.base_url or "https://convocatoria-hub-2.preview.emergentagent.com"
+        login_url = f"{base.rstrip('/')}/login"
+        branding_doc = await db.system_settings.find_one({"id": "global"}, {"_id": 0}) or {}
+        product_name = (branding_doc.get("branding") or {}).get("product_name", "KRINOS")
+        html, text = render_welcome(jur["nombre"], username, nueva, login_url, product_name)
+        email_result = await send_email(username, f"Bienvenido(a) a {product_name}", html, text_body=text)
+        await log_email(username, "Bienvenida (jurado)", "welcome", email_result, user_id=target_id)
+        await audit(user, "send_welcome", "jurados", jurado_id,
+                    detalle=f"provider={email_result.get('provider','?')} ok={email_result.get('ok')}")
+
     return {"ok": True, "username": username,
-            "password": nueva, "jurado": {"id": jur["id"], "nombre": jur["nombre"], "email": jur["email"]}}
+            "password": nueva,
+            "jurado": {"id": jur["id"], "nombre": jur["nombre"], "email": jur["email"]},
+            "email_result": email_result}
+
+
+@router.post("/credenciales-jurado/{jurado_id}/send-welcome")
+async def send_welcome_jurado(jurado_id: str, body: dict | None = None,
+                              user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    """Envía un correo de bienvenida al jurado sin tocar su contraseña. Si quieres incluir
+    la contraseña, usa `reset-password` con `enviar_correo: true`.
+    """
+    from email_service import send_email, render_welcome, log_email
+    db = get_db()
+    jur = await db.jurados.find_one({"id": jurado_id}, {"_id": 0})
+    if not jur:
+        raise HTTPException(status_code=404, detail="Jurado no encontrado")
+    base = (body or {}).get("base_url") or "https://convocatoria-hub-2.preview.emergentagent.com"
+    login_url = f"{base.rstrip('/')}/login"
+    branding_doc = await db.system_settings.find_one({"id": "global"}, {"_id": 0}) or {}
+    product_name = (branding_doc.get("branding") or {}).get("product_name", "KRINOS")
+    html, text = render_welcome(jur["nombre"], jur["email"].lower(), None, login_url, product_name)
+    result = await send_email(jur["email"], f"Bienvenido(a) a {product_name}", html, text_body=text)
+    await log_email(jur["email"], "Bienvenida (jurado)", "welcome", result, user_id=None)
+    await audit(user, "send_welcome", "jurados", jurado_id,
+                detalle=f"provider={result.get('provider','?')} ok={result.get('ok')}")
+    if not result.get("ok"):
+        return {"ok": False, "mocked": result.get("mocked", False),
+                "message": result.get("message") or result.get("error") or "Servicio de correo no configurado."}
+    return {"ok": True, "to": jur["email"], "provider": result.get("provider")}
 
 
 # ---------------------------------------------------------------------------

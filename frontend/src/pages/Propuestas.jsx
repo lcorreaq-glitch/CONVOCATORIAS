@@ -7,9 +7,10 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Upload, Download, ExternalLink, Search, FileStack, Pencil, X, Filter, ChevronDown, Trash2 } from "lucide-react";
+import { Plus, Upload, Download, ExternalLink, Search, FileStack, Pencil, X, Filter, ChevronDown, Trash2, Eye } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import PropuestaForm from "./propuestas/PropuestaForm";
+import PropuestaDetalle from "./propuestas/PropuestaDetalle";
 import ConvocatoriaContextBanner from "@/components/ConvocatoriaContextBanner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -140,6 +141,8 @@ export default function Propuestas() {
   const [catalogos, setCatalogos] = useState([]);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [detalleOpen, setDetalleOpen] = useState(false);
+  const [viewing, setViewing] = useState(null);
 
   const canEdit = user?.role === "admin_general" || user?.role === "admin_convocatoria";
 
@@ -335,78 +338,70 @@ export default function Propuestas() {
         )}
       </div>
 
-      {/* Columnas dinámicas según campos con uso_lista=true (default si no hay ninguno: subregion + linea) */}
-      {(() => {
-        const camposLista = campos.filter((c) => c.uso_lista);
-        const colsConfig = camposLista.length > 0 ? camposLista : campos.filter((c) => ["subregion", "linea"].includes(c.nombre_interno));
-        return (
-          <div className="border border-border rounded-sm bg-white overflow-x-auto">
-            <table className="w-full dense-table" data-testid={TID.propuestasTable}>
-              <thead>
-                <tr>
-                  <th>Código</th>
-                  <th>Propuesta</th>
-                  <th>Organización</th>
-                  {colsConfig.map((c) => <th key={c.id}>{c.nombre_visible}</th>)}
-                  <th>Estado</th>
-                  <th>Expediente</th>
-                  {canEdit && <th className="text-right">Acciones</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((p) => (
-                  <tr key={p.id} data-testid={`propuesta-row-${p.codigo}`}>
-                    <td className="font-mono text-xs">{p.codigo}</td>
-                    <td><div className="font-semibold">{p.nombre}</div></td>
-                    <td className="text-muted-foreground">{p.organizacion || p.datos?.nombre_organizacion || "—"}</td>
-                    {colsConfig.map((c) => (
-                      <td key={c.id} className="text-[12.5px]">
-                        {renderCellValue(p.datos?.[c.nombre_interno], c)}
-                      </td>
-                    ))}
-                    <td>
-                      {canEdit ? (
-                        <Select value={p.estado || "Registrada"} onValueChange={(v) => changeEstado(p, v)}>
-                          <SelectTrigger className="h-7 text-[11.5px] rounded-md min-w-[160px] border-[#E2E7EC]" data-testid={`prop-estado-${p.codigo}`}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {estadosCatalogo.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      ) : <Badge tone={estadoTone(p.estado)}>{p.estado}</Badge>}
-                    </td>
-                    <td>
-                      {p.datos?.link_expediente ? (
-                        <a href={p.datos.link_expediente} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[#0F5E54] hover:underline text-xs">
-                          <ExternalLink className="w-3 h-3" /> Abrir
-                        </a>
-                      ) : <span className="text-muted-foreground text-xs">—</span>}
-                    </td>
-                    {canEdit && (
-                      <td className="text-right whitespace-nowrap">
-                        <button
-                          onClick={() => { setEditing(p); setFormOpen(true); }}
-                          className="text-[#14776A] hover:text-[#0F5E54] p-1"
-                          data-testid={`prop-edit-${p.codigo}`}
-                          title="Editar propuesta"
-                        ><Pencil className="w-4 h-4 inline" /></button>
-                        <button
-                          onClick={() => deletePropuesta(p)}
-                          className="text-muted-foreground hover:text-red-600 p-1 ml-0.5"
-                          data-testid={`prop-delete-${p.codigo}`}
-                          title="Eliminar propuesta"
-                        ><Trash2 className="w-4 h-4 inline" /></button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-                {!items.length && <tr><td colSpan={5 + colsConfig.length + (canEdit ? 1 : 0)}><EmptyState title="Sin propuestas" hint="Crea una propuesta nueva o usa carga masiva para importar desde Excel." icon={FileStack} /></td></tr>}
-              </tbody>
-            </table>
-          </div>
-        );
-      })()}
+      {/* Tabla compacta: 4 campos clave + acción "Ver propuesta" para ver TODO el detalle */}
+      <div className="border border-border rounded-lg bg-white overflow-x-auto">
+        <table className="w-full dense-table" data-testid={TID.propuestasTable}>
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Propuesta</th>
+              <th>Organización</th>
+              <th>Estado</th>
+              <th className="text-right">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((p) => (
+              <tr key={p.id} data-testid={`propuesta-row-${p.codigo}`}>
+                <td className="font-mono text-xs">{p.codigo}</td>
+                <td><div className="font-semibold">{p.nombre}</div></td>
+                <td className="text-muted-foreground">{p.organizacion || p.datos?.nombre_organizacion || "—"}</td>
+                <td>
+                  {canEdit ? (
+                    <Select value={p.estado || "Registrada"} onValueChange={(v) => changeEstado(p, v)}>
+                      <SelectTrigger className="h-7 text-[11.5px] rounded-md min-w-[160px] border-[#E2E7EC]" data-testid={`prop-estado-${p.codigo}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {estadosCatalogo.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  ) : <Badge tone={estadoTone(p.estado)}>{p.estado}</Badge>}
+                </td>
+                <td className="text-right whitespace-nowrap">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => { setViewing(p); setDetalleOpen(true); }}
+                    className="rounded-md h-7 text-[11.5px] gap-1.5"
+                    data-testid={`prop-view-${p.codigo}`}
+                    title="Ver propuesta completa"
+                  >
+                    <Eye className="w-3.5 h-3.5" /> Ver propuesta
+                  </Button>
+                  {canEdit && (
+                    <>
+                      <button
+                        onClick={() => { setEditing(p); setFormOpen(true); }}
+                        className="text-[#14776A] hover:text-[#0F5E54] p-1 ml-1"
+                        data-testid={`prop-edit-${p.codigo}`}
+                        title="Editar"
+                      ><Pencil className="w-4 h-4 inline" /></button>
+                      <button
+                        onClick={() => deletePropuesta(p)}
+                        className="text-muted-foreground hover:text-red-600 p-1"
+                        data-testid={`prop-delete-${p.codigo}`}
+                        title="Eliminar"
+                      ><Trash2 className="w-4 h-4 inline" /></button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {!items.length && <tr><td colSpan={5}><EmptyState title="Sin propuestas" hint="Crea una propuesta nueva o usa carga masiva para importar desde Excel." icon={FileStack} /></td></tr>}
+          </tbody>
+        </table>
+      </div>
 
       <PropuestaForm
         open={formOpen}
@@ -416,6 +411,15 @@ export default function Propuestas() {
         catalogos={catalogos}
         propuesta={editing}
         onSaved={load}
+      />
+      <PropuestaDetalle
+        open={detalleOpen}
+        onOpenChange={setDetalleOpen}
+        propuesta={viewing}
+        campos={campos}
+        catalogos={catalogos}
+        canEdit={canEdit}
+        onEdit={(p) => { setEditing(p); setFormOpen(true); }}
       />
     </div>
   );

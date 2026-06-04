@@ -232,3 +232,91 @@ async def refresh_token(request: Request, response: Response):
         return {"ok": True}
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Token inválido")
+
+
+# ===========================================================================
+# Recuperar contraseña — flujo estándar con token (expira 1 hora)
+# ===========================================================================
+RESET_TOKEN_MINUTES = 60
+
+
+def _create_reset_token(user_id: str, email: str) -> str:
+    payload = {
+        "sub": user_id, "email": email,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=RESET_TOKEN_MINUTES),
+        "type": "reset",
+    }
+    return jwt.encode(payload, _secret(), algorithm=JWT_ALGORITHM)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+    base_url: Optional[str] = None  # URL del frontend (origin) para construir el link
+
+
+@router.post("/forgot-password")
+async def forgot_password(payload: ForgotPasswordRequest, request: Request):
+    """Solicita el envío de un correo con link de recuperación.
+
+    Por seguridad SIEMPRE devuelve `{ok: true}`, no revela si el email existe o no.
+    """
+    from email_service import send_email, render_reset, log_email, get_email_config
+
+    ident = (payload.email or "").strip().lower()
+    if not ident:
+        raise HTTPException(status_code=400, detail="Email requerido")
+    db = get_db()
+    user = await db.users.find_one({"$or": [{"email": ident}, {"username": ident}]})
+
+    # Siempre responder OK para no revelar usuarios existentes
+    if not user:
+        return {"ok": True, "message": "Si el correo está registrado, recibirás un enlace en breve."}
+
+    token = _create_reset_token(user["id"], user["email"])
+    base = payload.base_url or (request.headers.get("origin") or "").rstrip("/")
+    reset_url = f"{base}/reset-password?token={token}"
+
+    # Cargar branding
+    doc_settings = await db.system_settings.find_one({"id": "global"}, {"_id": 0}) or {}
+    product_name = (doc_settings.get("branding") or {}).get("product_name", "KRINOS")
+
+    html, text = render_reset(user.get("name", user["username"]), reset_url, product_name)
+    result = await send_email(user["email"], "Recuperar contraseña — KRINOS", html, text_body=text)
+    await log_email(user["email"], "Recuperar contraseña", "reset_password", result, user_id=user["id"])
+    await audit(user, "forgot_password", "auth", user["id"],
+                detalle=f"provider={result.get('provider','?')} ok={result.get('ok')}")
+    return {"ok": True, "message": "Si el correo está registrado, recibirás un enlace en breve.",
+            "_debug": {"provider": result.get("provider"), "delivered": result.get("ok"), "reason": result.get("reason")}}
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@router.post("/reset-password")
+async def reset_password(payload: ResetPasswordRequest):
+    if not payload.new_password or len(payload.new_password) < 6:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 6 caracteres.")
+    try:
+        data = jwt.decode(payload.token, _secret(), algorithms=[JWT_ALGORITHM])
+        if data.get("type") != "reset":
+            raise HTTPException(status_code=400, detail="Token inválido.")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=400, detail="El enlace de recuperación ha expirado. Solicita uno nuevo.")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=400, detail="Token inválido.")
+
+    db = get_db()
+    user = await db.users.find_one({"id": data["sub"]})
+    if not user:
+        raise HTTPException(status_code=400, detail="Usuario no encontrado.")
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"password_hash": hash_password(payload.new_password)}},
+    )
+    # Limpiar bloqueos previos por brute force
+    await db.login_attempts.delete_one({"identifier": user["username"]})
+    await db.login_attempts.delete_one({"identifier": user["email"]})
+    await audit(user, "reset_password", "auth", user["id"], detalle="self-service")
+    return {"ok": True, "message": "Contraseña actualizada. Ya puedes iniciar sesión."}

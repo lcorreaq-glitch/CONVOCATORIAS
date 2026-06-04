@@ -6,8 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  ArrowRight, Loader2, ShieldCheck, FileSignature, Layers, Workflow,
+  ArrowRight, Loader2, ShieldCheck, FileSignature, Layers, Workflow, Mail, X,
 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { toast } from "sonner";
+import { api } from "@/lib/api";
 
 const FEATURES = [
   { icon: Layers, title: "Convocatorias parametrizables", desc: "Configura formularios, criterios y reglas sin programar." },
@@ -23,6 +26,10 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotSent, setForgotSent] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
 
   if (user) return <Navigate to="/" replace />;
 
@@ -34,6 +41,26 @@ export default function Login() {
     if (r.ok) navigate("/");
     else setError(r.error);
   };
+
+  const onForgot = async (e) => {
+    e.preventDefault();
+    if (!forgotEmail.trim()) return;
+    setForgotLoading(true);
+    try {
+      await api.post("/auth/forgot-password", {
+        email: forgotEmail.trim(),
+        base_url: window.location.origin,
+      });
+      setForgotSent(true);
+      toast.success("Si el correo está registrado, recibirás el enlace en breve.");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "No se pudo enviar el correo.");
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  if (user) return <Navigate to="/" replace />;
 
   return (
     <div className="min-h-screen bg-soft-mesh">
@@ -161,15 +188,18 @@ export default function Login() {
                     </>
                   )}
                 </Button>
-              </form>
 
-              <div className="mt-7 pt-5 border-t border-[#E2E7EC]">
-                <div className="text-[11px] font-mono text-[#5E6878] leading-relaxed">
-                  <div className="text-[10.5px] uppercase tracking-[0.14em] font-bold text-[#1A1F2C] mb-1.5 font-display">Credenciales demo</div>
-                  <div>Usuario: <span className="text-[#1A1F2C]">lcorreaq</span></div>
-                  <div>Contraseña: <span className="text-[#1A1F2C]">Chocolate2026!</span></div>
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={() => { setForgotOpen(true); setForgotEmail(username); setForgotSent(false); }}
+                    className="text-[12.5px] text-[#14776A] hover:text-[#0F5E54] hover:underline font-semibold"
+                    data-testid="login-forgot-password"
+                  >
+                    ¿Olvidaste tu contraseña?
+                  </button>
                 </div>
-              </div>
+              </form>
             </div>
 
             <p className="text-center text-[11.5px] text-[#5E6878] mt-5 max-w-[460px] mx-auto lg:mx-0 lg:ml-auto">
@@ -178,6 +208,63 @@ export default function Login() {
           </div>
         </div>
       </main>
+
+      {/* Modal Forgot Password */}
+      <Dialog open={forgotOpen} onOpenChange={(o) => { setForgotOpen(o); if (!o) setForgotSent(false); }}>
+        <DialogContent className="rounded-xl max-w-md" data-testid="forgot-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <Mail className="w-5 h-5 text-[#14776A]" />
+              Recuperar contraseña
+            </DialogTitle>
+          </DialogHeader>
+          {!forgotSent ? (
+            <form onSubmit={onForgot} className="space-y-4">
+              <p className="text-[13px] text-[#5E6878]">
+                Ingresa el correo electrónico asociado a tu cuenta. Te enviaremos un enlace para restablecer tu contraseña.
+                El enlace expira en <strong>1 hora</strong>.
+              </p>
+              <div>
+                <Label className="text-[12px] font-semibold">Correo electrónico</Label>
+                <Input
+                  type="email"
+                  required
+                  autoFocus
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                  placeholder="correo@institucion.gov.co"
+                  className="mt-1.5 h-10 rounded-lg"
+                  data-testid="forgot-email-input"
+                />
+              </div>
+              <DialogFooter className="gap-2">
+                <Button type="button" variant="outline" onClick={() => setForgotOpen(false)} className="rounded-lg">
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={forgotLoading} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg gap-2" data-testid="forgot-submit">
+                  {forgotLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                  Enviar enlace
+                </Button>
+              </DialogFooter>
+            </form>
+          ) : (
+            <div className="space-y-3 text-[13px]">
+              <div className="bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded-r-md text-emerald-900">
+                <strong>Solicitud recibida.</strong><br />
+                Si el correo está registrado en KRINOS, recibirás un enlace para restablecer tu contraseña en los próximos minutos.
+              </div>
+              <p className="text-[12px] text-[#5E6878]">
+                ¿No te llega el correo? Revisa la carpeta de <em>spam</em> o pídele al administrador que reactive tu cuenta.
+              </p>
+              <DialogFooter>
+                <Button onClick={() => setForgotOpen(false)} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg w-full">
+                  Entendido
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

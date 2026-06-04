@@ -1,0 +1,35 @@
+{
+  "summary": "Iteración 14 — Backend testing de KRINOS: email service unificado (Gmail SMTP + SendGrid), flujo recuperar contraseña (forgot/reset con JWT, expira 1h), envío de bienvenida (users + jurados), reset jurado con enviar_correo, permisos por rol. 21/21 tests pasan. Regresión admin (test_admin_module.py 28/28) sigue OK.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_email_recovery_iter14.py",
+    "/app/test_reports/pytest/iter14_email_recovery.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes_settings.py /api/settings/sendgrid (legacy) sigue activo en paralelo al nuevo /email — considerar deprecarlo o documentarlo para evitar configuraciones duplicadas.",
+    "auth.py forgot-password retorna campo `_debug` con `{provider, delivered, reason}` aún en producción; útil ahora pero recordar removerlo o gating por env antes de prod final (revela si el correo fue entregado).",
+    "routes_users.py:125 y routes_admin.py:214,241 hardcodean `https://convocatoria-hub-2.preview.emergentagent.com` como base_url fallback. Mover a env var o derivar del request.headers.origin para portabilidad.",
+    "routes_admin.py:230 `send_welcome_jurado` recibe `body: dict | None` (no Pydantic) — inconsistente con el resto del módulo; sin validación.",
+    "email_service.py:209 captura toda excepción y retorna ok:false, lo cual es bueno; sin embargo no diferencia entre 535 (auth) y 5xx (servidor) ni propaga el código SMTP — el cliente sólo ve `Error de envío`.",
+    "send-welcome de users ACTUALIZA password incluso si el envío falla (mocked). Aceptable funcionalmente, pero idealmente debería actualizar solo si el envío fue exitoso, o avisar 'pwd cambiada pero correo no enviado'."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_email_recovery_iter14.py (nuevo, 21 tests)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "N/A (testing_type=backend only)"},
+  "test_credentials": "admin lcorreaq/Chocolate2026! (memory/test_credentials.md). Test users seed Pruebas2026! (jurado1@krinos.test, admin.conv@krinos.test).",
+  "seed_data_creation": "Tests crean users TEST_ prefixed con @example.com (los @krinos.test fueron rechazados por validación pydantic-email — .test es special-use TLD). Cleanup: se desactivan al final via DELETE /api/users/{id}. La config email se restaura a {provider:'sendgrid', enabled:false, todo vacío} en test_zz_cleanup_email_settings.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Tests cubren: (1) GET /api/settings devuelve bloque email con has_app_password/has_api_key; (2) PATCH /api/settings/email guarda gmail completo, enmascara app_password; PATCH parcial (solo provider) NO borra credenciales de gmail; provider inválido → 400; (3) POST /api/settings/email/test con enabled=false → 400; con enabled=true pero sin credenciales válidas → 400 (no 500); (4) /api/auth/forgot-password con email inexistente → 200 ok:true (no revela); con admin → 200 con _debug; (5) /api/auth/reset-password con token inválido/expirado/pwd<6 → 400 mensajes específicos; (6) E2E reset completo (create user → forgot → genera token JWT manual con JWT_SECRET → reset → login con nueva pwd OK → login con vieja pwd → 401); (7) POST /api/users/{id}/send-welcome con password_temporal cambia hash; sin password no cambia; (8) jurado NO puede patch email ni send-welcome (403); admin_convocatoria SÍ puede send-welcome a users pero NO patch email; (9) /api/admin/credenciales-jurado/{jid}/reset-password con enviar_correo:true incluye email_result; send-welcome jurado funciona en mocked. Regresión: test_admin_module.py 28/28 sigue OK.",
+  "rca of the issue": "N/A — todos los flujos pedidos funcionan correctamente. Único hallazgo durante test setup: dominio .test (RFC2606) es rechazado por pydantic email-validator; se cambió a @example.com en los fixtures. No es un bug del backend (validación correcta), pero el main agent podría considerar usar @example.com en docs/seeds en lugar de @krinos.test si se requieren inserts directos sin pasar por la validación (los seeds actuales usan motor directo así que no afecta)."
+}

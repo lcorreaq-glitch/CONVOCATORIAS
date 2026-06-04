@@ -100,6 +100,24 @@ function UsersPanel() {
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
+  const sendWelcome = async (u) => {
+    const incluir = confirm(`Enviar correo de bienvenida a ${u.email}.\n\n¿Quieres incluir una contraseña temporal NUEVA en el correo?\n\nAceptar = sí (regenera y envía).\nCancelar = solo bienvenida, sin contraseña (el usuario podrá usar "Recuperar contraseña").`);
+    let body = { base_url: window.location.origin };
+    if (incluir) {
+      const pwd = window.prompt("Contraseña temporal a enviar (déjala vacía para generar una automática de 10 caracteres):", "");
+      if (pwd === null) return;
+      body.password_temporal = pwd || Math.random().toString(36).slice(-10) + "A1!";
+    }
+    try {
+      const r = await api.post(`/users/${u.id}/send-welcome`, body);
+      if (r.data.ok) {
+        toast.success(`Correo enviado a ${u.email}` + (body.password_temporal ? ` con contraseña: ${body.password_temporal}` : ""));
+      } else {
+        toast.warning(r.data.message || "Servicio de correo no configurado.");
+      }
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
   const startEdit = (u) => {
     setEditing(u);
     setF({ username: u.username, email: u.email, name: u.name, password: "", role: u.role });
@@ -159,6 +177,9 @@ function UsersPanel() {
                 <td>{u.active ? <Badge tone="success">activo</Badge> : <Badge tone="danger">inactivo</Badge>}</td>
                 <td className="text-right space-x-2">
                   <Button size="sm" variant="outline" className="rounded-lg" onClick={() => startEdit(u)}>Editar</Button>
+                  <Button size="sm" variant="outline" className="rounded-lg gap-1.5" onClick={() => sendWelcome(u)} data-testid={`user-welcome-${u.username}`} title="Enviar correo de bienvenida">
+                    <Mail className="w-3.5 h-3.5" /> Bienvenida
+                  </Button>
                   <Button size="sm" variant="outline" className="rounded-lg" onClick={() => toggleActive(u)}>{u.active ? "Desactivar" : "Activar"}</Button>
                   {u.role !== "admin_general" && (
                     <Button size="sm" variant="outline" className="rounded-lg text-red-600 hover:bg-red-50 border-red-200" onClick={() => deleteUser(u)} data-testid={`user-delete-${u.username}`}>
@@ -389,97 +410,208 @@ function AIPanel() {
 }
 
 // ============== SENDGRID ==============
-function SendGridPanel() {
+function SendGridPanel() {  // Obsoleto - reemplazado por CorreosPanel. Se mantiene exportado en caso de tests previos.
+  return <CorreosPanel />;
+}
+
+// =================================================================
+//  Panel unificado de CORREOS (Gmail SMTP / SendGrid)
+// =================================================================
+function CorreosPanel() {
   const [settings, setSettings] = useState(null);
-  const [show, setShow] = useState(false);
+  const [show, setShow] = useState({ gmail: false, sg: false });
   const [f, setF] = useState({});
 
-  const load = () => api.get("/settings").then((r) => { setSettings(r.data); setF({
-    api_key: "",
-    from_email: r.data.sendgrid.from_email,
-    from_name: r.data.sendgrid.from_name,
-    enabled: r.data.sendgrid.enabled,
-    test_recipient: r.data.sendgrid.test_recipient,
-  }); });
+  const load = async () => {
+    const r = await api.get("/settings");
+    setSettings(r.data);
+    const e = r.data.email || {};
+    setF({
+      provider: e.provider || "gmail",
+      enabled: !!e.enabled,
+      from_email: e.from_email || "",
+      from_name: e.from_name || "KRINOS",
+      test_recipient: e.test_recipient || "",
+      gmail_user: e.gmail?.user || "",
+      gmail_app_password: "",  // input limpio para nueva
+      sg_api_key: "",
+      sg_from_email: e.sendgrid?.from_email || "",
+      sg_from_name: e.sendgrid?.from_name || "KRINOS",
+    });
+  };
   useEffect(() => { load(); }, []);
 
   const save = async () => {
     try {
-      const body = { ...f };
-      if (!body.api_key) delete body.api_key;
-      await api.patch("/settings/sendgrid", body);
-      toast.success("Configuración SendGrid guardada");
+      const body = {
+        provider: f.provider,
+        enabled: f.enabled,
+        from_email: f.from_email,
+        from_name: f.from_name,
+        test_recipient: f.test_recipient,
+        gmail: { user: f.gmail_user },
+        sendgrid: { from_email: f.sg_from_email, from_name: f.sg_from_name },
+      };
+      if (f.gmail_app_password) body.gmail.app_password = f.gmail_app_password;
+      if (f.sg_api_key) body.sendgrid.api_key = f.sg_api_key;
+      await api.patch("/settings/email", body);
+      toast.success("Configuración de correos guardada");
       load();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
   const testSend = async () => {
     try {
-      const r = await api.post("/settings/sendgrid/test");
-      toast.info(r.data.message || "Prueba enviada");
+      const r = await api.post("/settings/email/test");
+      toast.success(r.data.message || "Correo enviado correctamente");
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
   if (!settings) return <div className="p-8 text-sm text-[#5E6878]">Cargando…</div>;
-  const sg = settings.sendgrid;
+  const email = settings.email || {};
+  const provider = f.provider || "gmail";
 
   return (
     <div className="grid lg:grid-cols-[1fr_360px] gap-6">
       <div className="space-y-5">
+        {/* Header: selector de proveedor + switch enabled */}
         <div className="border border-[#E2E7EC] rounded-xl bg-white p-5 shadow-card">
-          <div className="flex items-start justify-between mb-3">
+          <div className="flex items-start justify-between gap-4 mb-4">
             <div>
-              <h4 className="font-display font-bold text-[15px]">Envío institucional con SendGrid</h4>
-              <p className="text-[12.5px] text-[#5E6878]">Habilite el envío de correos automáticos: invitación a jurados, recordatorios, restablecimiento de contraseña y notificaciones de resultados.</p>
+              <h4 className="font-display font-bold text-[15px]">Envío de correos institucionales</h4>
+              <p className="text-[12.5px] text-[#5E6878] mt-0.5">Bienvenidas, restablecimiento de contraseña, notificaciones a jurados y resultados.</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               <span className="text-[11px] uppercase tracking-wider text-[#5E6878]">{f.enabled ? "Habilitado" : "Deshabilitado"}</span>
-              <Switch checked={f.enabled} onCheckedChange={(v) => setF({ ...f, enabled: v })} data-testid="sg-enabled" />
+              <Switch checked={!!f.enabled} onCheckedChange={(v) => setF({ ...f, enabled: v })} data-testid="email-enabled" />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <Label className="text-xs font-semibold">SendGrid API Key</Label>
-              <div className="flex gap-2">
-                <Input type={show ? "text" : "password"} value={f.api_key} onChange={(e) => setF({ ...f, api_key: e.target.value })}
-                       placeholder={sg.has_api_key ? sg.api_key_masked : "SG.xxxxxxxxxxxx..."}
-                       className="rounded-lg font-mono" data-testid="sg-api-key" />
-                <Button type="button" variant="outline" className="rounded-lg" onClick={() => setShow((s) => !s)}>
-                  {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </Button>
-              </div>
-              <p className="text-[11px] text-[#5E6878] mt-1.5">{sg.has_api_key ? "Ya hay una key registrada. Pegue una nueva solo para reemplazarla." : "Permiso recomendado: Mail Send (Full Access)."}</p>
+
+          <div>
+            <Label className="text-xs font-semibold mb-1.5 block">Proveedor activo</Label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setF({ ...f, provider: "gmail" })}
+                className={`text-left rounded-lg border-2 p-3 transition-colors ${provider === "gmail" ? "border-[#14776A] bg-[#F0F7F5]" : "border-[#E2E7EC] bg-white hover:border-[#CBD2DA]"}`}
+                data-testid="provider-gmail"
+              >
+                <div className="flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-[#14776A]" />
+                  <span className="font-semibold text-[13px]">Gmail SMTP</span>
+                  {provider === "gmail" && <CheckCircle2 className="w-4 h-4 text-[#14776A] ml-auto" />}
+                </div>
+                <p className="text-[11.5px] text-[#5E6878] mt-1">Tu Gmail + Contraseña de Aplicación. Sin costo. Hasta ~500 correos/día.</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setF({ ...f, provider: "sendgrid" })}
+                className={`text-left rounded-lg border-2 p-3 transition-colors ${provider === "sendgrid" ? "border-[#14776A] bg-[#F0F7F5]" : "border-[#E2E7EC] bg-white hover:border-[#CBD2DA]"}`}
+                data-testid="provider-sendgrid"
+              >
+                <div className="flex items-center gap-2">
+                  <Send className="w-4 h-4 text-[#14776A]" />
+                  <span className="font-semibold text-[13px]">SendGrid</span>
+                  {provider === "sendgrid" && <CheckCircle2 className="w-4 h-4 text-[#14776A] ml-auto" />}
+                </div>
+                <p className="text-[11.5px] text-[#5E6878] mt-1">Servicio profesional. Free tier 100/día. Estadísticas y bounce control.</p>
+              </button>
             </div>
-            <div>
-              <Label className="text-xs font-semibold">Email remitente verificado</Label>
-              <Input value={f.from_email || ""} onChange={(e) => setF({ ...f, from_email: e.target.value })} placeholder="notificaciones@krinos.com" className="rounded-lg" data-testid="sg-from-email" />
-            </div>
-            <div>
-              <Label className="text-xs font-semibold">Nombre remitente</Label>
-              <Input value={f.from_name || ""} onChange={(e) => setF({ ...f, from_name: e.target.value })} placeholder="KRINOS" className="rounded-lg" data-testid="sg-from-name" />
-            </div>
-            <div className="col-span-2">
-              <Label className="text-xs font-semibold">Destinatario para prueba</Label>
-              <Input value={f.test_recipient || ""} onChange={(e) => setF({ ...f, test_recipient: e.target.value })} placeholder="su.correo@dominio.com" className="rounded-lg" data-testid="sg-test-recipient" />
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 mt-4">
-            <Button onClick={testSend} variant="outline" className="rounded-lg gap-2" data-testid="sg-test-btn"><Send className="w-4 h-4" />Enviar prueba</Button>
-            <Button onClick={save} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg gap-2" data-testid="sg-save-btn"><Save className="w-4 h-4" />Guardar</Button>
           </div>
         </div>
 
+        {/* Configuración GMAIL */}
+        {provider === "gmail" && (
+          <div className="border border-[#E2E7EC] rounded-xl bg-white p-5 shadow-card" data-testid="gmail-config">
+            <h4 className="font-display font-bold text-[15px] mb-1 flex items-center gap-2"><Mail className="w-4 h-4 text-[#14776A]" /> Configuración Gmail SMTP</h4>
+            <p className="text-[12.5px] text-[#5E6878] mb-4">Usa tu cuenta de Gmail con una <strong>Contraseña de Aplicación</strong> de 16 caracteres (NO tu contraseña habitual).</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs font-semibold">Correo Gmail</Label>
+                <Input value={f.gmail_user || ""} onChange={(e) => setF({ ...f, gmail_user: e.target.value })} placeholder="usuario@gmail.com" className="rounded-lg" data-testid="gmail-user" />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Contraseña de Aplicación</Label>
+                <div className="flex gap-2">
+                  <Input type={show.gmail ? "text" : "password"} value={f.gmail_app_password || ""} onChange={(e) => setF({ ...f, gmail_app_password: e.target.value })}
+                         placeholder={email.gmail?.has_app_password ? email.gmail.app_password_masked : "abcd efgh ijkl mnop"}
+                         className="rounded-lg font-mono" data-testid="gmail-app-password" />
+                  <Button type="button" variant="outline" className="rounded-lg" onClick={() => setShow((s) => ({ ...s, gmail: !s.gmail }))}>
+                    {show.gmail ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </Button>
+                </div>
+                <p className="text-[11px] text-[#5E6878] mt-1">{email.gmail?.has_app_password ? "Ya hay una contraseña registrada. Pega una nueva solo para reemplazarla." : "Formato: 16 caracteres divididos en 4 grupos de 4."}</p>
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Email remitente</Label>
+                <Input value={f.from_email || ""} onChange={(e) => setF({ ...f, from_email: e.target.value })} placeholder="usuario@gmail.com (o alias autorizado)" className="rounded-lg" data-testid="email-from-email" />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Nombre remitente</Label>
+                <Input value={f.from_name || ""} onChange={(e) => setF({ ...f, from_name: e.target.value })} placeholder="KRINOS" className="rounded-lg" data-testid="email-from-name" />
+              </div>
+              <div className="col-span-2">
+                <Label className="text-xs font-semibold">Destinatario para correo de prueba</Label>
+                <Input value={f.test_recipient || ""} onChange={(e) => setF({ ...f, test_recipient: e.target.value })} placeholder="tu.correo@dominio.com" className="rounded-lg" data-testid="email-test-recipient" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button onClick={testSend} variant="outline" className="rounded-lg gap-2" data-testid="email-test-btn"><Send className="w-4 h-4" />Enviar prueba</Button>
+              <Button onClick={save} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg gap-2" data-testid="email-save-btn"><Save className="w-4 h-4" />Guardar</Button>
+            </div>
+          </div>
+        )}
+
+        {/* Configuración SENDGRID */}
+        {provider === "sendgrid" && (
+          <div className="border border-[#E2E7EC] rounded-xl bg-white p-5 shadow-card" data-testid="sendgrid-config">
+            <h4 className="font-display font-bold text-[15px] mb-1 flex items-center gap-2"><Send className="w-4 h-4 text-[#14776A]" /> Configuración SendGrid</h4>
+            <p className="text-[12.5px] text-[#5E6878] mb-4">Servicio profesional. Permiso requerido: <strong>Mail Send → Full Access</strong>.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <Label className="text-xs font-semibold">SendGrid API Key</Label>
+                <div className="flex gap-2">
+                  <Input type={show.sg ? "text" : "password"} value={f.sg_api_key || ""} onChange={(e) => setF({ ...f, sg_api_key: e.target.value })}
+                         placeholder={email.sendgrid?.has_api_key ? email.sendgrid.api_key_masked : "SG.xxxxxxxxxxxx..."}
+                         className="rounded-lg font-mono" data-testid="sg-api-key" />
+                  <Button type="button" variant="outline" className="rounded-lg" onClick={() => setShow((s) => ({ ...s, sg: !s.sg }))}>
+                    {show.sg ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </Button>
+                </div>
+                <p className="text-[11px] text-[#5E6878] mt-1.5">{email.sendgrid?.has_api_key ? "Ya hay una key registrada." : "Genérala en SendGrid → Settings → API Keys."}</p>
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Email remitente verificado</Label>
+                <Input value={f.sg_from_email || ""} onChange={(e) => setF({ ...f, sg_from_email: e.target.value })} placeholder="notificaciones@krinos.com" className="rounded-lg" data-testid="sg-from-email" />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Nombre remitente</Label>
+                <Input value={f.sg_from_name || ""} onChange={(e) => setF({ ...f, sg_from_name: e.target.value })} placeholder="KRINOS" className="rounded-lg" data-testid="sg-from-name" />
+              </div>
+              <div className="col-span-2">
+                <Label className="text-xs font-semibold">Destinatario para correo de prueba</Label>
+                <Input value={f.test_recipient || ""} onChange={(e) => setF({ ...f, test_recipient: e.target.value })} placeholder="tu.correo@dominio.com" className="rounded-lg" data-testid="email-test-recipient-sg" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button onClick={testSend} variant="outline" className="rounded-lg gap-2" data-testid="email-test-btn-sg"><Send className="w-4 h-4" />Enviar prueba</Button>
+              <Button onClick={save} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg gap-2" data-testid="email-save-btn-sg"><Save className="w-4 h-4" />Guardar</Button>
+            </div>
+          </div>
+        )}
+
+        {/* Plantillas embebidas */}
         <div className="border border-[#E2E7EC] rounded-xl bg-white p-5 shadow-card">
           <h4 className="font-display font-bold text-[15px] mb-3">Plantillas embebidas</h4>
-          <p className="text-[12.5px] text-[#5E6878] mb-4">Las siguientes plantillas se enviarán automáticamente cuando el servicio esté habilitado y la convocatoria active el evento correspondiente.</p>
+          <p className="text-[12.5px] text-[#5E6878] mb-4">Se enviarán automáticamente cuando el servicio esté habilitado.</p>
           <div className="grid sm:grid-cols-2 gap-3">
             {[
-              { title: "Invitación a jurado", desc: "Cuando un jurado es creado o asignado a una convocatoria.", trigger: "jurado_invitado" },
-              { title: "Recordatorio de evaluación", desc: "3 días antes del cierre de la etapa individual.", trigger: "recordatorio_evaluacion" },
-              { title: "Resultado disponible", desc: "Cuando una propuesta es habilitada / no habilitada.", trigger: "habilitacion" },
-              { title: "Publicación de resultados", desc: "Al cerrar la convocatoria con ranking definitivo.", trigger: "resultados" },
-              { title: "Restablecer contraseña", desc: "A solicitud del usuario.", trigger: "reset_password" },
-              { title: "Acta firmada", desc: "Notifica a firmantes cuando se completa una firma.", trigger: "acta_firmada" },
+              { title: "Bienvenida (Usuario)", desc: "Al crear un usuario o desde el botón 'Enviar bienvenida'.", trigger: "welcome" },
+              { title: "Bienvenida (Jurado)", desc: "Al crear un jurado o tras resetear su contraseña con envío.", trigger: "welcome_jurado" },
+              { title: "Recuperar contraseña", desc: "Cuando el usuario solicita el enlace desde el login.", trigger: "reset_password" },
+              { title: "Recordatorio de evaluación", desc: "Próximamente. 3 días antes del cierre.", trigger: "recordatorio" },
+              { title: "Habilitación documental", desc: "Próximamente. Al cambiar estado de propuesta.", trigger: "habilitacion" },
+              { title: "Resultados", desc: "Próximamente. Al publicar ranking final.", trigger: "resultados" },
             ].map((t) => (
               <div key={t.trigger} className="border border-[#E2E7EC] rounded-lg p-3.5 bg-[#FAFBFC]">
                 <div className="font-semibold text-[13.5px] text-[#1A1F2C]">{t.title}</div>
@@ -491,35 +623,58 @@ function SendGridPanel() {
         </div>
       </div>
 
+      {/* Sidebar guías */}
       <aside className="lg:sticky lg:top-6 self-start space-y-3">
-        <div className="border border-[#E2E7EC] rounded-xl bg-white p-5 shadow-card">
-          <div className="text-[10.5px] uppercase tracking-[0.14em] font-display font-bold text-[#14776A] mb-2">Guía paso a paso</div>
-          <h4 className="font-display font-bold text-[15px] mb-3">Configurar SendGrid</h4>
-          <ol className="space-y-2.5 text-[12.5px] text-[#3F4856]">
-            <li><strong>1.</strong> Cree una cuenta en SendGrid.</li>
-            <li><strong>2.</strong> Verifique un <em>Single Sender</em> o un dominio (Authenticate Domain) — desde Settings → Sender Authentication.</li>
-            <li><strong>3.</strong> Genere una API Key con permiso <strong>Mail Send → Full Access</strong>.</li>
-            <li><strong>4.</strong> Péguela en este formulario junto con el email remitente verificado.</li>
-            <li><strong>5.</strong> Active el switch y pruebe envíando un correo de prueba.</li>
-          </ol>
-          <div className="border-t border-[#E2E7EC] mt-4 pt-3 space-y-1.5">
-            <a href="https://app.sendgrid.com/settings/api_keys" target="_blank" rel="noreferrer" className="flex items-center justify-between text-[12.5px] text-[#14776A] hover:underline">
-              Crear API Key <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-            <a href="https://app.sendgrid.com/settings/sender_auth" target="_blank" rel="noreferrer" className="flex items-center justify-between text-[12.5px] text-[#14776A] hover:underline">
-              Verificar remitente <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-            <a href="https://docs.sendgrid.com/" target="_blank" rel="noreferrer" className="flex items-center justify-between text-[12.5px] text-[#14776A] hover:underline">
-              Documentación oficial <ExternalLink className="w-3.5 h-3.5" />
-            </a>
+        {provider === "gmail" ? (
+          <div className="border border-[#E2E7EC] rounded-xl bg-white p-5 shadow-card">
+            <div className="text-[10.5px] uppercase tracking-[0.14em] font-display font-bold text-[#14776A] mb-2">Guía paso a paso</div>
+            <h4 className="font-display font-bold text-[15px] mb-3">Cómo generar tu Contraseña de Aplicación de Gmail</h4>
+            <ol className="space-y-2.5 text-[12.5px] text-[#3F4856]">
+              <li><strong>1.</strong> Inicia sesión en tu cuenta Gmail.</li>
+              <li><strong>2.</strong> Activa la <strong>Verificación en 2 pasos</strong> (es requisito obligatorio para generar contraseñas de aplicación).<br /><a href="https://myaccount.google.com/signinoptions/two-step-verification" target="_blank" rel="noreferrer" className="text-[#14776A] hover:underline inline-flex items-center gap-1 mt-1">Activar 2FA <ExternalLink className="w-3 h-3" /></a></li>
+              <li><strong>3.</strong> Ve a <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" className="text-[#14776A] hover:underline inline-flex items-center gap-1">myaccount.google.com/apppasswords <ExternalLink className="w-3 h-3" /></a></li>
+              <li><strong>4.</strong> Escribe un nombre (ej. "KRINOS") y clic en <strong>Crear</strong>.</li>
+              <li><strong>5.</strong> Google te mostrará una contraseña de <strong>16 caracteres</strong> (4 grupos de 4 letras). Cópiala COMPLETA (sin espacios o con espacios, ambos funcionan).</li>
+              <li><strong>6.</strong> Pégala aquí en el campo <em>Contraseña de Aplicación</em>, escribe tu correo Gmail, activa el switch arriba y guarda.</li>
+              <li><strong>7.</strong> Envía un correo de prueba para confirmar.</li>
+            </ol>
+            <div className="border-t border-[#E2E7EC] mt-4 pt-3 space-y-1.5">
+              <a href="https://support.google.com/accounts/answer/185833" target="_blank" rel="noreferrer" className="flex items-center justify-between text-[12.5px] text-[#14776A] hover:underline">
+                Doc oficial de Google <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+              <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" className="flex items-center justify-between text-[12.5px] text-[#14776A] hover:underline">
+                Crear Contraseña de Aplicación <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            </div>
+            <div className="border-l-4 border-amber-400 bg-amber-50 rounded-r-lg p-3 mt-4 text-[12px]">
+              <div className="flex gap-2"><AlertCircle className="w-4 h-4 text-amber-700 mt-0.5 shrink-0" /><div>
+                <strong>Límite Gmail:</strong> ~500 correos por día. Para volúmenes mayores usa SendGrid o un dominio profesional con Google Workspace.
+              </div></div>
+            </div>
           </div>
-        </div>
-        <div className="border-l-4 border-amber-400 bg-amber-50 rounded-r-lg p-4">
+        ) : (
+          <div className="border border-[#E2E7EC] rounded-xl bg-white p-5 shadow-card">
+            <div className="text-[10.5px] uppercase tracking-[0.14em] font-display font-bold text-[#14776A] mb-2">Guía paso a paso</div>
+            <h4 className="font-display font-bold text-[15px] mb-3">Configurar SendGrid</h4>
+            <ol className="space-y-2.5 text-[12.5px] text-[#3F4856]">
+              <li><strong>1.</strong> Crea una cuenta en SendGrid.</li>
+              <li><strong>2.</strong> Verifica un <em>Single Sender</em> o dominio (Authenticate Domain).</li>
+              <li><strong>3.</strong> Genera una API Key con permiso <strong>Mail Send → Full Access</strong>.</li>
+              <li><strong>4.</strong> Pégala aquí junto con el email remitente verificado.</li>
+              <li><strong>5.</strong> Activa el switch y prueba envío.</li>
+            </ol>
+            <div className="border-t border-[#E2E7EC] mt-4 pt-3 space-y-1.5">
+              <a href="https://app.sendgrid.com/settings/api_keys" target="_blank" rel="noreferrer" className="flex items-center justify-between text-[12.5px] text-[#14776A] hover:underline">Crear API Key <ExternalLink className="w-3.5 h-3.5" /></a>
+              <a href="https://app.sendgrid.com/settings/sender_auth" target="_blank" rel="noreferrer" className="flex items-center justify-between text-[12.5px] text-[#14776A] hover:underline">Verificar remitente <ExternalLink className="w-3.5 h-3.5" /></a>
+            </div>
+          </div>
+        )}
+        <div className="border-l-4 border-blue-400 bg-blue-50 rounded-r-lg p-4">
           <div className="flex gap-2.5">
-            <AlertCircle className="w-4 h-4 text-amber-700 mt-0.5 shrink-0" />
+            <Info className="w-4 h-4 text-blue-700 mt-0.5 shrink-0" />
             <div className="text-[12px] text-[#1A1F2C]">
-              <strong>Modo configuración</strong>
-              <p className="text-[#5E6878] mt-1">Los formularios y plantillas ya están listos. El envío real se activará cuando registre una API Key válida y verifique el remitente en SendGrid.</p>
+              <strong>Recomendación</strong>
+              <p className="text-[#5E6878] mt-1">Para producción institucional con volumen alto usa <strong>SendGrid</strong>. Para pruebas y operaciones internas, <strong>Gmail</strong> es la opción más rápida.</p>
             </div>
           </div>
         </div>
@@ -527,6 +682,7 @@ function SendGridPanel() {
     </div>
   );
 }
+
 
 // ============== BRANDING ==============
 function BrandingPanel() {
