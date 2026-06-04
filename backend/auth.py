@@ -82,6 +82,15 @@ async def get_current_user(request: Request) -> dict:
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
         if not user or not user.get("active", True):
             raise HTTPException(status_code=401, detail="Usuario inactivo o no encontrado")
+        # Fallback: si es jurado pero no tiene jurado_id en su user record,
+        # resolverlo automáticamente por email para garantizar el filtrado correcto
+        # en /actas, /dashboards/me y demás endpoints sensibles.
+        if user.get("role") == "jurado" and not user.get("jurado_id") and user.get("email"):
+            jur = await db.jurados.find_one({"email": user["email"].lower()}, {"id": 1, "_id": 0})
+            if jur:
+                user["jurado_id"] = jur["id"]
+                # Persistir para próximas peticiones
+                await db.users.update_one({"id": user["id"]}, {"$set": {"jurado_id": jur["id"]}})
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Sesión expirada")

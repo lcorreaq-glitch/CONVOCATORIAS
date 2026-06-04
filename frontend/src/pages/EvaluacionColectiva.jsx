@@ -362,8 +362,8 @@ export default function EvaluacionColectiva() {
                                  if (isNaN(v)) return;
                                  const mx = c.puntaje_max ?? 100;
                                  const mn = c.puntaje_min ?? 0;
-                                 if (v > mx) { v = mx; toast.warning(`'${c.nombre}': valor capeado a máximo ${mx} pts`); }
-                                 else if (v < mn) { v = mn; toast.warning(`'${c.nombre}': valor capeado a mínimo ${mn} pts`); }
+                                 if (v > mx) { v = mx; toast.warning(`'${c.nombre}': valor ajustado al máximo permitido (${mx} pts)`); }
+                                 else if (v < mn) { v = mn; toast.warning(`'${c.nombre}': valor ajustado al mínimo permitido (${mn} pts)`); }
                                  setPuntajes({ ...puntajes, [c.id]: v });
                                }} />
                         <div className="text-[10px] mt-1 text-muted-foreground font-mono">rango {c.puntaje_min}–{c.puntaje_max}</div>

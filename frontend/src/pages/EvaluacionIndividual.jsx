@@ -71,12 +71,12 @@ export default function EvaluacionIndividual() {
     let warned = false;
     if (v > max) {
       v = max;
-      toast.warning(`'${c.nombre}': valor capeado a máximo ${max} pts`);
+      toast.warning(`'${c.nombre}': valor ajustado al máximo permitido (${max} pts)`);
       warned = true;
     }
     if (v < min) {
       v = min;
-      if (!warned) toast.warning(`'${c.nombre}': valor capeado a mínimo ${min} pts`);
+      if (!warned) toast.warning(`'${c.nombre}': valor ajustado al mínimo permitido (${min} pts)`);
     }
     setPuntajes({ ...puntajes, [c.id]: v });
   };

@@ -31,17 +31,20 @@ export default function Actas() {
     try {
       const r = await api.get(`/actas-pendientes?convocatoria_id=${activeConvocatoriaId}`);
       // Si es jurado, filtrar lo que ve:
-      //  - Individuales: solo SU fila
+      //  - Individuales: solo SU fila (por jurado_id o por email)
       //  - Colectivas: solo ternas donde es integrante
       //  - Subregionales: solo subregiones donde tiene asignaciones
-      if (user?.role === "jurado" && user?.jurado_id) {
+      if (user?.role === "jurado") {
         const d = r.data;
-        d.individual = (d.individual || []).filter((row) => row.jurado_id === user.jurado_id);
+        const my_jid = user.jurado_id;
+        const my_email = (user.email || "").toLowerCase();
+        const isMineRow = (row) =>
+          (my_jid && row.jurado_id === my_jid) ||
+          (row.jurado_email && row.jurado_email.toLowerCase() === my_email);
+        d.individual = (d.individual || []).filter(isMineRow);
         d.colectiva_terna = (d.colectiva_terna || []).filter(
-          (row) => (row.integrantes_ids || []).includes(user.jurado_id),
+          (row) => my_jid && (row.integrantes_ids || []).includes(my_jid),
         );
-        // Para subregionales: backend ya retorna `firmas` por jurado; mostrar solo
-        // subregiones donde el jurado tiene asignación (`mis_subregiones`).
         const mis = new Set(d.mis_subregiones || []);
         d.subregional = (d.subregional || []).filter((row) => mis.has(row.subregion));
         setData(d);
