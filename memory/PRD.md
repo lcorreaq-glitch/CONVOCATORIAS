@@ -254,6 +254,32 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 
 ## Backlog / próximas tareas
 
+### v19 — Login limpio + Recuperar contraseña + Bienvenida + Correos Gmail/SendGrid (Feb 2026)
+**Backend nuevo `email_service.py`**:
+- ✅ Servicio unificado de envío de correos con soporte de **Gmail SMTP** (smtplib 587 + STARTTLS, Contraseña de Aplicación 16 chars) y **SendGrid** (API REST `/v3/mail/send`).
+- ✅ Plantillas HTML institucionales: `welcome`, `reset_password`, `notification` con branding KRINOS.
+- ✅ Log de envíos en colección `email_log`.
+
+**Backend endpoints nuevos**:
+- ✅ `POST /api/auth/forgot-password` — link de recuperación con token JWT (expira 1h). NO revela si el email existe.
+- ✅ `POST /api/auth/reset-password` — verifica token, cambia password y limpia bloqueos brute force.
+- ✅ `PATCH /api/settings/email` — config unificada Gmail/SendGrid (selector + sub-bloques). Patch parcial preserva campos. Migración auto del bloque legacy `sendgrid`.
+- ✅ `POST /api/settings/email/test` — envío de prueba según proveedor activo.
+- ✅ `POST /api/users/{id}/send-welcome` — bienvenida con o sin contraseña temporal.
+- ✅ `POST /api/admin/credenciales-jurado/{id}/send-welcome` y `reset-password` con `enviar_correo:true`.
+
+**Frontend**:
+- ✅ Login: removidas credenciales demo + link "¿Olvidaste tu contraseña?" con modal y endpoint conectado.
+- ✅ Nueva página `/reset-password?token=<jwt>` (validación + redirect login).
+- ✅ Propuestas: tabla compacta de 4 columnas + botón **"Ver propuesta"** con modal `PropuestaDetalle` que agrupa todos los campos por secciones.
+- ✅ Admin → Correos: selector visual Gmail/SendGrid, guía paso a paso para Contraseña de Aplicación de Gmail (links a `myaccount.google.com/apppasswords` + 2FA), sidebar contextual.
+- ✅ Admin → Usuarios: botón "Bienvenida" por fila.
+- ✅ Jurados: icono Mail (azul) por fila.
+
+**Testing (iter 14)**: 21/21 pytest PASS. Regresión admin 28/28 OK.
+
+
+
 ### v18 — Reset operativo + Delete unificado + Usuarios de prueba (Feb 2026)
 **Backend nuevo** `routes_admin.py`:
 - ✅ `POST /api/admin/reset-datos` — borra propuestas, jurados, ternas, asignaciones, evaluaciones (ind+col), rankings, actas y opcionalmente usuarios/auditoría. Requiere `confirmacion="REINICIAR"`. Preserva configuración (convocatorias, campos, catálogos, criterios, desempates, plantillas, branding).

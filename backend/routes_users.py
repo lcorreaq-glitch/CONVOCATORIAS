@@ -1,7 +1,7 @@
 """KRINOS - User management (Admin General creates other users)."""
 import uuid
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, EmailStr, Field
 
 from db import get_db, now_iso
@@ -107,7 +107,7 @@ class WelcomePayload(BaseModel):
 
 
 @router.post("/{user_id}/send-welcome")
-async def send_welcome_email(user_id: str, payload: WelcomePayload,
+async def send_welcome_email(user_id: str, payload: WelcomePayload, request: Request,
                              actor: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
     """Envía un correo de bienvenida al usuario con su username y (opcional) contraseña temporal.
 
@@ -122,7 +122,7 @@ async def send_welcome_email(user_id: str, payload: WelcomePayload,
     if not u.get("email"):
         raise HTTPException(status_code=400, detail="El usuario no tiene email configurado")
 
-    base = payload.base_url or "https://convocatoria-hub-2.preview.emergentagent.com"
+    base = payload.base_url or request.headers.get("origin") or "https://convocatoria-hub-2.emergent.host"
     login_url = f"{base.rstrip('/')}/login"
 
     branding_doc = await db.system_settings.find_one({"id": "global"}, {"_id": 0}) or {}

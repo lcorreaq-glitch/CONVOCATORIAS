@@ -285,8 +285,7 @@ async def forgot_password(payload: ForgotPasswordRequest, request: Request):
     await log_email(user["email"], "Recuperar contraseña", "reset_password", result, user_id=user["id"])
     await audit(user, "forgot_password", "auth", user["id"],
                 detalle=f"provider={result.get('provider','?')} ok={result.get('ok')}")
-    return {"ok": True, "message": "Si el correo está registrado, recibirás un enlace en breve.",
-            "_debug": {"provider": result.get("provider"), "delivered": result.get("ok"), "reason": result.get("reason")}}
+    return {"ok": True, "message": "Si el correo está registrado, recibirás un enlace en breve."}
 
 
 class ResetPasswordRequest(BaseModel):
