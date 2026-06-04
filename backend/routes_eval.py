@@ -1,5 +1,6 @@
 """KRINOS - Evaluación Individual + Colectiva."""
 import uuid
+import os
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
@@ -146,8 +147,66 @@ async def save_eval(eid: str, payload: EvalUpdate, user: dict = Depends(get_curr
     await db.evaluaciones_individuales.update_one({"id": eid}, {"$set": updates})
     await audit(user, "save", "evaluaciones_individuales", eid,
                 valor_nuevo={"estado": updates.get("estado"), "puntaje_total": updates["puntaje_total"]})
+
+    # ────────────────────────────────────────────────────────────────────
+    # TRIGGER: Si esta es la última evaluación individual pendiente del jurado,
+    # enviarle un correo invitándolo a firmar su acta consolidada (idempotente).
+    # ────────────────────────────────────────────────────────────────────
+    if payload.finalizar:
+        try:
+            await _maybe_notify_evaluaciones_completas(db, ev)
+        except Exception as ex:
+            # No fallar la operación principal por un error de correo
+            import logging
+            logging.getLogger("krinos").warning(f"Email notif evaluaciones completas falló: {ex}")
+
     out = await db.evaluaciones_individuales.find_one({"id": eid}, {"_id": 0})
     return out
+
+
+async def _maybe_notify_evaluaciones_completas(db, ev: dict):
+    """Envía correo al jurado cuando ha finalizado TODAS sus evaluaciones individuales
+    de la convocatoria. Idempotente: registra `datos.email_acta_listo_at` en el jurado.
+    """
+    jurado_id = ev.get("jurado_id")
+    convocatoria_id = ev.get("convocatoria_id")
+    if not jurado_id or not convocatoria_id:
+        return
+    jur = await db.jurados.find_one({"id": jurado_id})
+    if not jur:
+        return
+    # Verificar si ya se envió antes
+    datos = jur.get("datos") or {}
+    if datos.get("email_acta_listo_at"):
+        return
+    # Contar pendientes vs totales (solo individuales, no colectivas)
+    total = await db.evaluaciones_individuales.count_documents({
+        "convocatoria_id": convocatoria_id, "jurado_id": jurado_id, "etapa": {"$ne": "colectiva"},
+    })
+    if total == 0:
+        return
+    pendientes = await db.evaluaciones_individuales.count_documents({
+        "convocatoria_id": convocatoria_id, "jurado_id": jurado_id, "etapa": {"$ne": "colectiva"},
+        "estado": {"$nin": ["Finalizada", "Firmada"]},
+    })
+    if pendientes > 0:
+        return  # aún quedan pendientes
+    # Enviar correo
+    from email_service import send_email, render_evals_completas, log_email
+    settings_doc = await db.system_settings.find_one({"id": "global"}, {"_id": 0}) or {}
+    product_name = (settings_doc.get("branding") or {}).get("product_name", "KRINOS")
+    base_url = (settings_doc.get("branding") or {}).get("public_url") or \
+               os.environ.get("PUBLIC_FRONTEND_URL", "https://convocatoria-hub-2.emergent.host")
+    actas_url = f"{base_url.rstrip('/')}/actas"
+    html, text = render_evals_completas(jur.get("nombre", "Jurado"), total, actas_url, product_name)
+    result = await send_email(jur["email"], f"¡Evaluaciones completas! Firma tu acta — {product_name}",
+                              html, text_body=text)
+    await log_email(jur["email"], "Evaluaciones completas", "evals_complete", result, user_id=None)
+    # Marca timestamp para idempotencia (incluso si el correo fue mocked, no re-enviar pronto)
+    datos["email_acta_listo_at"] = now_iso()
+    datos["email_acta_listo_result"] = {"provider": result.get("provider"), "ok": result.get("ok"),
+                                        "mocked": result.get("mocked", False)}
+    await db.jurados.update_one({"id": jurado_id}, {"$set": {"datos": datos}})
 
 
 @router.post("/evaluaciones-individuales/{eid}/firmar")

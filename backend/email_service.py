@@ -112,6 +112,22 @@ def render_generic(subject: str, content_html: str, product_name: str = "KRINOS"
     return _layout(body, product_name), subject
 
 
+def render_evals_completas(name: str, total_evals: int, actas_url: str, product_name: str = "KRINOS") -> tuple[str, str]:
+    body = f"""
+      <h1 style="font-size:22px;font-weight:800;margin:0 0 14px;">¡Completaste tus evaluaciones! 🎉</h1>
+      <p>Hola {name},</p>
+      <p>Has finalizado las <strong>{total_evals} evaluaciones individuales</strong> asignadas en <strong>{product_name}</strong>. ¡Excelente trabajo!</p>
+      <div style="background:#F0F7F5;border-left:4px solid #14776A;padding:14px 18px;border-radius:6px;margin:18px 0;">
+        <strong style="color:#0F5E54;">Próximo paso:</strong> firma tu acta individual consolidada.
+        <p style="margin:6px 0 0;font-size:12.5px;color:#5E6878;">Es una sola acta que reúne todas tus calificaciones. Recuerda tener tu firma cargada en <em>Mi Perfil</em>.</p>
+      </div>
+      <a href="{actas_url}" style="display:inline-block;background:#14776A;color:#FFFFFF;text-decoration:none;padding:11px 22px;border-radius:8px;font-weight:600;font-size:13.5px;">Ir a firmar mi acta</a>
+      <p style="margin-top:20px;font-size:12.5px;color:#5E6878;">Si tienes dudas, contacta al administrador de la convocatoria.</p>
+    """
+    text = f"¡Completaste tus evaluaciones, {name}!\n\nFinalizaste {total_evals} evaluaciones individuales en {product_name}.\n\nSiguiente paso: firma tu acta individual en:\n{actas_url}\n"
+    return _layout(body, product_name), text
+
+
 # ---------------------------------------------------------------------------
 # Envío real
 # ---------------------------------------------------------------------------
