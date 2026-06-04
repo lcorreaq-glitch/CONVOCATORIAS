@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/PageHeader";
-import { UserCog, Mail, Phone, MapPin, FileText, ExternalLink, Pencil, IdCard, PenLine } from "lucide-react";
+import { UserCog, Mail, Phone, MapPin, FileText, ExternalLink, Pencil, IdCard, PenLine, Download, FileType } from "lucide-react";
 import { api, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 import SignaturePad from "@/components/SignaturePad";
@@ -117,6 +117,51 @@ export default function JuradoDetalle({ open, onOpenChange, jurado, campos, onEd
               </p>
             </section>
           )}
+
+          {/* Hoja de vida */}
+          <section>
+            <h3 className="text-[11px] uppercase tracking-[0.14em] font-display font-bold text-[#14776A] mb-2 flex items-center gap-1.5">
+              <FileText className="w-3.5 h-3.5" />Hoja de vida
+            </h3>
+            {jurado.datos?.hoja_vida?.url ? (
+              <div className="border border-border rounded-lg p-3 bg-white flex items-center gap-3" data-testid="jur-detail-hv">
+                <div className="w-10 h-10 rounded-md bg-[#F0F7F5] grid place-items-center shrink-0">
+                  <FileType className="w-5 h-5 text-[#14776A]" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-[13px] truncate" title={jurado.datos.hoja_vida.name}>
+                    {jurado.datos.hoja_vida.name || "Hoja de vida"}
+                  </div>
+                  <div className="text-[10.5px] text-muted-foreground">
+                    {jurado.datos.hoja_vida.size
+                      ? `${(jurado.datos.hoja_vida.size / 1024).toFixed(1)} KB`
+                      : "Archivo cargado"}
+                  </div>
+                </div>
+                <a
+                  href={jurado.datos.hoja_vida.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-[#0F5E54] hover:underline px-2.5 py-1.5"
+                  data-testid="jur-detail-hv-view"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Ver
+                </a>
+                <a
+                  href={jurado.datos.hoja_vida.url}
+                  download={jurado.datos.hoja_vida.name || "hoja_de_vida"}
+                  className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold bg-[#14776A] hover:bg-[#0F5E54] text-white px-3 py-1.5 rounded-md"
+                  data-testid="jur-detail-hv-download"
+                >
+                  <Download className="w-3.5 h-3.5" /> Descargar
+                </a>
+              </div>
+            ) : (
+              <div className="text-[12.5px] italic text-muted-foreground border border-dashed border-border rounded-lg px-4 py-3">
+                Sin hoja de vida cargada. El jurado puede subirla desde <span className="font-semibold">Mi Perfil</span>.
+              </div>
+            )}
+          </section>
 
           {/* Campos extras dinámicos */}
           {extras.length > 0 && (
