@@ -254,6 +254,41 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 
 ## Backlog / próximas tareas
 
+### v20 — Roles & Permisos totalmente administrables + Gating del sidebar (Feb 2026)
+**Backend `routes_permissions.py` (re-escrito)**:
+- ✅ Colección MongoDB `roles` con CRUD completo. `is_system=true` para los 7 roles base.
+- ✅ `MODULES_CATALOG` con 24 módulos × 19 acciones canónicas (view/create/edit/delete/sign/evaluate/export/import/send_welcome/reset_password/configure/auto/seed/reset/etc).
+- ✅ Seed idempotente en startup (server.py lifespan).
+- ✅ Endpoints:
+  - `GET /catalog` — módulos y acciones disponibles.
+  - `GET /matrix` — matrix completa para la UI editable (versión 2.0).
+  - `GET /roles`, `GET /roles/{code}` — lista y consulta.
+  - `POST /roles` — crear rol custom (snake_case, valida permisos contra catálogo).
+  - `PATCH /roles/{code}` — actualizar name/description/permissions.
+  - `DELETE /roles/{code}` — bloqueado para is_system; bloqueado si hay usuarios asignados.
+  - `PATCH /roles/{code}/permissions` — toggle granular {module, action, allowed}.
+  - `GET /me` — permisos del usuario autenticado.
+- ✅ Defensa anti-bloqueo: `admin_general` no puede perder view en roles/usuarios/sistema/administracion.
+
+**Backend `routes_users.py`**:
+- ✅ `ALLOWED_ROLES` hardcoded → eliminado. Ahora valida contra `db.roles` (acepta roles custom).
+
+**Frontend**:
+- ✅ `AuthContext` expone `permissions` global + función `can(module, action)`. Refresca tras login.
+- ✅ `Layout.jsx` — sidebar filtrado por `can(module, 'view')`. Cada item del nav tiene su módulo declarado. Administración ahora requiere `can("administracion","view")` (no rol hardcoded).
+- ✅ `RolesPanel` (Administración → Roles & Permisos) reescrito:
+  - Lista lateral con todos los roles + icono escudo en los del sistema.
+  - Panel derecho con matriz interactiva: cada (módulo × acción) es un botón toggle verde/gris.
+  - Atajos "Todos / Ninguno" por fila.
+  - Editar nombre/descripción del rol.
+  - Botón Crear rol (modal con code+name+description).
+  - Eliminar rol custom (bloqueado para is_system; bloqueado si hay users).
+- ✅ `UsersPanel` — el select de Rol carga roles dinámicos desde `/api/permissions/roles` (incluye roles custom).
+
+**Testing (iter 15)**: 22/22 pytest PASS · 0 críticos. Verificado E2E manual: crear rol custom → asignar a user → user.permissions/me refleja permisos → DELETE rol bloqueado si hay users.
+
+
+
 ### v19 — Login limpio + Recuperar contraseña + Bienvenida + Correos Gmail/SendGrid (Feb 2026)
 **Backend nuevo `email_service.py`**:
 - ✅ Servicio unificado de envío de correos con soporte de **Gmail SMTP** (smtplib 587 + STARTTLS, Contraseña de Aplicación 16 chars) y **SendGrid** (API REST `/v3/mail/send`).

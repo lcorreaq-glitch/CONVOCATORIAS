@@ -9,8 +9,14 @@ from auth import get_current_user, require_roles, hash_password, audit
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
-ALLOWED_ROLES = ["admin_general", "admin_convocatoria", "supervisor",
-                 "jurado", "integrante_terna", "invitado", "auditor"]
+
+async def _valid_role_codes() -> set[str]:
+    """Devuelve todos los códigos de rol válidos (del sistema + custom). Lee desde DB."""
+    db = get_db()
+    codes = set()
+    async for r in db.roles.find({}, {"code": 1, "_id": 0}):
+        codes.add(r["code"])
+    return codes
 
 
 class UserCreate(BaseModel):
@@ -40,8 +46,9 @@ async def list_users(user: dict = Depends(require_roles("admin_general"))):
 
 @router.post("")
 async def create_user(payload: UserCreate, user: dict = Depends(require_roles("admin_general"))):
-    if payload.role not in ALLOWED_ROLES:
-        raise HTTPException(status_code=400, detail="Rol inválido")
+    valid_roles = await _valid_role_codes()
+    if payload.role not in valid_roles:
+        raise HTTPException(status_code=400, detail=f"Rol inválido. Códigos válidos: {sorted(valid_roles)}")
     db = get_db()
     if await db.users.find_one({"$or": [{"username": payload.username.lower()}, {"email": payload.email.lower()}]}):
         raise HTTPException(status_code=409, detail="Usuario o email ya registrado")
@@ -73,8 +80,9 @@ async def update_user(user_id: str, payload: UserUpdate, user: dict = Depends(re
     if payload.name is not None: updates["name"] = payload.name
     if payload.email is not None: updates["email"] = payload.email.lower()
     if payload.role is not None:
-        if payload.role not in ALLOWED_ROLES:
-            raise HTTPException(status_code=400, detail="Rol inválido")
+        valid_roles = await _valid_role_codes()
+        if payload.role not in valid_roles:
+            raise HTTPException(status_code=400, detail=f"Rol inválido. Códigos válidos: {sorted(valid_roles)}")
         updates["role"] = payload.role
     if payload.active is not None: updates["active"] = payload.active
     if payload.password: updates["password_hash"] = hash_password(payload.password)
