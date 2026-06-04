@@ -56,7 +56,27 @@ export default function EvaluacionIndividual() {
     api.get(`/evaluaciones-individuales/${id}/referencia-v1`).then((r) => setV1Ref(r.data)).catch(() => setV1Ref(null));
   }, [id]);
 
-  const setPunt = (cid, v) => setPuntajes({ ...puntajes, [cid]: v === "" ? "" : parseFloat(v) });
+  const setPunt = (c, raw) => {
+    if (raw === "" || raw === null || raw === undefined) {
+      setPuntajes({ ...puntajes, [c.id]: "" });
+      return;
+    }
+    let v = parseFloat(raw);
+    if (isNaN(v)) return;  // ignora caracteres no numéricos
+    const max = c.puntaje_max ?? 100;
+    const min = c.puntaje_min ?? 0;
+    let warned = false;
+    if (v > max) {
+      v = max;
+      toast.warning(`'${c.nombre}': valor capeado a máximo ${max} pts`);
+      warned = true;
+    }
+    if (v < min) {
+      v = min;
+      if (!warned) toast.warning(`'${c.nombre}': valor capeado a mínimo ${min} pts`);
+    }
+    setPuntajes({ ...puntajes, [c.id]: v });
+  };
   const setObs = (cid, v) => setObservaciones({ ...observaciones, [cid]: v });
 
   const isCritPriorizacion = (c) => ((c.nombre_interno || c.nombre || "").toLowerCase()).includes("prioriz");
@@ -321,7 +341,15 @@ export default function EvaluacionIndividual() {
                         readOnly={isAuto}
                         min={c.puntaje_min} max={c.puntaje_max} step="0.1"
                         value={isAuto ? autoValue : (puntajes[c.id] ?? "")}
-                        onChange={(e) => !isAuto && setPunt(c.id, e.target.value)}
+                        onChange={(e) => !isAuto && setPunt(c, e.target.value)}
+                        onKeyDown={(e) => {
+                          // Bloquear "e", "+", "-" para evitar exponenciales y signos
+                          if (["e", "E", "+"].includes(e.key)) e.preventDefault();
+                        }}
+                        onBlur={(e) => {
+                          // Forzar reclamping en blur (por si el browser dejó pasar algo)
+                          if (!isAuto && e.target.value !== "") setPunt(c, e.target.value);
+                        }}
                         className={`w-28 rounded-lg text-right font-display font-extrabold text-[20px] tabular-nums pr-3 ${isAuto ? "border-[#BFDBFE] bg-[#EFF6FF]/60 text-[#1E40AF] cursor-not-allowed" : sumaRanking ? "border-[#CDE7E1] focus-visible:ring-[#14776A]" : "border-[#FDE68A] focus-visible:ring-[#F59E0B]"}`}
                         placeholder="—"
                       />
