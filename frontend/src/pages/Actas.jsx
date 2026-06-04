@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api, formatApiError, openPdf } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader, { Badge } from "@/components/PageHeader";
@@ -18,6 +19,7 @@ const ESTADO_TONE = {
 
 export default function Actas() {
   const { activeConvocatoriaId, user } = useAuth();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("individual");
   const [busy, setBusy] = useState(false);
@@ -164,14 +166,21 @@ export default function Actas() {
                         {r.forzada && <span className="ml-1 text-[10px] text-amber-700 font-semibold">· forzada</span>}
                       </td>
                       <td className="text-right space-x-1.5">
-                        {r.estado === "Pendiente" && isAdmin && (
-                          <Button size="sm" variant="outline" onClick={() => setConfirmForzar(r)} className="gap-1 rounded-sm text-[11px] h-7" data-testid={`actas-ind-forzar-${r.jurado_id}`}>
+                        {/* Admin: puede forzar acta tanto si está Pendiente como si Requiere firma */}
+                        {(r.estado === "Pendiente" || r.estado === "Requiere firma" || !r.tiene_firma) && isAdmin && (
+                          <Button size="sm" variant="outline" onClick={() => setConfirmForzar(r)} className="gap-1 rounded-sm text-[11px] h-7 border-amber-300 text-amber-700 hover:bg-amber-50" data-testid={`actas-ind-forzar-${r.jurado_id}`}>
                             <Zap className="w-3 h-3" /> Forzar
                           </Button>
                         )}
-                        {/* Para jurado: botón Firmar SU acta cuando avance completo */}
-                        {isJurado && isMine && r.finalizadas === r.total && r.total > 0 && !r.firma_acta_at && (
-                          <Button size="sm" onClick={firmarMiActaIndividual} disabled={busy || !r.tiene_firma} className="bg-[#0F5E54] hover:bg-[#0B4A42] text-white gap-1 rounded-sm text-[11px] h-7" data-testid="actas-ind-firmar-mia">
+                        {/* Jurado: si no tiene firma, mostrar botón naranja para ir a cargarla */}
+                        {isJurado && isMine && !r.tiene_firma && (
+                          <Button size="sm" onClick={() => navigate("/mi-perfil")} className="bg-amber-500 hover:bg-amber-600 text-white gap-1 rounded-sm text-[11px] h-7" data-testid="actas-ind-go-firma">
+                            <PenLine className="w-3 h-3" /> Cargar firma
+                          </Button>
+                        )}
+                        {/* Jurado: si tiene firma + avance 100% + no firmada aún, botón verde para firmar */}
+                        {isJurado && isMine && r.tiene_firma && r.finalizadas === r.total && r.total > 0 && !r.firma_acta_at && (
+                          <Button size="sm" onClick={firmarMiActaIndividual} disabled={busy} className="bg-[#0F5E54] hover:bg-[#0B4A42] text-white gap-1 rounded-sm text-[11px] h-7" data-testid="actas-ind-firmar-mia">
                             <PenLine className="w-3 h-3" /> Firmar mi acta
                           </Button>
                         )}
