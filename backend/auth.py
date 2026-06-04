@@ -167,6 +167,7 @@ class UserOut(BaseModel):
     role: str
     active: bool = True
     convocatoria_roles: list = Field(default_factory=list)
+    jurado_id: Optional[str] = None  # solo para usuarios con rol jurado
 
 
 @router.post("/login")

@@ -398,6 +398,7 @@ async def list_actas_pendientes(convocatoria_id: str, user: dict = Depends(get_c
             "subregiones": j.get("subregiones") or [], "documento": cedula,
             "total": total, "finalizadas": finalizadas, "estado": estado,
             "forzada": forzada, "tiene_firma": bool(firma_url),
+            "firma_acta_at": ((j.get("datos") or {}).get("acta_individual_firma_at")),
             "porcentaje": round((finalizadas / total) * 100) if total else 0,
         })
 
@@ -424,6 +425,7 @@ async def list_actas_pendientes(convocatoria_id: str, user: dict = Depends(get_c
         colectivas.append({
             "terna_id": t["id"], "terna_codigo": t["codigo"], "terna_nombre": t.get("nombre"),
             "subregion": t.get("subregion"), "integrantes": len(integrantes),
+            "integrantes_ids": [i.get("jurado_id") for i in integrantes if i.get("jurado_id")],
             "total": total, "cerradas": cerradas, "firmas": firmas_completas,
             "estado": estado, "porcentaje": round((cerradas / total) * 100) if total else 0,
         })
@@ -465,10 +467,62 @@ async def list_actas_pendientes(convocatoria_id: str, user: dict = Depends(get_c
                 "estado": estado, "porcentaje": round((cerradas / total) * 100) if total else 0,
             })
 
+    # Subregiones donde el jurado autenticado tiene asignaciones (para filtro UI)
+    mis_subregiones = []
+    if user.get("role") == "jurado" and user.get("jurado_id"):
+        me = next((j for j in jurados if j["id"] == user["jurado_id"]), None)
+        if me:
+            mis_subregiones = list(me.get("subregiones") or [])
+
     return {
         "individual": individuales, "colectiva_terna": colectivas, "subregional": subregionales,
         "uso_acta_subregional": uso_subregional, "is_inc2026": inc,
+        "mis_subregiones": mis_subregiones,
     }
+
+
+# ============================================================
+# FIRMA INDIVIDUAL (jurado firma SU acta agregada al terminar todas sus evals)
+# ============================================================
+@router.post("/actas/individual-jurado/{jurado_id}/firmar")
+async def firmar_acta_individual(jurado_id: str, user: dict = Depends(get_current_user)):
+    """El jurado firma SU acta individual única (agrupada con todas sus evaluaciones).
+    Pre-requisitos:
+      - Solo el propio jurado puede firmarla (a menos que sea admin).
+      - Todas sus evaluaciones individuales deben estar Finalizadas.
+      - Debe tener firma cargada en su perfil.
+    """
+    db = get_db()
+    jur = await db.jurados.find_one({"id": jurado_id})
+    if not jur:
+        raise HTTPException(404, "Jurado no encontrado")
+    # Solo el propio jurado o un admin pueden firmar
+    is_admin = user.get("role") in ("admin_general", "admin_convocatoria")
+    if not is_admin and user.get("jurado_id") != jurado_id:
+        raise HTTPException(403, "Solo puedes firmar tu propia acta individual.")
+    firma_url = ((jur.get("datos") or {}).get("firma_url"))
+    if not firma_url:
+        raise HTTPException(400, "Debes cargar tu firma en Mi Perfil antes de firmar el acta.")
+    # Verificar que todas las evals estén finalizadas
+    evs = await db.evaluaciones_individuales.find({
+        "convocatoria_id": jur["convocatoria_id"], "jurado_id": jurado_id, "etapa": {"$ne": "colectiva"}
+    }).to_list(500)
+    total = len(evs)
+    if total == 0:
+        raise HTTPException(400, "No tienes evaluaciones individuales para firmar.")
+    pend = sum(1 for e in evs if e.get("estado") not in ("Finalizada", "Firmada"))
+    if pend > 0 and not ((jur.get("datos") or {}).get("acta_individual_forzada")):
+        raise HTTPException(400, f"Te faltan {pend} evaluación(es) por finalizar antes de firmar el acta.")
+    # Marcar firmas en cada evaluación + en datos del jurado
+    await db.evaluaciones_individuales.update_many(
+        {"convocatoria_id": jur["convocatoria_id"], "jurado_id": jurado_id, "etapa": {"$ne": "colectiva"}},
+        {"$set": {"estado": "Firmada", "fecha_firma": now_iso()}},
+    )
+    datos = jur.get("datos") or {}
+    datos["acta_individual_firma_at"] = now_iso()
+    await db.jurados.update_one({"id": jurado_id}, {"$set": {"datos": datos}})
+    await audit(user, "sign", "actas", jurado_id, detalle=f"acta_individual ({total} evals)")
+    return {"ok": True, "firmadas": total}
 
 
 # ============================================================
@@ -795,6 +849,9 @@ async def acta_individual_jurado(jurado_id: str, user: dict = Depends(get_curren
     jur = await db.jurados.find_one({"id": jurado_id})
     if not jur:
         raise HTTPException(404, "Jurado no encontrado")
+    # Seguridad: el rol jurado solo puede acceder a su propia acta individual
+    if user.get("role") == "jurado" and user.get("jurado_id") != jurado_id:
+        raise HTTPException(403, "Solo puedes descargar tu propia acta individual.")
     conv = await db.convocatorias.find_one({"id": jur["convocatoria_id"]})
     tmpl = await _get_template(db, conv, "individual")
     ctx = _build_ctx(conv, jurado=jur)
@@ -838,6 +895,11 @@ async def acta_colectiva_terna(terna_id: str, user: dict = Depends(get_current_u
     terna = await db.ternas.find_one({"id": terna_id})
     if not terna:
         raise HTTPException(404, "Terna no encontrada")
+    # Seguridad: el rol jurado solo puede acceder al acta de ternas donde es integrante
+    if user.get("role") == "jurado":
+        my_jid = user.get("jurado_id")
+        if not my_jid or not any(i.get("jurado_id") == my_jid for i in (terna.get("integrantes") or [])):
+            raise HTTPException(403, "Solo puedes descargar actas de ternas donde eres integrante.")
     conv = await db.convocatorias.find_one({"id": terna["convocatoria_id"]})
     tmpl = await _get_template(db, conv, "colectiva_terna")
     ctx = _build_ctx(conv, subregion=terna.get("subregion"), terna=terna)

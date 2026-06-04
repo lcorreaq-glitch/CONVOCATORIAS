@@ -23,14 +23,31 @@ export default function Actas() {
   const [busy, setBusy] = useState(false);
   const [confirmForzar, setConfirmForzar] = useState(null);
 
-  const isAdmin = ["admin_general", "admin_convocatoria"].includes(user?.role);
+  const isAdmin = ["admin_general", "admin_convocatoria", "supervisor"].includes(user?.role);
   const isJurado = user?.role === "jurado";
 
   const load = async () => {
     if (!activeConvocatoriaId) return;
     try {
       const r = await api.get(`/actas-pendientes?convocatoria_id=${activeConvocatoriaId}`);
-      setData(r.data);
+      // Si es jurado, filtrar lo que ve:
+      //  - Individuales: solo SU fila
+      //  - Colectivas: solo ternas donde es integrante
+      //  - Subregionales: solo subregiones donde tiene asignaciones
+      if (user?.role === "jurado" && user?.jurado_id) {
+        const d = r.data;
+        d.individual = (d.individual || []).filter((row) => row.jurado_id === user.jurado_id);
+        d.colectiva_terna = (d.colectiva_terna || []).filter(
+          (row) => (row.integrantes_ids || []).includes(user.jurado_id),
+        );
+        // Para subregionales: backend ya retorna `firmas` por jurado; mostrar solo
+        // subregiones donde el jurado tiene asignación (`mis_subregiones`).
+        const mis = new Set(d.mis_subregiones || []);
+        d.subregional = (d.subregional || []).filter((row) => mis.has(row.subregion));
+        setData(d);
+      } else {
+        setData(r.data);
+      }
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail) || "Error al cargar actas");
     }
@@ -44,6 +61,18 @@ export default function Actas() {
       toast.success("Acta individual activada");
       await load();
       setConfirmForzar(null);
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail) || "Error");
+    } finally { setBusy(false); }
+  };
+
+  const firmarMiActaIndividual = async () => {
+    if (!user?.jurado_id) return;
+    setBusy(true);
+    try {
+      await api.post(`/actas/individual-jurado/${user.jurado_id}/firmar`);
+      toast.success("¡Tu acta individual ha sido firmada!");
+      await load();
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail) || "Error");
     } finally { setBusy(false); }
@@ -135,6 +164,12 @@ export default function Actas() {
                         {r.estado === "Pendiente" && isAdmin && (
                           <Button size="sm" variant="outline" onClick={() => setConfirmForzar(r)} className="gap-1 rounded-sm text-[11px] h-7" data-testid={`actas-ind-forzar-${r.jurado_id}`}>
                             <Zap className="w-3 h-3" /> Forzar
+                          </Button>
+                        )}
+                        {/* Para jurado: botón Firmar SU acta cuando avance completo */}
+                        {isJurado && isMine && r.finalizadas === r.total && r.total > 0 && !r.firma_acta_at && (
+                          <Button size="sm" onClick={firmarMiActaIndividual} disabled={busy || !r.tiene_firma} className="bg-[#0F5E54] hover:bg-[#0B4A42] text-white gap-1 rounded-sm text-[11px] h-7" data-testid="actas-ind-firmar-mia">
+                            <PenLine className="w-3 h-3" /> Firmar mi acta
                           </Button>
                         )}
                         {canDownload && (
