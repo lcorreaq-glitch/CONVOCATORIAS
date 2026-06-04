@@ -254,6 +254,27 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 
 ## Backlog / próximas tareas
 
+### v21 — Onboarding personalizado + verificación dashboard jurado (Feb 2026)
+**Frontend nuevo `WelcomeOnboarding.jsx`**:
+- ✅ Modal de 4 pasos que aparece UNA vez por usuario (flag en localStorage `krinos_onboarding_<userid>_v1`).
+- ✅ Paso 1: Bienvenida personalizada con nombre, ícono y badge del rol + descripción del rol desde DB.
+- ✅ Paso 2: Tarjetas grid con los módulos accesibles en el sidebar (icono + nombre + número de acciones).
+- ✅ Paso 3: Lista de TODOS los permisos por módulo con chips traducidos al español (Ver, Crear, Evaluar, Firmar, Exportar, etc.).
+- ✅ Paso 4: 3 consejos rápidos (Mi Perfil, Cambiar contraseña, Permisos personalizables).
+- ✅ Botones Anterior/Saltar/Siguiente con progress dots.
+- ✅ Auto-montado en `Layout.jsx` (se activa al primer ingreso de cada usuario).
+
+**Verificación Dashboard del Jurado**:
+- ✅ Backend `_dashboards_for_role`: para rol "jurado" SOLO crea dashboard "mi_avance" con 5 widgets propios. Dashboards territoriales/línea/priorización filtrados con `role != "jurado"`.
+- ✅ Data sources `mias_asignadas`, `mias_pendientes`, `mias_finalizadas`, `mi_avance_personal`, `mi_promedio_emitido` filtran por `jurado_id == user.jurado_id`. Cero exposición de datos de otros jurados.
+- ✅ Sidebar muestra solo 3 módulos (Dashboard, Evaluaciones, Actas) gracias al gating por permisos.
+- ✅ Confirmación E2E con jurado1@krinos.test: ve solo "Mi panel de evaluación" + sus 5 KPIs personales.
+
+**Limpieza correlacionada**:
+- ✅ `MiPerfil.jsx` universal (ya implementado en v19): admin ve cambio de contraseña, jurado ve firma+CV+IA.
+
+
+
 ### v20 — Roles & Permisos totalmente administrables + Gating del sidebar (Feb 2026)
 **Backend `routes_permissions.py` (re-escrito)**:
 - ✅ Colección MongoDB `roles` con CRUD completo. `is_system=true` para los 7 roles base.

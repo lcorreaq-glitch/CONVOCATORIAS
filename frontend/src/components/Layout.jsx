@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import WelcomeOnboarding from "@/components/WelcomeOnboarding";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, tid: TID.navDashboard, end: true, module: "dashboard" },
@@ -172,6 +173,8 @@ export default function Layout() {
       <main className="flex-1 min-w-0 flex flex-col">
         <Outlet />
       </main>
+
+      <WelcomeOnboarding />
     </div>
   );
 }
