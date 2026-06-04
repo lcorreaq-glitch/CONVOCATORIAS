@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader, { EmptyState } from "@/components/PageHeader";
+import JuradoTimeline from "@/components/JuradoTimeline";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
   LineChart, Line, CartesianGrid,
@@ -74,6 +75,9 @@ export default function Dashboard() {
           </div>
         )}
       />
+
+      {/* Timeline visual del jurado (solo rol jurado) */}
+      <JuradoTimeline convocatoriaId={activeConvocatoriaId} />
 
       {/* SUGERENCIAS INTELIGENTES */}
       {data.is_admin && (data.suggestions?.length > 0) && (

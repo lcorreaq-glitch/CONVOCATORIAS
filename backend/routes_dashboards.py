@@ -567,3 +567,79 @@ async def dismiss_suggestion(suggestion_id: str, convocatoria_id: str,
     config["dashboards_overrides"] = overrides
     await db.convocatorias.update_one({"id": convocatoria_id}, {"$set": {"configuracion": config}})
     return {"ok": True}
+
+
+# ============================================================
+# TIMELINE DEL JURADO — progreso visual en el dashboard
+# ============================================================
+@router.get("/dashboards/mi-timeline")
+async def mi_timeline(convocatoria_id: str, user: dict = Depends(get_current_user)):
+    """Progreso del jurado autenticado en 4 fases: Asignación → Evaluación → Finalización → Firma."""
+    db = get_db()
+    jurado_id = user.get("jurado_id")
+    if not jurado_id:
+        return {"jurado_id": None, "phases": []}
+
+    total_asignadas = await db.evaluaciones_individuales.count_documents({
+        "convocatoria_id": convocatoria_id, "jurado_id": jurado_id, "etapa": {"$ne": "colectiva"},
+    })
+    iniciadas = await db.evaluaciones_individuales.count_documents({
+        "convocatoria_id": convocatoria_id, "jurado_id": jurado_id, "etapa": {"$ne": "colectiva"},
+        "estado": {"$in": ["Iniciada", "En edición"]},
+    })
+    finalizadas = await db.evaluaciones_individuales.count_documents({
+        "convocatoria_id": convocatoria_id, "jurado_id": jurado_id, "etapa": {"$ne": "colectiva"},
+        "estado": {"$in": ["Finalizada", "Firmada"]},
+    })
+
+    jur = await db.jurados.find_one({"id": jurado_id}) or {}
+    firma_acta_at = (jur.get("datos") or {}).get("acta_individual_firma_at")
+    tiene_firma = bool((jur.get("datos") or {}).get("firma_url"))
+
+    def phase(key, label, desc, status, counter=None, extra=None):
+        return {"key": key, "label": label, "description": desc, "status": status,
+                "counter": counter, "extra": extra}
+
+    phases = []
+    if total_asignadas == 0:
+        phases.append(phase("asignacion", "Asignación", "Aún no se te han asignado propuestas.", "pending", {"current": 0, "total": 0}))
+    else:
+        phases.append(phase("asignacion", "Asignación", f"Tienes {total_asignadas} propuestas asignadas.", "completed", {"current": total_asignadas, "total": total_asignadas}))
+
+    if total_asignadas == 0:
+        phases.append(phase("evaluacion", "Evaluación", "Pendiente de asignación.", "pending"))
+    elif finalizadas == 0:
+        phases.append(phase("evaluacion", "Evaluación", f"Listo para empezar. {iniciadas} en borrador.", "in_progress", {"current": iniciadas, "total": total_asignadas}))
+    elif finalizadas < total_asignadas:
+        phases.append(phase("evaluacion", "Evaluación", f"En progreso: {finalizadas} de {total_asignadas} evaluadas.", "in_progress", {"current": finalizadas, "total": total_asignadas}))
+    else:
+        phases.append(phase("evaluacion", "Evaluación", f"Completaste todas tus {total_asignadas} evaluaciones.", "completed", {"current": total_asignadas, "total": total_asignadas}))
+
+    if total_asignadas == 0:
+        phases.append(phase("finalizacion", "Finalización", "Pendiente.", "pending"))
+    elif finalizadas == 0:
+        phases.append(phase("finalizacion", "Finalización", "Marca cada evaluación como Finalizada cuando termines.", "pending", {"current": 0, "total": total_asignadas}))
+    elif finalizadas < total_asignadas:
+        phases.append(phase("finalizacion", "Finalización", f"{finalizadas}/{total_asignadas} finalizadas. Te faltan {total_asignadas - finalizadas}.", "in_progress", {"current": finalizadas, "total": total_asignadas}))
+    else:
+        phases.append(phase("finalizacion", "Finalización", "Todas tus evaluaciones están finalizadas.", "completed", {"current": total_asignadas, "total": total_asignadas}))
+
+    if not tiene_firma:
+        phases.append(phase("firma", "Firma del acta", "Carga tu firma en Mi Perfil para poder firmar el acta.", "pending", extra={"action": "mi_perfil"}))
+    elif firma_acta_at:
+        phases.append(phase("firma", "Firma del acta", f"Acta firmada el {firma_acta_at[:10]}.", "completed", extra={"firmada_at": firma_acta_at}))
+    elif finalizadas < total_asignadas or total_asignadas == 0:
+        phases.append(phase("firma", "Firma del acta", "Disponible cuando completes todas tus evaluaciones.", "pending"))
+    else:
+        phases.append(phase("firma", "Firma del acta", "¡Listo para firmar tu acta consolidada!", "in_progress", extra={"action": "actas"}))
+
+    return {
+        "jurado_id": jurado_id, "jurado_nombre": jur.get("nombre"),
+        "phases": phases,
+        "summary": {
+            "total_asignadas": total_asignadas, "finalizadas": finalizadas, "iniciadas": iniciadas,
+            "tiene_firma": tiene_firma, "acta_firmada": bool(firma_acta_at),
+            "porcentaje_global": round((finalizadas / total_asignadas) * 100) if total_asignadas else 0,
+        },
+    }
+
