@@ -30,8 +30,10 @@ from routes_admin import router as admin_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    from routes_permissions import seed_roles
     await create_indexes()
     await seed_admin()
+    await seed_roles()
     await seed_incentivos_2026()
     await seed_demo_data()
     yield

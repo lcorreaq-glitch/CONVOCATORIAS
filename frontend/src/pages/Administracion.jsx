@@ -13,6 +13,7 @@ import {
   Shield, Sparkles, Mail, Users as UsersIcon, Palette,
   CheckCircle2, AlertCircle, ExternalLink, Eye, EyeOff, Save, Send, Info,
   Wrench, Trash2, RefreshCw, KeyRound, Copy, AlertTriangle, ClipboardList,
+  Plus, Pencil,
 } from "lucide-react";
 
 const MODELS = {
@@ -64,12 +65,14 @@ const ROLES_LABELS = {
 
 function UsersPanel() {
   const [items, setItems] = useState([]);
+  const [roles, setRoles] = useState([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [f, setF] = useState({ username: "", email: "", name: "", password: "", role: "supervisor" });
 
   const load = () => api.get("/users").then((r) => setItems(r.data));
-  useEffect(() => { load(); }, []);
+  const loadRoles = () => api.get("/permissions/roles").then((r) => setRoles(r.data));
+  useEffect(() => { load(); loadRoles(); }, []);
 
   const submit = async () => {
     try {
@@ -150,7 +153,7 @@ function UsersPanel() {
               <Select value={f.role} onValueChange={(v) => setF({ ...f, role: v })}>
                 <SelectTrigger className="rounded-lg" data-testid="admin-user-role"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(ROLES_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                  {roles.map((r) => <SelectItem key={r.code} value={r.code}>{r.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -173,7 +176,7 @@ function UsersPanel() {
                 <td className="font-mono text-[12px]">{u.username}</td>
                 <td className="font-semibold">{u.name}</td>
                 <td className="font-mono text-[12px]">{u.email}</td>
-                <td>{ROLES_LABELS[u.role] || u.role}</td>
+                <td>{(roles.find((r) => r.code === u.role)?.name) || ROLES_LABELS[u.role] || u.role}</td>
                 <td>{u.active ? <Badge tone="success">activo</Badge> : <Badge tone="danger">inactivo</Badge>}</td>
                 <td className="text-right space-x-2">
                   <Button size="sm" variant="outline" className="rounded-lg" onClick={() => startEdit(u)}>Editar</Button>
@@ -196,52 +199,237 @@ function UsersPanel() {
   );
 }
 
-// ============== ROLES ==============
+// ============== ROLES & PERMISOS (editable v2) ==============
 function RolesPanel() {
   const [matrix, setMatrix] = useState(null);
-  useEffect(() => { api.get("/permissions/matrix").then((r) => setMatrix(r.data)); }, []);
+  const [selectedRole, setSelectedRole] = useState(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newRole, setNewRole] = useState({ code: "", name: "", description: "" });
+  const [editingRole, setEditingRole] = useState(null);
+
+  const load = async () => {
+    const { data } = await api.get("/permissions/matrix");
+    setMatrix(data);
+    setSelectedRole((prev) => prev || data.roles[0]?.code);
+  };
+  useEffect(() => { load(); }, []);
+
+  const togglePerm = async (roleCode, module, action, currentlyAllowed) => {
+    try {
+      await api.patch(`/permissions/roles/${roleCode}/permissions`, {
+        module, action, allowed: !currentlyAllowed,
+      });
+      // Optimista
+      setMatrix((m) => {
+        const roles = m.roles.map((r) => {
+          if (r.code !== roleCode) return r;
+          const perms = { ...(r.permissions || {}) };
+          const acts = new Set(perms[module] || []);
+          if (currentlyAllowed) acts.delete(action); else acts.add(action);
+          perms[module] = Array.from(acts).sort();
+          return { ...r, permissions: perms };
+        });
+        return { ...m, roles };
+      });
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const toggleAllModule = async (roleCode, moduleCode, moduleActions, mode) => {
+    // mode: "all" | "none"
+    const target = mode === "all" ? moduleActions : [];
+    try {
+      const role = matrix.roles.find((r) => r.code === roleCode);
+      const perms = { ...(role.permissions || {}) };
+      perms[moduleCode] = target;
+      await api.patch(`/permissions/roles/${roleCode}`, { permissions: perms });
+      load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const createRole = async () => {
+    if (!newRole.code || !newRole.name) { toast.error("Código y nombre requeridos"); return; }
+    try {
+      await api.post("/permissions/roles", { ...newRole, permissions: {} });
+      toast.success("Rol creado");
+      setCreateOpen(false);
+      setNewRole({ code: "", name: "", description: "" });
+      load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const saveRoleMeta = async () => {
+    if (!editingRole) return;
+    try {
+      await api.patch(`/permissions/roles/${editingRole.code}`, {
+        name: editingRole.name, description: editingRole.description,
+      });
+      toast.success("Rol actualizado");
+      setEditingRole(null);
+      load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const deleteRole = async (role) => {
+    if (role.is_system) { toast.error("No se puede eliminar un rol del sistema."); return; }
+    if (!confirm(`¿Eliminar el rol "${role.name}"?\n\nVerifica que no haya usuarios asignados.`)) return;
+    try {
+      await api.delete(`/permissions/roles/${role.code}`);
+      toast.success("Rol eliminado");
+      if (selectedRole === role.code) setSelectedRole(matrix.roles[0]?.code);
+      load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
   if (!matrix) return <div className="p-8 text-sm text-[#5E6878]">Cargando matriz de permisos…</div>;
+  const role = matrix.roles.find((r) => r.code === selectedRole);
 
   return (
-    <div>
-      <div className="border-l-4 border-[#14776A] bg-[#F0F7F5] rounded-r-lg p-4 mb-5 flex gap-3">
-        <Info className="w-5 h-5 text-[#14776A] mt-0.5 shrink-0" />
-        <div className="text-[13px] text-[#1A1F2C]">
-          <strong className="font-display">Matriz predefinida (versión {matrix.version})</strong>
-          <p className="text-[#5E6878] mt-1">{matrix.note}</p>
+    <div className="space-y-4">
+      <div className="border-l-4 border-[#14776A] bg-[#F0F7F5] rounded-r-lg p-4 flex items-start justify-between gap-3">
+        <div className="flex gap-3">
+          <Info className="w-5 h-5 text-[#14776A] mt-0.5 shrink-0" />
+          <div className="text-[13px] text-[#1A1F2C]">
+            <strong className="font-display">Roles y permisos (versión {matrix.version} — editable)</strong>
+            <p className="text-[#5E6878] mt-1">Selecciona un rol y activa o desactiva las acciones por módulo. Los roles del sistema no se pueden eliminar pero sí editar sus permisos. El rol Administrador General conserva siempre acceso completo a Administración/Roles/Usuarios/Sistema.</p>
+          </div>
         </div>
+        <Button onClick={() => setCreateOpen(true)} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg gap-2 shrink-0" data-testid="role-create-btn">
+          <Plus className="w-4 h-4" /> Crear rol
+        </Button>
       </div>
-      <div className="border border-[#E2E7EC] rounded-xl bg-white overflow-x-auto shadow-card">
-        <table className="w-full dense-table">
-          <thead>
-            <tr>
-              <th className="!text-left sticky left-0 bg-background z-10">Módulo</th>
-              {matrix.roles.map((r) => <th key={r} className="!text-center min-w-[110px]">{ROLES_LABELS[r] || r}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {matrix.modules.map((m) => (
-              <tr key={m}>
-                <td className="sticky left-0 bg-white font-semibold capitalize">{m}</td>
-                {matrix.roles.map((r) => {
-                  const acts = matrix.permissions[r][m] || [];
-                  return (
-                    <td key={r} className="!text-center">
-                      {acts.length === 0
-                        ? <span className="text-[#CBD2DA]">—</span>
-                        : (
-                          <div className="flex flex-wrap gap-1 justify-center">
-                            {acts.map((a) => <Badge key={a} tone="success">{a}</Badge>)}
+
+      {createOpen && (
+        <div className="border border-[#E2E7EC] rounded-xl bg-[#FAFBFC] p-4">
+          <h4 className="font-display font-bold text-[14px] mb-2">Nuevo rol</h4>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <div><Label className="text-xs font-semibold">Código (interno)</Label>
+              <Input value={newRole.code} onChange={(e) => setNewRole({ ...newRole, code: e.target.value })} placeholder="ej. coordinador" className="rounded-lg font-mono" data-testid="role-new-code" /></div>
+            <div><Label className="text-xs font-semibold">Nombre visible</Label>
+              <Input value={newRole.name} onChange={(e) => setNewRole({ ...newRole, name: e.target.value })} placeholder="Coordinador Regional" className="rounded-lg" data-testid="role-new-name" /></div>
+            <div><Label className="text-xs font-semibold">Descripción</Label>
+              <Input value={newRole.description} onChange={(e) => setNewRole({ ...newRole, description: e.target.value })} placeholder="Breve descripción" className="rounded-lg" /></div>
+          </div>
+          <div className="flex justify-end gap-2 mt-3">
+            <Button variant="outline" onClick={() => setCreateOpen(false)} className="rounded-lg">Cancelar</Button>
+            <Button onClick={createRole} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg gap-2" data-testid="role-create-save"><Save className="w-4 h-4" />Crear</Button>
+          </div>
+        </div>
+      )}
+
+      <div className="grid lg:grid-cols-[260px_1fr] gap-4">
+        {/* Lista de roles */}
+        <div className="border border-[#E2E7EC] rounded-xl bg-white p-2">
+          <div className="text-[10.5px] uppercase tracking-wider font-display font-bold text-[#5E6878] px-2 py-2">
+            Roles del sistema
+          </div>
+          {matrix.roles.map((r) => (
+            <button
+              key={r.code}
+              onClick={() => setSelectedRole(r.code)}
+              data-testid={`role-select-${r.code}`}
+              className={`w-full text-left px-3 py-2 rounded-lg transition-colors mb-0.5 flex items-center justify-between gap-2 ${
+                selectedRole === r.code ? "bg-[#E8F3F0]" : "hover:bg-[#F1F4F7]"
+              }`}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-[13px] text-[#1A1F2C] truncate">{r.name}</div>
+                <div className="text-[10.5px] text-[#5E6878] font-mono truncate">{r.code}</div>
+              </div>
+              {r.is_system && <Shield className="w-3.5 h-3.5 text-[#14776A] shrink-0" title="Rol del sistema" />}
+            </button>
+          ))}
+        </div>
+
+        {/* Matriz del rol seleccionado */}
+        {role && (
+          <div className="border border-[#E2E7EC] rounded-xl bg-white p-5 shadow-card min-w-0">
+            <div className="flex items-start justify-between mb-4 gap-3">
+              <div className="flex-1 min-w-0">
+                {editingRole?.code === role.code ? (
+                  <div className="space-y-2">
+                    <Input value={editingRole.name} onChange={(e) => setEditingRole({ ...editingRole, name: e.target.value })} className="rounded-lg font-display font-bold text-[18px]" />
+                    <Input value={editingRole.description || ""} onChange={(e) => setEditingRole({ ...editingRole, description: e.target.value })} className="rounded-lg text-[13px]" placeholder="Descripción" />
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={saveRoleMeta} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg gap-1.5"><Save className="w-3.5 h-3.5" />Guardar</Button>
+                      <Button size="sm" variant="outline" onClick={() => setEditingRole(null)} className="rounded-lg">Cancelar</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <h3 className="font-display font-extrabold text-[20px] tracking-tight">{role.name}</h3>
+                    <code className="text-[11px] text-[#5E6878] font-mono">{role.code}</code>
+                    <p className="text-[12.5px] text-[#5E6878] mt-1">{role.description || "Sin descripción."}</p>
+                  </>
+                )}
+              </div>
+              <div className="flex gap-2 shrink-0">
+                {!editingRole && (
+                  <Button size="sm" variant="outline" className="rounded-lg gap-1.5" onClick={() => setEditingRole({ code: role.code, name: role.name, description: role.description || "" })} data-testid={`role-edit-${role.code}`}>
+                    <Pencil className="w-3.5 h-3.5" /> Editar
+                  </Button>
+                )}
+                {!role.is_system && (
+                  <Button size="sm" variant="outline" className="rounded-lg text-red-600 border-red-200 hover:bg-red-50" onClick={() => deleteRole(role)} data-testid={`role-delete-${role.code}`}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            <div className="text-[10.5px] uppercase tracking-wider font-display font-bold text-[#14776A] mb-2">
+              Permisos por módulo · {Object.values(role.permissions || {}).reduce((acc, v) => acc + v.length, 0)} acciones activas
+            </div>
+            <div className="overflow-x-auto max-h-[70vh]">
+              <table className="w-full text-[12.5px]">
+                <thead className="sticky top-0 bg-white z-10">
+                  <tr className="border-b-2 border-[#E2E7EC]">
+                    <th className="text-left py-2 px-2 font-display font-bold text-[#1A1F2C] sticky left-0 bg-white z-10 min-w-[180px]">Módulo</th>
+                    <th className="text-center px-2 font-display font-bold text-[#5E6878] min-w-[110px]">Acciones</th>
+                    <th className="text-right px-2 font-display font-bold text-[#5E6878] min-w-[90px]">Atajos</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {matrix.modules.map((mod) => {
+                    const granted = new Set(role.permissions?.[mod.code] || []);
+                    return (
+                      <tr key={mod.code} className="border-b border-[#F1F4F7] hover:bg-[#FAFBFC]">
+                        <td className="py-2.5 px-2 sticky left-0 bg-inherit min-w-[180px]">
+                          <div className="font-semibold text-[13px]">{mod.label}</div>
+                          <code className="text-[10.5px] text-[#5E6878] font-mono">{mod.code}</code>
+                        </td>
+                        <td className="px-2">
+                          <div className="flex flex-wrap gap-1.5">
+                            {mod.actions.map((act) => {
+                              const on = granted.has(act);
+                              return (
+                                <button
+                                  key={act}
+                                  onClick={() => togglePerm(role.code, mod.code, act, on)}
+                                  data-testid={`perm-${role.code}-${mod.code}-${act}`}
+                                  className={`px-2 py-1 rounded-md text-[11px] font-semibold border transition-all ${
+                                    on
+                                      ? "bg-[#14776A] text-white border-[#14776A] hover:bg-[#0F5E54]"
+                                      : "bg-white text-[#5E6878] border-[#E2E7EC] hover:border-[#14776A] hover:text-[#14776A]"
+                                  }`}
+                                >
+                                  {on ? "✓ " : ""}{act}
+                                </button>
+                              );
+                            })}
                           </div>
-                        )
-                      }
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                        </td>
+                        <td className="text-right px-2 whitespace-nowrap">
+                          <button onClick={() => toggleAllModule(role.code, mod.code, mod.actions, "all")} className="text-[11px] text-[#14776A] hover:underline mr-2">Todos</button>
+                          <button onClick={() => toggleAllModule(role.code, mod.code, mod.actions, "none")} className="text-[11px] text-[#5E6878] hover:underline">Ninguno</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

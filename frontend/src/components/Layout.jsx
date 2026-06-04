@@ -11,22 +11,22 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const NAV = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, tid: TID.navDashboard, end: true },
-  { to: "/convocatorias", label: "Convocatorias", icon: FolderOpen, tid: TID.navConvocatorias },
-  { to: "/configuracion", label: "Configuración", icon: Settings2, tid: TID.navConfig },
-  { to: "/propuestas", label: "Propuestas", icon: FileStack, tid: TID.navPropuestas },
-  { to: "/jurados", label: "Jurados", icon: Users, tid: TID.navJurados },
-  { to: "/ternas", label: "Ternas / Grupos", icon: UsersRound, tid: TID.navTernas },
-  { to: "/asignaciones", label: "Asignaciones", icon: Workflow, tid: TID.navAsignaciones },
-  { to: "/evaluaciones", label: "Evaluaciones", icon: ClipboardCheck, tid: TID.navEvaluaciones },
-  { to: "/ranking", label: "Ranking & Resultados", icon: Trophy, tid: TID.navRanking },
-  { to: "/actas", label: "Actas", icon: FileText, tid: TID.navActas },
-  { to: "/reportes", label: "Reportes", icon: BarChart3, tid: TID.navReportes },
-  { to: "/auditoria", label: "Auditoría", icon: Shield, tid: TID.navAuditoria },
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, tid: TID.navDashboard, end: true, module: "dashboard" },
+  { to: "/convocatorias", label: "Convocatorias", icon: FolderOpen, tid: TID.navConvocatorias, module: "convocatorias" },
+  { to: "/configuracion", label: "Configuración", icon: Settings2, tid: TID.navConfig, module: "configuracion" },
+  { to: "/propuestas", label: "Propuestas", icon: FileStack, tid: TID.navPropuestas, module: "propuestas" },
+  { to: "/jurados", label: "Jurados", icon: Users, tid: TID.navJurados, module: "jurados" },
+  { to: "/ternas", label: "Ternas / Grupos", icon: UsersRound, tid: TID.navTernas, module: "ternas" },
+  { to: "/asignaciones", label: "Asignaciones", icon: Workflow, tid: TID.navAsignaciones, module: "asignaciones" },
+  { to: "/evaluaciones", label: "Evaluaciones", icon: ClipboardCheck, tid: TID.navEvaluaciones, module: "evaluaciones" },
+  { to: "/ranking", label: "Ranking & Resultados", icon: Trophy, tid: TID.navRanking, module: "ranking" },
+  { to: "/actas", label: "Actas", icon: FileText, tid: TID.navActas, module: "actas" },
+  { to: "/reportes", label: "Reportes", icon: BarChart3, tid: TID.navReportes, module: "reportes" },
+  { to: "/auditoria", label: "Auditoría", icon: Shield, tid: TID.navAuditoria, module: "auditoria" },
 ];
 
 export default function Layout() {
-  const { user, logout, activeConvocatoriaId, setConv } = useAuth();
+  const { user, logout, activeConvocatoriaId, setConv, can } = useAuth();
   const navigate = useNavigate();
   const [convs, setConvs] = React.useState([]);
 
@@ -101,7 +101,7 @@ export default function Layout() {
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto py-3 px-3">
-          {NAV.map((n) => (
+          {NAV.filter((n) => can(n.module, "view")).map((n) => (
             <NavLink
               key={n.to}
               to={n.to}
@@ -119,7 +119,7 @@ export default function Layout() {
               <span>{n.label}</span>
             </NavLink>
           ))}
-          {user?.role === "admin_general" && (
+          {can("administracion", "view") && (
             <NavLink
               to="/administracion"
               data-testid="nav-administracion"

@@ -1,0 +1,33 @@
+{
+  "summary": "Backend testing del módulo Roles y Permisos editable. 22/22 pytest pasan. Cubre catálogo, matrix v2.0, CRUD de roles, toggle granular de permisos, defensa anti-bloqueo de admin_general, RBAC (jurado no puede mutar), idempotencia del seed y propagación del cambio de rol al endpoint /me.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/users", "issue": "EmailStr rechaza dominios .test (RFC 6761 reserved). Algunos test_credentials.md usan @krinos.test que no validarían si se usara directamente con EmailStr. Funciona con dominios reales como @example.com o @krinos.test cuando el endpoint de seed lo crea por otro camino. Considerar ajustar la doc o la validación si se quiere consistencia."},
+      {"endpoint": "DELETE /api/permissions/roles/{code}", "issue": "El bloqueo por usuarios asignados sólo aplica defensivamente a roles del sistema (ya bloqueados antes por is_system). Para roles custom no se puede testear vía API porque /api/users.create valida role contra ALLOWED_ROLES (lista hard-coded de roles del sistema). Es decir, en la práctica un rol custom NUNCA podrá tener usuarios asignados a menos que se modifique el endpoint de usuarios para aceptar roles custom desde MongoDB."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_permissions_module.py",
+    "/app/test_reports/pytest/iter15_permissions.xml"
+  ],
+  "action_items": [
+    "Considerar permitir que /api/users acepte roles custom (no sólo ALLOWED_ROLES) para que el flujo 'crear rol custom → asignar a usuarios → bloquear delete' sea funcional end-to-end. Hoy el bloqueo por usuarios-asignados sólo aplica a roles del sistema, los cuales ya están protegidos por is_system primero (código muerto de defensa, aunque correcto).",
+    "Opcional: documentar en routes_permissions.py que el seed corre en startup (server.py lifespan) — ya está pero conviene reiterarlo en el README del módulo."
+  ],
+  "critical_code_review_comments": [
+    "ALLOWED_ROLES en /app/backend/routes_users.py:12 está hard-coded a los 7 roles del sistema. Esto contradice el espíritu del módulo (roles totalmente administrables): si el admin crea un rol custom, NO podrá asignarlo a un usuario vía API. Debería validar contra db.roles.find({}) en lugar de la lista estática.",
+    "En routes_permissions.py update_role (línea ~286-289) la defensa anti-bloqueo de admin_general restaura las acciones completas, lo cual sobrescribe silenciosamente lo que envíe el cliente sin avisar. Considerar devolver una advertencia en el response o usar 400 cuando el cliente intente reducir explícitamente esos módulos, para coherencia con el endpoint toggle_permission (que sí devuelve 400).",
+    "MODULES_CATALOG y SYSTEM_ROLES son listas en memoria; cada cambio de catálogo requiere redeploy. Está bien para MVP pero el módulo 'totalmente administrable' podría querer ampliar catálogo desde la UI en el futuro.",
+    "audit() en update_role envía 'valor_nuevo=list(updates.keys())' (sólo las keys); para auditoría completa debería incluir los valores aplicados (con tamaño limitado)."
+  ],
+  "updated_files": ["/app/backend/tests/test_permissions_module.py"],
+  "success_rate": {"backend": "100% (22/22)", "frontend": "n/a (sólo backend solicitado)"},
+  "test_credentials": "admin: lcorreaq / Chocolate2026! (verificado vigente al final del test)",
+  "seed_data_creation": "Se crearon 2 usuarios temporales (test_perm_*, jur_rbac_*) y 1 rol custom (mi_rol_custom) durante los tests. Todos limpiados en teardown (usuarios desactivados via DELETE soft, rol borrado). Sin contaminación residual.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Suite pytest reutilizable en /app/backend/tests/test_permissions_module.py. Cubre todos los endpoints /api/permissions/* y la interacción /api/users/{id} (cambio de rol). Si se modifica ALLOWED_ROLES en routes_users.py para soportar roles custom, agregar test que cree user con rol custom y verifique bloqueo de DELETE del rol con usuarios asignados.",
+  "rca of the issue": "N/A - sin fallas. Los 2 únicos hallazgos durante desarrollo del test fueron: (1) pydantic EmailStr rechaza dominios .test (RFC 6761) — resuelto usando @example.com; (2) inicialmente os.environ.get('REACT_APP_BACKEND_URL') retornaba None bajo pytest porque la var sólo está en frontend/.env, no exportada al shell — resuelto con fallback de lectura del .env."
+}

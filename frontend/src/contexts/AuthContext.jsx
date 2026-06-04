@@ -5,21 +5,33 @@ const AuthCtx = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null); // null=checking, false=anon, obj=logged
+  const [permissions, setPermissions] = useState({}); // { module: [actions] }
   const [activeConvocatoriaId, setActiveConvocatoriaId] = useState(
     localStorage.getItem("krinos_conv_id") || null
   );
 
+  const loadPermissions = useCallback(async () => {
+    try {
+      const { data } = await api.get("/permissions/me");
+      setPermissions(data.permissions || {});
+    } catch {
+      setPermissions({});
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     const token = localStorage.getItem("krinos_token");
-    if (!token) { setUser(false); return; }
+    if (!token) { setUser(false); setPermissions({}); return; }
     try {
       const { data } = await api.get("/auth/me");
       setUser(data);
+      await loadPermissions();
     } catch {
       setToken(null);
       setUser(false);
+      setPermissions({});
     }
-  }, []);
+  }, [loadPermissions]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -28,6 +40,7 @@ export function AuthProvider({ children }) {
       const { data } = await api.post("/auth/login", { username, password });
       if (data?.access_token) setToken(data.access_token);
       setUser(data);
+      await loadPermissions();
       return { ok: true };
     } catch (e) {
       return { ok: false, error: formatApiError(e.response?.data?.detail) || e.message };
@@ -36,11 +49,11 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     try { await api.post("/auth/logout"); } catch (e) {
-      // Logout server-side falla silencioso (sesión expirada, red, etc.) — limpiamos cliente igual
       console.warn("Logout server-side failed:", e?.message);
     }
     setToken(null);
     setUser(false);
+    setPermissions({});
   };
 
   const setConv = (id) => {
@@ -49,8 +62,25 @@ export function AuthProvider({ children }) {
     setActiveConvocatoriaId(id);
   };
 
+  /**
+   * Verifica si el usuario tiene permiso para una acción específica en un módulo.
+   * Por defecto chequea "view".
+   * @param {string} module — código del módulo (ej. "propuestas")
+   * @param {string} action — acción (default: "view")
+   */
+  const can = useCallback((module, action = "view") => {
+    if (!user) return false;
+    // Atajos: admin_general siempre puede TODO (defensivo)
+    if (user.role === "admin_general") return true;
+    const acts = permissions[module] || [];
+    return acts.includes(action);
+  }, [user, permissions]);
+
   return (
-    <AuthCtx.Provider value={{ user, login, logout, refresh, activeConvocatoriaId, setConv }}>
+    <AuthCtx.Provider value={{
+      user, permissions, login, logout, refresh, can,
+      activeConvocatoriaId, setConv, reloadPermissions: loadPermissions,
+    }}>
       {children}
     </AuthCtx.Provider>
   );
