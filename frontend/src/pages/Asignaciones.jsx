@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Workflow, Trash2, Download, Upload, Sparkles, Loader2, Search, CheckSquare, ShieldAlert } from "lucide-react";
+import { Plus, Workflow, Trash2, Download, Upload, Sparkles, Loader2, Search, CheckSquare, ShieldAlert, ArrowRightLeft, AlertTriangle, CheckCircle2 } from "lucide-react";
 import ConvocatoriaContextBanner from "@/components/ConvocatoriaContextBanner";
 
 export default function Asignaciones() {
@@ -35,6 +35,11 @@ export default function Asignaciones() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showCanceladas, setShowCanceladas] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Modal de resultado masivo (errores + duplicados)
+  const [bulkResult, setBulkResult] = useState(null);
+  // Modal Reasignar
+  const [reassignTarget, setReassignTarget] = useState(null); // asignación a reasignar
+  const [reassignChoice, setReassignChoice] = useState(""); // nuevo jurado_id o terna_id
 
   const canEdit = user?.role === "admin_general" || user?.role === "admin_convocatoria";
 
@@ -64,13 +69,22 @@ export default function Asignaciones() {
         ...(f.tipo_evaluacion === "individual" ? { jurado_ids: f.jurado_ids } : { terna_id: f.terna_id }),
       };
       const r = await api.post("/asignaciones/bulk-create", payload);
-      const { creadas, duplicadas } = r.data;
-      if (creadas && duplicadas) toast.success(`${creadas} creadas · ${duplicadas} ya existían (omitidas)`);
-      else if (creadas) toast.success(`${creadas} asignaciones creadas`);
-      else if (duplicadas) toast.message(`Todas (${duplicadas}) ya estaban asignadas. No se creó nada.`);
-      setOpen(false);
-      setF({ propuesta_ids: [], jurado_ids: [], terna_id: "", tipo_evaluacion: "individual" });
-      load();
+      const { creadas, duplicadas, erroneas } = r.data;
+      // Si todo OK sin reglas violadas: cerrar y notificar
+      if (creadas && !duplicadas && !(erroneas?.length)) {
+        toast.success(`${creadas} asignaciones creadas`);
+        setOpen(false);
+        setF({ propuesta_ids: [], jurado_ids: [], terna_id: "", tipo_evaluacion: "individual" });
+        load();
+        return;
+      }
+      // Hay duplicadas o errores: mostrar modal con detalle
+      if (creadas || duplicadas || erroneas?.length) {
+        setBulkResult({ creadas, duplicadas, erroneas: erroneas || [] });
+        load();
+      } else {
+        toast.message("No se creó ninguna asignación.");
+      }
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail));
     } finally { setSubmitting(false); }
@@ -104,6 +118,28 @@ export default function Asignaciones() {
       load();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     finally { setBusy(false); }
+  };
+
+  // Reasignar una asignación: cambiar jurado/terna si NO fue evaluada todavía
+  const openReassign = (asig) => {
+    setReassignTarget(asig);
+    setReassignChoice("");
+  };
+  const doReassign = async () => {
+    if (!reassignTarget || !reassignChoice) return;
+    setBusy(true);
+    try {
+      const body = reassignTarget.tipo_evaluacion === "individual"
+        ? { jurado_id: reassignChoice }
+        : { terna_id: reassignChoice };
+      await api.patch(`/asignaciones/${reassignTarget.id}`, body);
+      toast.success("Asignación reasignada");
+      setReassignTarget(null);
+      setReassignChoice("");
+      load();
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail));
+    } finally { setBusy(false); }
   };
 
   const propMap = useMemo(() => Object.fromEntries(propuestas.map((p) => [p.id, p])), [propuestas]);
@@ -358,9 +394,14 @@ export default function Asignaciones() {
                   <td><Badge tone={cancelada ? "muted" : "default"}>{a.estado}</Badge></td>
                   <td className="text-right">
                     {!cancelada && canEdit && (
-                      <button onClick={() => cancelar(a.id)} className="text-muted-foreground hover:text-red-600" data-testid={`asig-delete-${a.id}`}>
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="inline-flex items-center gap-1">
+                        <button onClick={() => openReassign(a)} className="text-muted-foreground hover:text-[#14776A] p-1" title="Reasignar (solo si no fue evaluada)" data-testid={`asig-reassign-${a.id}`}>
+                          <ArrowRightLeft className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => cancelar(a.id)} className="text-muted-foreground hover:text-red-600 p-1" data-testid={`asig-delete-${a.id}`}>
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -474,6 +515,123 @@ export default function Asignaciones() {
                 {autoBusy ? "Asignando…" : "Ejecutar"}
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL: Resultado de creación masiva (con duplicadas y errores detallados) */}
+      <Dialog open={!!bulkResult} onOpenChange={(v) => { if (!v) setBulkResult(null); }}>
+        <DialogContent className="rounded-lg max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              {bulkResult?.creadas > 0 ? <CheckCircle2 className="w-5 h-5 text-emerald-600" /> : <AlertTriangle className="w-5 h-5 text-amber-600" />}
+              Resultado de la asignación masiva
+            </DialogTitle>
+          </DialogHeader>
+          {bulkResult && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="border border-emerald-200 bg-emerald-50 rounded-lg p-3 text-center">
+                  <div className="text-[10px] uppercase tracking-wide text-emerald-700 font-bold">Creadas</div>
+                  <div className="text-3xl font-display font-bold text-emerald-700">{bulkResult.creadas || 0}</div>
+                </div>
+                <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 text-center">
+                  <div className="text-[10px] uppercase tracking-wide text-amber-700 font-bold">Duplicadas (omitidas)</div>
+                  <div className="text-3xl font-display font-bold text-amber-700">{bulkResult.duplicadas || 0}</div>
+                </div>
+                <div className="border border-red-200 bg-red-50 rounded-lg p-3 text-center">
+                  <div className="text-[10px] uppercase tracking-wide text-red-700 font-bold">Bloqueadas por regla</div>
+                  <div className="text-3xl font-display font-bold text-red-700">{bulkResult.erroneas?.length || 0}</div>
+                </div>
+              </div>
+              {(bulkResult.erroneas?.length || 0) > 0 && (
+                <div className="border border-red-200 rounded-lg p-3 max-h-72 overflow-y-auto bg-white">
+                  <div className="text-[12px] font-bold text-red-800 mb-2 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4" /> Asignaciones que no se pudieron crear:
+                  </div>
+                  <ul className="space-y-1.5 text-[12px]">
+                    {bulkResult.erroneas.map((er, i) => {
+                      const prop = propMap[er.propuesta_id];
+                      const tgtName = jurMap[er.target]?.nombre || ternaMap[er.target]?.nombre || er.target;
+                      return (
+                        <li key={i} className="border-l-2 border-red-300 pl-2">
+                          <span className="font-mono text-[11px] text-muted-foreground">{prop?.codigo || "—"}</span>{" "}
+                          <span className="font-semibold capitalize">{(prop?.nombre || "").toLowerCase()}</span>{" "}
+                          → <span className="text-foreground">{tgtName}</span>
+                          <div className="text-red-700 text-[11.5px] mt-0.5">{er.error}</div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+              {bulkResult.duplicadas > 0 && (
+                <p className="text-[12px] text-amber-700 italic">
+                  Las duplicadas se omitieron silenciosamente porque ya existían como asignaciones activas.
+                </p>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => { setBulkResult(null); setOpen(false); setF({ propuesta_ids: [], jurado_ids: [], terna_id: "", tipo_evaluacion: "individual" }); }} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-md">
+              Entendido
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL: Reasignar (cambiar jurado/terna) */}
+      <Dialog open={!!reassignTarget} onOpenChange={(v) => { if (!v) { setReassignTarget(null); setReassignChoice(""); } }}>
+        <DialogContent className="rounded-lg max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <ArrowRightLeft className="w-5 h-5 text-[#14776A]" /> Reasignar
+            </DialogTitle>
+            <p className="text-[12px] text-muted-foreground mt-1">
+              Solo se puede reasignar si la asignación <strong>NO ha sido evaluada</strong>. Si el jurado o la terna ya finalizó la evaluación, debes cancelarla y crear una nueva.
+            </p>
+          </DialogHeader>
+          {reassignTarget && (
+            <div className="space-y-3">
+              <div className="bg-[#F0F7F5] border border-[#CDE7E1] rounded-lg p-3 text-[12px]">
+                <div className="text-muted-foreground">Propuesta</div>
+                <div className="font-semibold capitalize">
+                  <span className="font-mono text-[11px] text-muted-foreground">{propMap[reassignTarget.propuesta_id]?.codigo}</span>{" "}
+                  {(propMap[reassignTarget.propuesta_id]?.nombre || "").toLowerCase()}
+                </div>
+                <div className="text-muted-foreground mt-2">
+                  {reassignTarget.tipo_evaluacion === "individual" ? "Jurado actual" : "Terna actual"}
+                </div>
+                <div className="font-medium">
+                  {reassignTarget.jurado_id ? jurMap[reassignTarget.jurado_id]?.nombre : ternaMap[reassignTarget.terna_id]?.nombre}
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs font-bold">Nuevo {reassignTarget.tipo_evaluacion === "individual" ? "jurado" : "terna"}</Label>
+                <Select value={reassignChoice} onValueChange={setReassignChoice}>
+                  <SelectTrigger className="rounded-md" data-testid="asig-reassign-select">
+                    <SelectValue placeholder={`Selecciona ${reassignTarget.tipo_evaluacion === "individual" ? "jurado" : "terna"}…`} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {reassignTarget.tipo_evaluacion === "individual"
+                      ? jurados.filter((j) => j.id !== reassignTarget.jurado_id).map((j) => (
+                          <SelectItem key={j.id} value={j.id}>{j.nombre} — {j.email}</SelectItem>
+                        ))
+                      : ternas.filter((t) => t.id !== reassignTarget.terna_id && t.estado !== "Inactivo").map((t) => (
+                          <SelectItem key={t.id} value={t.id}>{t.codigo} · {t.nombre}</SelectItem>
+                        ))
+                    }
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReassignTarget(null)} className="rounded-md">Cancelar</Button>
+            <Button onClick={doReassign} disabled={!reassignChoice || busy} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-md gap-2" data-testid="asig-reassign-submit">
+              {busy && <Loader2 className="w-4 h-4 animate-spin" />}
+              <ArrowRightLeft className="w-4 h-4" /> Reasignar
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

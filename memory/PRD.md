@@ -433,6 +433,30 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 ### v22.1 — Fix UX: input REINICIAR uppercase (Feb 2026)
 - ✅ El input de confirmación "REINICIAR" en Administración → Sistema usaba `className="uppercase"` (solo visual) pero comparaba con `=== "REINICIAR"` exacto. Si el usuario escribía minúsculas, veía mayúsculas pero el valor real no coincidía y el botón nunca se habilitaba. Corregido normalizando con `.toUpperCase()` en el `onChange`.
 
+### v22.6 — Reasignar (sin re-evaluar) + modal con errores detallados (Feb 2026)
+
+**Backend `routes_data.py`**:
+- ✅ **NUEVO** `PATCH /api/asignaciones/{aid}` — Reasigna cambiando `jurado_id` o `terna_id`.
+  - Bloquea **409** si ya hay evaluación finalizada (no Borrador/Iniciada/Anulada): "Cancela y crea una nueva".
+  - Bloquea **400** si el tipo del nuevo target no coincide (jurado vs terna).
+  - Valida existencia (**404**) del nuevo target en la convocatoria.
+  - Verifica que el nuevo target no genere duplicado activo (**409**).
+  - Respeta regla "1 propuesta = 1 terna" y `jurados_por_propuesta` en colectiva/individual.
+  - **Cascade**: si es individual, actualiza el `jurado_id` de la evaluación en Borrador asociada.
+  - Auditoría con `valor_anterior` y `valor_nuevo`.
+
+**Frontend `Asignaciones.jsx`**:
+- ✅ **Modal de resultado masivo**: al usar bulk-create, si hay duplicadas o errores, se abre un modal de 3 columnas (Creadas · Duplicadas · Bloqueadas por regla) + lista detallada de errores con propuesta, target y motivo. Reemplaza al toast silencioso.
+- ✅ **Botón "Reasignar"** (icono ArrowRightLeft) en cada fila activa de la tabla. Abre modal con:
+  - Card del estado actual (propuesta + jurado/terna actual).
+  - Select del nuevo jurado/terna (filtra el actual y las ternas inactivas).
+  - Mensajes 409 del backend se muestran como toast claro.
+
+**Validación e2e (curl)**:
+- PATCH reasignar jurado A→B → 200, evaluación borrador también actualizada (cascada).
+- Reasignar a jurado inexistente → **404** "El nuevo jurado no existe en esta convocatoria".
+- Reasignar a jurado ya asignado a misma propuesta → **409** "Ya existe otra asignación activa".
+
 ### v22.5 — Ternas: editar, eliminar con validación, carga masiva + validación de existencia (Feb 2026)
 
 **Backend `routes_data.py`**:

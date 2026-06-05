@@ -1173,6 +1173,125 @@ async def create_asignacion(payload: AsignacionIn, user: dict = Depends(require_
     return doc
 
 
+@router.patch("/asignaciones/{aid}")
+async def reasignar_asignacion(aid: str, payload: dict, user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    """Reasigna una asignación (cambia jurado_id o terna_id) — solo si NO ha sido evaluada.
+    Body: {"jurado_id": "..."} o {"terna_id": "..."}
+    """
+    db = get_db()
+    asig = await db.asignaciones.find_one({"id": aid}, {"_id": 0})
+    if not asig:
+        raise HTTPException(404, "Asignación no encontrada")
+    if asig.get("estado") == "Cancelada":
+        raise HTTPException(409, "La asignación está cancelada. Crea una nueva en lugar de reasignar.")
+
+    # Verificar que NO haya evaluación finalizada
+    if asig["tipo_evaluacion"] == "individual":
+        ev = await db.evaluaciones_individuales.find_one({
+            "asignacion_id": aid,
+            "estado": {"$nin": ["Borrador", "Iniciada", "Anulada"]},
+        })
+        if ev:
+            raise HTTPException(
+                409,
+                f"No se puede reasignar: el jurado ya finalizó la evaluación de esta propuesta (estado: {ev.get('estado')}). "
+                f"Si necesitas cambiar, cancela la asignación y crea una nueva con otro jurado.",
+            )
+    else:
+        # Colectiva: verifica evaluaciones_colectivas finalizadas
+        ev_col = await db.evaluaciones_colectivas.find_one({
+            "asignacion_id": aid,
+            "estado": {"$nin": ["Borrador", "Iniciada", "Anulada"]},
+        })
+        if ev_col:
+            raise HTTPException(
+                409,
+                f"No se puede reasignar: la terna ya finalizó la evaluación colectiva (estado: {ev_col.get('estado')}). "
+                f"Si necesitas cambiar, cancela esta y crea una nueva.",
+            )
+
+    nuevo_jurado = payload.get("jurado_id")
+    nueva_terna = payload.get("terna_id")
+    if not nuevo_jurado and not nueva_terna:
+        raise HTTPException(400, "Debe enviar 'jurado_id' o 'terna_id' para reasignar")
+
+    # Tipo debe coincidir
+    if nuevo_jurado and asig["tipo_evaluacion"] != "individual":
+        raise HTTPException(400, "Esta asignación es colectiva — usa terna_id")
+    if nueva_terna and asig["tipo_evaluacion"] != "colectiva":
+        raise HTTPException(400, "Esta asignación es individual — usa jurado_id")
+
+    # Validar existencia del nuevo target
+    if nuevo_jurado:
+        j = await db.jurados.find_one({"id": nuevo_jurado, "convocatoria_id": asig["convocatoria_id"]}, {"_id": 0})
+        if not j:
+            raise HTTPException(404, "El nuevo jurado no existe en esta convocatoria")
+    if nueva_terna:
+        t = await db.ternas.find_one({"id": nueva_terna, "convocatoria_id": asig["convocatoria_id"]}, {"_id": 0, "estado": 1, "codigo": 1, "nombre": 1})
+        if not t:
+            raise HTTPException(404, "La nueva terna no existe en esta convocatoria")
+        if t.get("estado") == "Inactivo":
+            raise HTTPException(409, f"La terna {t.get('codigo')} · {t.get('nombre')} está inactiva")
+
+    # Validar que el nuevo target no genere duplicado activo
+    new_target_key = "jurado_id" if nuevo_jurado else "terna_id"
+    new_target_val = nuevo_jurado or nueva_terna
+    if new_target_val == asig.get(new_target_key):
+        return {"ok": True, "noop": True, "mensaje": "Es el mismo target — no se hizo nada"}
+    dup_q = {
+        "convocatoria_id": asig["convocatoria_id"],
+        "propuesta_id": asig["propuesta_id"],
+        "tipo_evaluacion": asig["tipo_evaluacion"],
+        "etapa": asig.get("etapa"),
+        new_target_key: new_target_val,
+        "estado": {"$ne": "Cancelada"},
+        "id": {"$ne": aid},
+    }
+    if await db.asignaciones.find_one(dup_q):
+        raise HTTPException(409, f"Ya existe otra asignación activa con ese {'jurado' if nuevo_jurado else 'terna'} para la misma propuesta + etapa")
+
+    # Si individual: respetar límite jurados (no es duplicado, pero podría exceder)
+    if asig["tipo_evaluacion"] == "individual":
+        conv = await db.convocatorias.find_one({"id": asig["convocatoria_id"]}, {"_id": 0, "jurados_por_propuesta": 1})
+        limite = int((conv or {}).get("jurados_por_propuesta") or 3)
+        # Como estamos reemplazando el jurado de ESTA asignación, el count no cambia. OK.
+        # Sólo verificar si la cuenta actual ya excede (caso edge).
+        actuales = await db.asignaciones.count_documents({
+            "convocatoria_id": asig["convocatoria_id"],
+            "propuesta_id": asig["propuesta_id"],
+            "tipo_evaluacion": "individual",
+            "estado": {"$ne": "Cancelada"},
+        })
+        if actuales > limite:
+            raise HTTPException(409, f"La propuesta tiene {actuales} jurados (más del límite {limite}). Cancela alguna antes de reasignar.")
+
+    # Si colectiva: regla 1 propuesta = 1 terna
+    if asig["tipo_evaluacion"] == "colectiva":
+        otra = await db.asignaciones.find_one({
+            "convocatoria_id": asig["convocatoria_id"],
+            "propuesta_id": asig["propuesta_id"],
+            "tipo_evaluacion": "colectiva",
+            "terna_id": {"$nin": [nueva_terna, asig.get("terna_id")]},
+            "estado": {"$ne": "Cancelada"},
+        })
+        if otra:
+            t = await db.ternas.find_one({"id": otra["terna_id"]}, {"_id": 0, "codigo": 1, "nombre": 1})
+            raise HTTPException(409, f"La propuesta ya está en otra terna activa ({t.get('codigo')} · {t.get('nombre')})")
+
+    # Hacer la reasignación: actualizar la asignación y, si individual, el jurado_id de la evaluación borrador
+    update = {new_target_key: new_target_val, "reasignada_at": now_iso()}
+    await db.asignaciones.update_one({"id": aid}, {"$set": update})
+    if asig["tipo_evaluacion"] == "individual":
+        await db.evaluaciones_individuales.update_many(
+            {"asignacion_id": aid, "estado": {"$in": ["Borrador", "Iniciada"]}},
+            {"$set": {"jurado_id": new_target_val}},
+        )
+    await audit(user, "reassign", "asignaciones", aid,
+                valor_anterior={new_target_key: asig.get(new_target_key)},
+                valor_nuevo={new_target_key: new_target_val})
+    return {"ok": True, "asignacion_id": aid, "nuevo": {new_target_key: new_target_val}}
+
+
 @router.delete("/asignaciones/{aid}")
 async def delete_asignacion(aid: str, user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
     db = get_db()
