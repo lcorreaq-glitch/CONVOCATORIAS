@@ -433,6 +433,28 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 ### v22.1 — Fix UX: input REINICIAR uppercase (Feb 2026)
 - ✅ El input de confirmación "REINICIAR" en Administración → Sistema usaba `className="uppercase"` (solo visual) pero comparaba con `=== "REINICIAR"` exacto. Si el usuario escribía minúsculas, veía mayúsculas pero el valor real no coincidía y el botón nunca se habilitaba. Corregido normalizando con `.toUpperCase()` en el `onChange`.
 
+### v22.4 — Validaciones avanzadas de asignación + dedup one-shot + límite configurable (Feb 2026)
+
+**Backend**:
+- ✅ Nuevo campo `Convocatoria.jurados_por_propuesta` (default 3) configurable desde Configuración avanzada.
+- ✅ `POST /api/asignaciones` ahora valida 3 reglas:
+  1. **Sin duplicados activos** (propuesta + jurado/terna + etapa, estado != Cancelada).
+  2. **1 propuesta = 1 terna en colectiva**: bloquea asignar a otra terna si ya tiene una activa.
+  3. **Límite N jurados individuales por propuesta**: respeta `convocatoria.jurados_por_propuesta`.
+- ✅ `POST /api/asignaciones/bulk-create` aplica las 3 reglas en el cartesiano (con conteo en memoria para no exceder el límite y break por propuesta cuando se alcanza).
+- ✅ **NUEVO** `POST /api/admin/dedupe-asignaciones?convocatoria_id=...`: detecta duplicados activos (misma propuesta + mismo jurado/terna + misma etapa + tipo), conserva la más antigua y cancela el resto. Anula evaluaciones individuales asociadas en Borrador/Iniciada.
+
+**Frontend**:
+- ✅ `ConvocatoriaDetail` → Configuración avanzada: nuevo input numérico **"Jurados individuales por propuesta (límite)"** con ayuda contextual.
+- ✅ `Asignaciones`: botón **"Limpiar duplicados"** (color ámbar) que llama al endpoint dedupe.
+- ✅ Los mensajes de error 409 del backend son descriptivos y se muestran como toast (incluyen códigos de terna existente y números actuales/límite).
+
+**Validación e2e**:
+- PATCH convocatoria con `jurados_por_propuesta:3` → 200.
+- 3 asignaciones individuales OK, 4ta da 409 con mensaje específico.
+- Asignar mismo prop a 2 ternas distintas: 1ra OK, 2da 409 con mensaje detallando la terna existente.
+- Dedupe corrió y encontró duplicados existentes (1 cancelado). Verificación posterior: 36 asignaciones activas, **0 duplicados restantes**.
+
 ### v22.3 — Asignaciones sin duplicados + masivas manuales + plantilla pro (Feb 2026)
 
 **Backend `routes_data.py`**:

@@ -294,6 +294,22 @@ export default function ConvocatoriaDetail() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="border-t border-border pt-4">
+              <Label className="text-xs font-semibold">Jurados individuales por propuesta (límite)</Label>
+              <p className="text-[11.5px] text-muted-foreground mb-2">
+                Cantidad máxima de jurados que pueden evaluar individualmente la misma propuesta en esta convocatoria.
+                El sistema bloqueará nuevas asignaciones cuando se alcance este número.
+              </p>
+              <Input
+                type="number"
+                min={1}
+                max={20}
+                value={f.jurados_por_propuesta ?? 3}
+                onChange={(e) => setF({ ...f, jurados_por_propuesta: Math.max(1, Number(e.target.value) || 3) })}
+                className="rounded-lg w-28 font-mono tabular-nums"
+                data-testid="conv-jurados-por-propuesta"
+              />
+            </div>
           </div>
         </TabsContent>
       </Tabs>

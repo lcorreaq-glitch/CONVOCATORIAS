@@ -340,6 +340,49 @@ async def seed_estados_jurado(convocatoria_id: str,
 
 
 # ---------------------------------------------------------------------------
+# 4c. DEDUPLICAR ASIGNACIONES — limpieza one-shot de duplicados pre-existentes
+# ---------------------------------------------------------------------------
+@router.post("/dedupe-asignaciones")
+async def dedupe_asignaciones(convocatoria_id: str,
+                               user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    """Detecta duplicados activos (misma propuesta + mismo jurado/terna + misma etapa + tipo)
+    y conserva sólo la más antigua. El resto se marca como 'Cancelada' (y sus evaluaciones
+    individuales en Borrador/Iniciada se anulan).
+    """
+    db = get_db()
+    # Trae sólo activas; agrupa
+    cursor = db.asignaciones.find({"convocatoria_id": convocatoria_id, "estado": {"$ne": "Cancelada"}}, {"_id": 0}).sort("created_at", 1)
+    asignaciones_act = await cursor.to_list(50000)
+    seen: dict = {}
+    duplicadas_ids: list = []
+    for a in asignaciones_act:
+        key = (
+            a.get("propuesta_id"),
+            a.get("tipo_evaluacion"),
+            a.get("etapa"),
+            a.get("jurado_id") or a.get("terna_id"),
+        )
+        if key in seen:
+            duplicadas_ids.append(a["id"])
+        else:
+            seen[key] = a["id"]
+    if not duplicadas_ids:
+        return {"ok": True, "duplicados_encontrados": 0, "canceladas": 0}
+    res = await db.asignaciones.update_many(
+        {"id": {"$in": duplicadas_ids}},
+        {"$set": {"estado": "Cancelada"}},
+    )
+    await db.evaluaciones_individuales.update_many(
+        {"asignacion_id": {"$in": duplicadas_ids}, "estado": {"$in": ["Borrador", "Iniciada"]}},
+        {"$set": {"estado": "Anulada"}},
+    )
+    await audit(user, "dedupe", "asignaciones", convocatoria_id,
+                detalle=f"Canceladas {res.modified_count} duplicadas")
+    return {"ok": True, "duplicados_encontrados": len(duplicadas_ids), "canceladas": res.modified_count}
+
+
+
+# ---------------------------------------------------------------------------
 # 5. DELETE EXPLÍCITOS (hard-delete) para Propuestas, Jurados, Evaluaciones, Rankings, Actas
 # Reciben permisos solo de admin_general / admin_convocatoria.
 # ---------------------------------------------------------------------------

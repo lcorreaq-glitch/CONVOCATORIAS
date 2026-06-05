@@ -2,7 +2,7 @@
 
 import uuid
 import io
-from typing import List, Optional
+from typing import List, Optional, Dict
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -871,9 +871,7 @@ async def create_asignacion(payload: AsignacionIn, user: dict = Depends(require_
     doc = payload.model_dump()
     if not doc.get("jurado_id") and not doc.get("terna_id"):
         raise HTTPException(status_code=400, detail="Debe especificar jurado_id o terna_id")
-    # ──────────────── Prevenir duplicados (P0) ────────────────
-    # No permite la MISMA propuesta + MISMO jurado/terna + MISMA etapa/tipo si la asignación
-    # sigue activa (estado != Cancelada). Si fue cancelada, sí se puede reasignar.
+    # ──────────────── Prevenir duplicados ────────────────
     dup_q = {
         "convocatoria_id": doc["convocatoria_id"],
         "propuesta_id": doc["propuesta_id"],
@@ -892,6 +890,38 @@ async def create_asignacion(payload: AsignacionIn, user: dict = Depends(require_
             status_code=409,
             detail=f"Ya existe una asignación activa para esta propuesta + {'jurado' if doc.get('jurado_id') else 'terna'} + etapa",
         )
+
+    # ──────────────── Regla: 1 propuesta sólo va a 1 terna en COLECTIVA ────────────────
+    if doc["tipo_evaluacion"] == "colectiva" and doc.get("terna_id"):
+        otra_terna = await db.asignaciones.find_one({
+            "convocatoria_id": doc["convocatoria_id"],
+            "propuesta_id": doc["propuesta_id"],
+            "tipo_evaluacion": "colectiva",
+            "terna_id": {"$ne": doc["terna_id"]},
+            "estado": {"$ne": "Cancelada"},
+        })
+        if otra_terna:
+            terna_doc = await db.ternas.find_one({"id": otra_terna["terna_id"]}, {"_id": 0, "codigo": 1, "nombre": 1})
+            raise HTTPException(
+                status_code=409,
+                detail=f"La propuesta ya está asignada a otra terna en evaluación colectiva ({terna_doc.get('codigo','?')} · {terna_doc.get('nombre','')}). Cancela esa asignación antes de mover la propuesta a otra terna.",
+            )
+
+    # ──────────────── Regla: límite de jurados individuales por propuesta ────────────────
+    if doc["tipo_evaluacion"] == "individual" and doc.get("jurado_id"):
+        conv = await db.convocatorias.find_one({"id": doc["convocatoria_id"]}, {"_id": 0, "jurados_por_propuesta": 1})
+        limite = int((conv or {}).get("jurados_por_propuesta") or 3)
+        actuales = await db.asignaciones.count_documents({
+            "convocatoria_id": doc["convocatoria_id"],
+            "propuesta_id": doc["propuesta_id"],
+            "tipo_evaluacion": "individual",
+            "estado": {"$ne": "Cancelada"},
+        })
+        if actuales >= limite:
+            raise HTTPException(
+                status_code=409,
+                detail=f"La propuesta ya tiene {actuales} jurado(s) asignado(s), igual al límite configurado en la convocatoria ({limite}). Aumenta el límite en Configuración avanzada o cancela una asignación.",
+            )
 
     doc["id"] = str(uuid.uuid4())
     doc["estado"] = "Creada"
@@ -1035,10 +1065,43 @@ async def bulk_create_asignaciones(payload: AsignacionBulkIn,
     etapa = payload.etapa or ("Evaluación Colectiva" if payload.tipo_evaluacion == "colectiva" else "Evaluación Individual")
     creadas, duplicadas, erroneas = 0, 0, []
 
+    # Convocatoria config para regla "límite jurados por propuesta"
+    conv = await db.convocatorias.find_one({"id": payload.convocatoria_id}, {"_id": 0, "jurados_por_propuesta": 1})
+    limite_jurados = int((conv or {}).get("jurados_por_propuesta") or 3)
+
     targets: list = payload.jurado_ids if payload.tipo_evaluacion == "individual" else [payload.terna_id]
+    # Conteos actuales por propuesta (para no exceder el límite con el cartesiano)
+    counts_por_propuesta: Dict[str, int] = {}
+    if payload.tipo_evaluacion == "individual":
+        for pid in payload.propuesta_ids:
+            counts_por_propuesta[pid] = await db.asignaciones.count_documents({
+                "convocatoria_id": payload.convocatoria_id,
+                "propuesta_id": pid,
+                "tipo_evaluacion": "individual",
+                "estado": {"$ne": "Cancelada"},
+            })
+
     for pid in payload.propuesta_ids:
+        # Regla colectiva: una propuesta = una terna
+        if payload.tipo_evaluacion == "colectiva":
+            otra = await db.asignaciones.find_one({
+                "convocatoria_id": payload.convocatoria_id,
+                "propuesta_id": pid,
+                "tipo_evaluacion": "colectiva",
+                "terna_id": {"$ne": payload.terna_id},
+                "estado": {"$ne": "Cancelada"},
+            })
+            if otra:
+                erroneas.append({"propuesta_id": pid, "target": payload.terna_id,
+                                  "error": "Ya está asignada a otra terna (1 propuesta = 1 terna)"})
+                continue
         for tgt in targets:
             try:
+                # Límite individual
+                if payload.tipo_evaluacion == "individual" and counts_por_propuesta.get(pid, 0) >= limite_jurados:
+                    erroneas.append({"propuesta_id": pid, "target": tgt,
+                                      "error": f"Propuesta ya tiene {limite_jurados} jurado(s) — límite alcanzado"})
+                    break  # no tiene sentido probar más jurados para esa propuesta
                 dup_q = {
                     "convocatoria_id": payload.convocatoria_id,
                     "propuesta_id": pid,
@@ -1069,6 +1132,7 @@ async def bulk_create_asignaciones(payload: AsignacionBulkIn,
                     doc["terna_id"] = tgt
                 await db.asignaciones.insert_one(doc)
                 if payload.tipo_evaluacion == "individual":
+                    counts_por_propuesta[pid] = counts_por_propuesta.get(pid, 0) + 1
                     await db.evaluaciones_individuales.insert_one({
                         "id": str(uuid.uuid4()),
                         "convocatoria_id": payload.convocatoria_id,
@@ -1084,8 +1148,8 @@ async def bulk_create_asignaciones(payload: AsignacionBulkIn,
             except Exception as e:
                 erroneas.append({"propuesta_id": pid, "target": tgt, "error": str(e)})
     await audit(user, "bulk_create", "asignaciones", payload.convocatoria_id,
-                detalle=f"{creadas} creadas, {duplicadas} ya existían")
-    return {"creadas": creadas, "duplicadas": duplicadas, "erroneas": erroneas}
+                detalle=f"{creadas} creadas, {duplicadas} ya existían, {len(erroneas)} con error")
+    return {"creadas": creadas, "duplicadas": duplicadas, "erroneas": erroneas, "limite_jurados": limite_jurados}
 
 
 class AsignacionBulkDeleteIn(BaseModel):

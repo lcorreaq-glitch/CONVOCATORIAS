@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Workflow, Trash2, Download, Upload, Sparkles, Loader2, Search, CheckSquare } from "lucide-react";
+import { Plus, Workflow, Trash2, Download, Upload, Sparkles, Loader2, Search, CheckSquare, ShieldAlert } from "lucide-react";
 import ConvocatoriaContextBanner from "@/components/ConvocatoriaContextBanner";
 
 export default function Asignaciones() {
@@ -93,6 +93,19 @@ export default function Asignaciones() {
     finally { setBusy(false); }
   };
 
+  const dedupe = async () => {
+    if (!confirm("Esto detectará duplicados activos (misma propuesta + mismo jurado/terna + misma etapa) y dejará sólo el más antiguo. El resto se cancelará. ¿Continuar?")) return;
+    setBusy(true);
+    try {
+      const r = await api.post(`/admin/dedupe-asignaciones?convocatoria_id=${activeConvocatoriaId}`);
+      const { duplicados_encontrados, canceladas } = r.data;
+      if (duplicados_encontrados === 0) toast.success("No se encontraron duplicados");
+      else toast.success(`Limpieza completada: ${canceladas} duplicados cancelados`);
+      load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setBusy(false); }
+  };
+
   const propMap = useMemo(() => Object.fromEntries(propuestas.map((p) => [p.id, p])), [propuestas]);
   const jurMap = useMemo(() => Object.fromEntries(jurados.map((j) => [j.id, j])), [jurados]);
   const ternaMap = useMemo(() => Object.fromEntries(ternas.map((t) => [t.id, t])), [ternas]);
@@ -138,6 +151,9 @@ export default function Asignaciones() {
               <>
                 <Button onClick={() => setAutoOpen(true)} variant="outline" className="rounded-sm gap-2 border-[#14776A] text-[#14776A] hover:bg-[#F0F7F5]" data-testid="asig-auto-btn">
                   <Sparkles className="w-4 h-4" />Asignación automática
+                </Button>
+                <Button variant="outline" className="rounded-sm gap-2 text-amber-700 border-amber-300 hover:bg-amber-50" onClick={dedupe} disabled={busy} data-testid="asig-dedupe-btn" title="Detecta y cancela duplicados activos pre-existentes">
+                  <ShieldAlert className="w-4 h-4" />Limpiar duplicados
                 </Button>
                 <Button variant="outline" className="rounded-sm gap-2" onClick={() => downloadFile(`/asignaciones-template?convocatoria_id=${activeConvocatoriaId}`, "plantilla_asignaciones.xlsx").catch((e) => toast.error(e.message))} data-testid="asig-template-btn">
                   <Download className="w-4 h-4" />Plantilla

@@ -24,6 +24,7 @@ class ConvocatoriaIn(BaseModel):
     fechas: dict = Field(default_factory=dict)
     modalidad_evaluacion_colectiva: str = "promedio_individuales"
     modelo_expediente: str = "externo"
+    jurados_por_propuesta: int = 3  # número objetivo/máximo de jurados individuales por propuesta
     imagen_grafica: dict = Field(default_factory=dict)
 
 
