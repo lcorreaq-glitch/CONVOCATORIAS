@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { api, formatApiError, downloadFile } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader, { Badge, EmptyState } from "@/components/PageHeader";
@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Workflow, Trash2, Download, Upload, Sparkles, Loader2 } from "lucide-react";
+import { Plus, Workflow, Trash2, Download, Upload, Sparkles, Loader2, Search, CheckSquare } from "lucide-react";
 import ConvocatoriaContextBanner from "@/components/ConvocatoriaContextBanner";
 
 export default function Asignaciones() {
@@ -26,7 +26,15 @@ export default function Asignaciones() {
   const [autoCfg, setAutoCfg] = useState({ jurados_por_propuesta: 3, solo_subregion: true, asignar_ternas: true, balance_carga: true });
   const [autoBusy, setAutoBusy] = useState(false);
   const [autoResult, setAutoResult] = useState(null);
-  const [f, setF] = useState({ propuesta_id: "", jurado_id: "", terna_id: "", tipo_evaluacion: "individual" });
+  // Formulario masivo manual
+  const [f, setF] = useState({ propuesta_ids: [], jurado_ids: [], terna_id: "", tipo_evaluacion: "individual" });
+  const [propSearch, setPropSearch] = useState("");
+  const [jurSearch, setJurSearch] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  // Selección masiva en la tabla
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [showCanceladas, setShowCanceladas] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const canEdit = user?.role === "admin_general" || user?.role === "admin_convocatoria";
 
@@ -39,28 +47,82 @@ export default function Asignaciones() {
       api.get(`/ternas?convocatoria_id=${activeConvocatoriaId}`),
     ]);
     setAsignaciones(a.data); setPropuestas(p.data); setJurados(j.data); setTernas(t.data);
+    setSelectedIds(new Set());
   };
   useEffect(() => { load(); }, [activeConvocatoriaId]);
 
   const submit = async () => {
+    if (!f.propuesta_ids.length) { toast.error("Selecciona al menos una propuesta"); return; }
+    if (f.tipo_evaluacion === "individual" && !f.jurado_ids.length) { toast.error("Selecciona al menos un jurado"); return; }
+    if (f.tipo_evaluacion === "colectiva" && !f.terna_id) { toast.error("Selecciona una terna"); return; }
+    setSubmitting(true);
     try {
-      const payload = { ...f, convocatoria_id: activeConvocatoriaId };
-      if (!payload.jurado_id) delete payload.jurado_id;
-      if (!payload.terna_id) delete payload.terna_id;
-      await api.post("/asignaciones", payload);
-      toast.success("Asignación creada"); setOpen(false); load();
-      setF({ propuesta_id: "", jurado_id: "", terna_id: "", tipo_evaluacion: "individual" });
-    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+      const payload = {
+        convocatoria_id: activeConvocatoriaId,
+        propuesta_ids: f.propuesta_ids,
+        tipo_evaluacion: f.tipo_evaluacion,
+        ...(f.tipo_evaluacion === "individual" ? { jurado_ids: f.jurado_ids } : { terna_id: f.terna_id }),
+      };
+      const r = await api.post("/asignaciones/bulk-create", payload);
+      const { creadas, duplicadas } = r.data;
+      if (creadas && duplicadas) toast.success(`${creadas} creadas · ${duplicadas} ya existían (omitidas)`);
+      else if (creadas) toast.success(`${creadas} asignaciones creadas`);
+      else if (duplicadas) toast.message(`Todas (${duplicadas}) ya estaban asignadas. No se creó nada.`);
+      setOpen(false);
+      setF({ propuesta_ids: [], jurado_ids: [], terna_id: "", tipo_evaluacion: "individual" });
+      load();
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail));
+    } finally { setSubmitting(false); }
   };
 
   const cancelar = async (id) => {
-    if (!confirm("¿Cancelar asignación?")) return;
+    if (!confirm("¿Cancelar esta asignación?")) return;
     await api.delete(`/asignaciones/${id}`); load();
   };
 
-  const propMap = Object.fromEntries(propuestas.map((p) => [p.id, p]));
-  const jurMap = Object.fromEntries(jurados.map((j) => [j.id, j]));
-  const ternaMap = Object.fromEntries(ternas.map((t) => [t.id, t]));
+  const bulkCancel = async () => {
+    if (!selectedIds.size) return;
+    if (!confirm(`¿Cancelar ${selectedIds.size} asignación${selectedIds.size > 1 ? "es" : ""}?`)) return;
+    setBusy(true);
+    try {
+      const r = await api.post("/asignaciones/bulk-delete", { ids: [...selectedIds] });
+      toast.success(`${r.data.canceladas} asignaciones canceladas`);
+      load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setBusy(false); }
+  };
+
+  const propMap = useMemo(() => Object.fromEntries(propuestas.map((p) => [p.id, p])), [propuestas]);
+  const jurMap = useMemo(() => Object.fromEntries(jurados.map((j) => [j.id, j])), [jurados]);
+  const ternaMap = useMemo(() => Object.fromEntries(ternas.map((t) => [t.id, t])), [ternas]);
+
+  // Filtros para los pickers del modal
+  const propuestasFiltradas = useMemo(() => {
+    const s = propSearch.toLowerCase();
+    return s ? propuestas.filter((p) => `${p.codigo} ${p.nombre} ${p.organizacion || ""}`.toLowerCase().includes(s)) : propuestas;
+  }, [propuestas, propSearch]);
+  const juradosFiltrados = useMemo(() => {
+    const s = jurSearch.toLowerCase();
+    return s ? jurados.filter((j) => `${j.nombre} ${j.email}`.toLowerCase().includes(s)) : jurados;
+  }, [jurados, jurSearch]);
+
+  const togglePropuesta = (id) => setF((p) => ({ ...p, propuesta_ids: p.propuesta_ids.includes(id) ? p.propuesta_ids.filter((x) => x !== id) : [...p.propuesta_ids, id] }));
+  const toggleJurado = (id) => setF((p) => ({ ...p, jurado_ids: p.jurado_ids.includes(id) ? p.jurado_ids.filter((x) => x !== id) : [...p.jurado_ids, id] }));
+
+  // Asignaciones visibles (filtra canceladas si toggle off)
+  const visibles = useMemo(() => asignaciones.filter((a) => showCanceladas || a.estado !== "Cancelada"), [asignaciones, showCanceladas]);
+  const allVisibleActiveIds = visibles.filter((a) => a.estado !== "Cancelada").map((a) => a.id);
+  const allSelected = allVisibleActiveIds.length > 0 && allVisibleActiveIds.every((id) => selectedIds.has(id));
+  const toggleAll = () => {
+    if (allSelected) setSelectedIds(new Set());
+    else setSelectedIds(new Set(allVisibleActiveIds));
+  };
+  const toggleOne = (id) => {
+    const next = new Set(selectedIds);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setSelectedIds(next);
+  };
 
   if (!activeConvocatoriaId) return <div className="p-10 text-muted-foreground">Selecciona una convocatoria.</div>;
 
@@ -86,50 +148,127 @@ export default function Asignaciones() {
               </>
             )}
             {canEdit && (
-              <Dialog open={open} onOpenChange={setOpen}>
+              <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setF({ propuesta_ids: [], jurado_ids: [], terna_id: "", tipo_evaluacion: "individual" }); setPropSearch(""); setJurSearch(""); } }}>
                 <DialogTrigger asChild><Button className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2" data-testid="asig-new-btn"><Plus className="w-4 h-4" />Nueva</Button></DialogTrigger>
-            <DialogContent className="rounded-sm max-w-lg">
-              <DialogHeader><DialogTitle className="font-display">Nueva asignación</DialogTitle></DialogHeader>
-              <div className="space-y-3">
+            <DialogContent className="rounded-lg max-w-4xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="font-display">Nueva asignación</DialogTitle>
+                <p className="text-[12.5px] text-muted-foreground mt-1">
+                  Selecciona <strong>una o varias propuestas</strong> y <strong>uno o varios jurados</strong> (o una terna para colectiva).
+                  Se creará el producto cartesiano. Las combinaciones que ya existen se omiten automáticamente — no se duplican.
+                </p>
+              </DialogHeader>
+
+              <div className="space-y-4 pt-2">
                 <div>
-                  <label className="text-xs font-bold">Propuesta</label>
-                  <Select value={f.propuesta_id} onValueChange={(v) => setF({ ...f, propuesta_id: v })}>
-                    <SelectTrigger className="rounded-sm" data-testid="asig-propuesta"><SelectValue placeholder="Selecciona propuesta" /></SelectTrigger>
-                    <SelectContent>{propuestas.map((p) => <SelectItem key={p.id} value={p.id}>{p.codigo} · {p.nombre}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <label className="text-xs font-bold">Tipo de evaluación</label>
-                  <Select value={f.tipo_evaluacion} onValueChange={(v) => setF({ ...f, tipo_evaluacion: v })}>
-                    <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
+                  <Label className="text-xs font-bold">Tipo de evaluación</Label>
+                  <Select value={f.tipo_evaluacion} onValueChange={(v) => setF({ ...f, tipo_evaluacion: v, jurado_ids: [], terna_id: "" })}>
+                    <SelectTrigger className="rounded-md" data-testid="asig-tipo"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="individual">Individual</SelectItem>
-                      <SelectItem value="colectiva">Colectiva</SelectItem>
+                      <SelectItem value="individual">Individual (propuesta × jurado)</SelectItem>
+                      <SelectItem value="colectiva">Colectiva (propuesta × terna)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-                {f.tipo_evaluacion === "individual" && (
-                  <div>
-                    <label className="text-xs font-bold">Jurado</label>
-                    <Select value={f.jurado_id} onValueChange={(v) => setF({ ...f, jurado_id: v })}>
-                      <SelectTrigger className="rounded-sm" data-testid="asig-jurado"><SelectValue placeholder="Selecciona jurado" /></SelectTrigger>
-                      <SelectContent>{jurados.map((j) => <SelectItem key={j.id} value={j.id}>{j.nombre}</SelectItem>)}</SelectContent>
-                    </Select>
+
+                <div className="grid md:grid-cols-2 gap-4">
+                  {/* Picker Propuestas */}
+                  <div className="border border-border rounded-lg overflow-hidden bg-white">
+                    <div className="bg-[#F0F7F5] px-3 py-2 border-b border-border flex items-center justify-between">
+                      <div className="text-[12px] font-bold text-[#0F5E54]">
+                        Propuestas <span className="font-mono text-muted-foreground font-normal">({f.propuesta_ids.length} de {propuestasFiltradas.length})</span>
+                      </div>
+                      <button type="button" onClick={() => setF({ ...f, propuesta_ids: f.propuesta_ids.length === propuestasFiltradas.length ? [] : propuestasFiltradas.map((p) => p.id) })} className="text-[11px] text-[#14776A] hover:underline">
+                        {f.propuesta_ids.length === propuestasFiltradas.length && propuestasFiltradas.length > 0 ? "Limpiar" : "Sel. todas"}
+                      </button>
+                    </div>
+                    <div className="px-3 py-2 border-b border-border">
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 absolute left-2 top-2 text-muted-foreground" />
+                        <Input value={propSearch} onChange={(e) => setPropSearch(e.target.value)} placeholder="Buscar por código, nombre u organización…" className="h-8 pl-7 text-[12px] rounded-md" data-testid="asig-propuesta-search" />
+                      </div>
+                    </div>
+                    <div className="max-h-72 overflow-y-auto">
+                      {propuestasFiltradas.map((p) => (
+                        <label key={p.id} className={`flex items-start gap-2 px-3 py-1.5 border-b border-border/40 cursor-pointer hover:bg-[#F7FAF9] ${f.propuesta_ids.includes(p.id) ? "bg-[#F0F7F5]" : ""}`}>
+                          <input type="checkbox" checked={f.propuesta_ids.includes(p.id)} onChange={() => togglePropuesta(p.id)} className="mt-1" />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-mono text-[10.5px] text-muted-foreground">{p.codigo}</div>
+                            <div className="text-[12.5px] font-semibold truncate capitalize">{(p.nombre || "").toLowerCase()}</div>
+                            {(p.organizacion || p.datos?.nombre_organizacion) && (
+                              <div className="text-[10.5px] text-muted-foreground truncate capitalize">{((p.organizacion || p.datos?.nombre_organizacion) || "").toLowerCase()}</div>
+                            )}
+                          </div>
+                        </label>
+                      ))}
+                      {!propuestasFiltradas.length && <div className="p-4 text-center text-[12px] text-muted-foreground">Sin resultados</div>}
+                    </div>
                   </div>
-                )}
-                {f.tipo_evaluacion === "colectiva" && (
+
+                  {/* Picker Jurados o Terna */}
+                  {f.tipo_evaluacion === "individual" ? (
+                    <div className="border border-border rounded-lg overflow-hidden bg-white">
+                      <div className="bg-[#F0F7F5] px-3 py-2 border-b border-border flex items-center justify-between">
+                        <div className="text-[12px] font-bold text-[#0F5E54]">
+                          Jurados <span className="font-mono text-muted-foreground font-normal">({f.jurado_ids.length} de {juradosFiltrados.length})</span>
+                        </div>
+                        <button type="button" onClick={() => setF({ ...f, jurado_ids: f.jurado_ids.length === juradosFiltrados.length ? [] : juradosFiltrados.map((j) => j.id) })} className="text-[11px] text-[#14776A] hover:underline">
+                          {f.jurado_ids.length === juradosFiltrados.length && juradosFiltrados.length > 0 ? "Limpiar" : "Sel. todos"}
+                        </button>
+                      </div>
+                      <div className="px-3 py-2 border-b border-border">
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 absolute left-2 top-2 text-muted-foreground" />
+                          <Input value={jurSearch} onChange={(e) => setJurSearch(e.target.value)} placeholder="Buscar por nombre o email…" className="h-8 pl-7 text-[12px] rounded-md" data-testid="asig-jurado-search" />
+                        </div>
+                      </div>
+                      <div className="max-h-72 overflow-y-auto">
+                        {juradosFiltrados.map((j) => (
+                          <label key={j.id} className={`flex items-start gap-2 px-3 py-1.5 border-b border-border/40 cursor-pointer hover:bg-[#F7FAF9] ${f.jurado_ids.includes(j.id) ? "bg-[#F0F7F5]" : ""}`}>
+                            <input type="checkbox" checked={f.jurado_ids.includes(j.id)} onChange={() => toggleJurado(j.id)} className="mt-1" />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[12.5px] font-semibold truncate">{j.nombre}</div>
+                              <div className="text-[10.5px] text-muted-foreground truncate">{j.email}</div>
+                              {(j.subregiones || []).length > 0 && (
+                                <div className="text-[10px] text-muted-foreground/80 truncate">{j.subregiones.join(" · ")}</div>
+                              )}
+                            </div>
+                          </label>
+                        ))}
+                        {!juradosFiltrados.length && <div className="p-4 text-center text-[12px] text-muted-foreground">Sin resultados</div>}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="border border-border rounded-lg bg-white p-3">
+                      <Label className="text-xs font-bold">Terna</Label>
+                      <Select value={f.terna_id} onValueChange={(v) => setF({ ...f, terna_id: v })}>
+                        <SelectTrigger className="rounded-md mt-1" data-testid="asig-terna"><SelectValue placeholder="Selecciona terna" /></SelectTrigger>
+                        <SelectContent>{ternas.map((t) => <SelectItem key={t.id} value={t.id}>{t.codigo} · {t.nombre} {t.subregion && `· ${t.subregion}`}</SelectItem>)}</SelectContent>
+                      </Select>
+                      <p className="text-[11px] text-muted-foreground mt-2">La terna seleccionada será asignada a todas las propuestas elegidas (evaluación colectiva).</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Resumen */}
+                <div className="rounded-lg border border-[#CDE7E1] bg-[#F0F7F5] px-3 py-2 text-[12.5px] flex items-center gap-2">
+                  <CheckSquare className="w-4 h-4 text-[#14776A]" />
                   <div>
-                    <label className="text-xs font-bold">Terna</label>
-                    <Select value={f.terna_id} onValueChange={(v) => setF({ ...f, terna_id: v })}>
-                      <SelectTrigger className="rounded-sm"><SelectValue placeholder="Selecciona terna" /></SelectTrigger>
-                      <SelectContent>{ternas.map((t) => <SelectItem key={t.id} value={t.id}>{t.codigo} · {t.nombre}</SelectItem>)}</SelectContent>
-                    </Select>
+                    Se crearán <strong className="font-mono">
+                      {f.tipo_evaluacion === "individual"
+                        ? f.propuesta_ids.length * f.jurado_ids.length
+                        : f.propuesta_ids.length * (f.terna_id ? 1 : 0)}
+                    </strong> asignaciones (las duplicadas se omitirán).
                   </div>
-                )}
+                </div>
               </div>
+
               <DialogFooter>
-                <Button variant="outline" onClick={() => setOpen(false)} className="rounded-sm">Cancelar</Button>
-                <Button onClick={submit} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm">Crear</Button>
+                <Button variant="outline" onClick={() => setOpen(false)} className="rounded-md">Cancelar</Button>
+                <Button onClick={submit} disabled={submitting} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-md gap-2" data-testid="asig-submit">
+                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                  {submitting ? "Creando…" : "Crear asignaciones"}
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -140,23 +279,70 @@ export default function Asignaciones() {
 
       <ConvocatoriaContextBanner />
 
+      {/* Barra de acción masiva (sticky) */}
+      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          {canEdit && selectedIds.size > 0 && (
+            <Button onClick={bulkCancel} disabled={busy} className="bg-red-600 hover:bg-red-700 rounded-md gap-2 text-white" data-testid="asig-bulk-delete">
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+              Cancelar {selectedIds.size} asignación{selectedIds.size > 1 ? "es" : ""}
+            </Button>
+          )}
+          <div className="text-[12.5px] text-muted-foreground">
+            <strong>{visibles.length}</strong> visibles ·{" "}
+            <strong>{asignaciones.filter((a) => a.estado !== "Cancelada").length}</strong> activas ·{" "}
+            <strong>{asignaciones.filter((a) => a.estado === "Cancelada").length}</strong> canceladas
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-[12.5px] text-muted-foreground cursor-pointer">
+          <Switch checked={showCanceladas} onCheckedChange={setShowCanceladas} data-testid="asig-toggle-canceladas" />
+          Mostrar canceladas
+        </label>
+      </div>
+
       <div className="border border-border rounded-sm bg-white overflow-x-auto">
         <table className="w-full dense-table">
-          <thead><tr><th>Propuesta</th><th>Tipo</th><th>Jurado / Terna</th><th>Etapa</th><th>Estado</th><th></th></tr></thead>
+          <thead>
+            <tr>
+              {canEdit && (
+                <th className="w-9 text-center">
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Seleccionar todas las activas" data-testid="asig-select-all" />
+                </th>
+              )}
+              <th>Propuesta</th><th>Tipo</th><th>Jurado / Terna</th><th>Etapa</th><th>Estado</th><th></th>
+            </tr>
+          </thead>
           <tbody>
-            {asignaciones.map((a) => {
+            {visibles.map((a) => {
               const p = propMap[a.propuesta_id];
               const target = a.jurado_id ? jurMap[a.jurado_id]?.nombre : ternaMap[a.terna_id]?.nombre;
+              const cancelada = a.estado === "Cancelada";
               return (
-                <tr key={a.id}>
-                  <td><div className="font-mono text-xs text-muted-foreground">{p?.codigo}</div><div className="font-semibold">{p?.nombre}</div></td>
+                <tr key={a.id} className={cancelada ? "opacity-60" : ""} data-testid={`asig-row-${a.id}`}>
+                  {canEdit && (
+                    <td className="text-center">
+                      {!cancelada && (
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(a.id)}
+                          onChange={() => toggleOne(a.id)}
+                          aria-label="Seleccionar"
+                          data-testid={`asig-select-${a.id}`}
+                        />
+                      )}
+                    </td>
+                  )}
+                  <td>
+                    <div className="font-mono text-[11px] text-muted-foreground tabular-nums">{p?.codigo}</div>
+                    <div className="font-semibold text-[13px] capitalize leading-snug">{(p?.nombre || "").toLowerCase()}</div>
+                  </td>
                   <td><Badge tone={a.tipo_evaluacion === "individual" ? "info" : "success"}>{a.tipo_evaluacion}</Badge></td>
-                  <td>{target || "—"}</td>
-                  <td className="text-xs text-muted-foreground">{a.etapa}</td>
-                  <td><Badge tone="default">{a.estado}</Badge></td>
+                  <td className="text-[13px]">{target || "—"}</td>
+                  <td className="text-[12px] text-muted-foreground">{a.etapa}</td>
+                  <td><Badge tone={cancelada ? "muted" : "default"}>{a.estado}</Badge></td>
                   <td className="text-right">
-                    {a.estado !== "Cancelada" && (
-                      <button onClick={() => cancelar(a.id)} className="text-muted-foreground hover:text-red-600">
+                    {!cancelada && canEdit && (
+                      <button onClick={() => cancelar(a.id)} className="text-muted-foreground hover:text-red-600" data-testid={`asig-delete-${a.id}`}>
                         <Trash2 className="w-4 h-4" />
                       </button>
                     )}
@@ -164,7 +350,7 @@ export default function Asignaciones() {
                 </tr>
               );
             })}
-            {!asignaciones.length && <tr><td colSpan={6}><EmptyState title="Sin asignaciones" hint="Asigna propuestas a jurados o ternas." icon={Workflow} /></td></tr>}
+            {!visibles.length && <tr><td colSpan={canEdit ? 7 : 6}><EmptyState title="Sin asignaciones" hint="Asigna propuestas a jurados o ternas." icon={Workflow} /></td></tr>}
           </tbody>
         </table>
       </div>

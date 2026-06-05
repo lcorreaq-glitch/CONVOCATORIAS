@@ -871,6 +871,28 @@ async def create_asignacion(payload: AsignacionIn, user: dict = Depends(require_
     doc = payload.model_dump()
     if not doc.get("jurado_id") and not doc.get("terna_id"):
         raise HTTPException(status_code=400, detail="Debe especificar jurado_id o terna_id")
+    # ──────────────── Prevenir duplicados (P0) ────────────────
+    # No permite la MISMA propuesta + MISMO jurado/terna + MISMA etapa/tipo si la asignación
+    # sigue activa (estado != Cancelada). Si fue cancelada, sí se puede reasignar.
+    dup_q = {
+        "convocatoria_id": doc["convocatoria_id"],
+        "propuesta_id": doc["propuesta_id"],
+        "tipo_evaluacion": doc["tipo_evaluacion"],
+        "estado": {"$ne": "Cancelada"},
+    }
+    if doc.get("jurado_id"):
+        dup_q["jurado_id"] = doc["jurado_id"]
+    if doc.get("terna_id"):
+        dup_q["terna_id"] = doc["terna_id"]
+    if doc.get("etapa"):
+        dup_q["etapa"] = doc["etapa"]
+    existing = await db.asignaciones.find_one(dup_q)
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Ya existe una asignación activa para esta propuesta + {'jurado' if doc.get('jurado_id') else 'terna'} + etapa",
+        )
+
     doc["id"] = str(uuid.uuid4())
     doc["estado"] = "Creada"
     doc["created_at"] = now_iso()
@@ -986,36 +1008,229 @@ async def asignacion_masiva_subregion(payload: AsignacionMasivaIn, user: dict = 
 
 
 # ==================== ASIGNACIONES: PLANTILLA / IMPORT MASIVO / AUTO ====================
+
+class AsignacionBulkIn(BaseModel):
+    convocatoria_id: str
+    propuesta_ids: List[str]
+    tipo_evaluacion: str  # individual | colectiva
+    jurado_ids: Optional[List[str]] = None
+    terna_id: Optional[str] = None
+    etapa: Optional[str] = None  # default según tipo
+
+
+@router.post("/asignaciones/bulk-create")
+async def bulk_create_asignaciones(payload: AsignacionBulkIn,
+                                    user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    """Crea N×M asignaciones (cartesiano propuestas × jurados o N×terna).
+    Salta silenciosamente las combinaciones que ya existen (estado != Cancelada).
+    """
+    db = get_db()
+    if not payload.propuesta_ids:
+        raise HTTPException(400, "Selecciona al menos una propuesta")
+    if payload.tipo_evaluacion == "individual" and not payload.jurado_ids:
+        raise HTTPException(400, "Selecciona al menos un jurado")
+    if payload.tipo_evaluacion == "colectiva" and not payload.terna_id:
+        raise HTTPException(400, "Selecciona una terna")
+
+    etapa = payload.etapa or ("Evaluación Colectiva" if payload.tipo_evaluacion == "colectiva" else "Evaluación Individual")
+    creadas, duplicadas, erroneas = 0, 0, []
+
+    targets: list = payload.jurado_ids if payload.tipo_evaluacion == "individual" else [payload.terna_id]
+    for pid in payload.propuesta_ids:
+        for tgt in targets:
+            try:
+                dup_q = {
+                    "convocatoria_id": payload.convocatoria_id,
+                    "propuesta_id": pid,
+                    "tipo_evaluacion": payload.tipo_evaluacion,
+                    "etapa": etapa,
+                    "estado": {"$ne": "Cancelada"},
+                }
+                if payload.tipo_evaluacion == "individual":
+                    dup_q["jurado_id"] = tgt
+                else:
+                    dup_q["terna_id"] = tgt
+                if await db.asignaciones.find_one(dup_q):
+                    duplicadas += 1
+                    continue
+                aid = str(uuid.uuid4())
+                doc = {
+                    "id": aid,
+                    "convocatoria_id": payload.convocatoria_id,
+                    "propuesta_id": pid,
+                    "tipo_evaluacion": payload.tipo_evaluacion,
+                    "etapa": etapa,
+                    "estado": "Creada",
+                    "created_at": now_iso(),
+                }
+                if payload.tipo_evaluacion == "individual":
+                    doc["jurado_id"] = tgt
+                else:
+                    doc["terna_id"] = tgt
+                await db.asignaciones.insert_one(doc)
+                if payload.tipo_evaluacion == "individual":
+                    await db.evaluaciones_individuales.insert_one({
+                        "id": str(uuid.uuid4()),
+                        "convocatoria_id": payload.convocatoria_id,
+                        "propuesta_id": pid,
+                        "jurado_id": tgt,
+                        "asignacion_id": aid,
+                        "estado": "Borrador",
+                        "puntajes": {}, "observaciones": {}, "observacion_final": "",
+                        "puntaje_total": 0, "puntaje_diferencial_total": 0,
+                        "created_at": now_iso(),
+                    })
+                creadas += 1
+            except Exception as e:
+                erroneas.append({"propuesta_id": pid, "target": tgt, "error": str(e)})
+    await audit(user, "bulk_create", "asignaciones", payload.convocatoria_id,
+                detalle=f"{creadas} creadas, {duplicadas} ya existían")
+    return {"creadas": creadas, "duplicadas": duplicadas, "erroneas": erroneas}
+
+
+class AsignacionBulkDeleteIn(BaseModel):
+    ids: List[str]
+
+
+@router.post("/asignaciones/bulk-delete")
+async def bulk_delete_asignaciones(payload: AsignacionBulkDeleteIn,
+                                    user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    db = get_db()
+    if not payload.ids:
+        return {"canceladas": 0}
+    res = await db.asignaciones.update_many(
+        {"id": {"$in": payload.ids}},
+        {"$set": {"estado": "Cancelada"}},
+    )
+    # Anular evaluaciones individuales en borrador
+    await db.evaluaciones_individuales.update_many(
+        {"asignacion_id": {"$in": payload.ids}, "estado": {"$in": ["Borrador", "Iniciada"]}},
+        {"$set": {"estado": "Anulada"}},
+    )
+    await audit(user, "bulk_cancel", "asignaciones", "-",
+                detalle=f"{res.modified_count} asignaciones canceladas")
+    return {"canceladas": res.modified_count}
+
+
 @router.get("/asignaciones-template")
 async def asignaciones_template(convocatoria_id: str, user: dict = Depends(get_current_user)):
-    """Plantilla XLSX con propuestas y ternas/jurados existentes para asignar."""
+    """Plantilla XLSX con look & feel idéntico a Propuestas/Jurados:
+    - 2 filas header (etiqueta humana + nombre técnico).
+    - Fila ejemplo prellena con valores reales.
+    - Hojas Instrucciones y Catálogos (Propuestas, Ternas, Jurados existentes + tipos válidos).
+    """
+    from openpyxl.styles import Font, PatternFill, Alignment
+
     db = get_db()
-    propuestas = await db.propuestas.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(2000)
+    propuestas = await db.propuestas.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).sort("codigo", 1).to_list(2000)
     ternas = await db.ternas.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(500)
     jurados = await db.jurados.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(2000)
+
+    ejemplo_propuesta = propuestas[0]["codigo"] if propuestas else "P-0001"
+    ejemplo_terna = ternas[0].get("codigo", "T1") if ternas else "T1"
+    ejemplo_jurado = jurados[0].get("email", "jurado@ejemplo.co") if jurados else "jurado@ejemplo.co"
+
     wb = Workbook()
     ws = wb.active
     ws.title = "Asignaciones"
-    ws.append(["propuesta_codigo", "tipo_evaluacion", "terna_codigo", "jurado_email", "etapa"])
-    ws.append(["P-0001", "colectiva", "T1", "", "Evaluación Colectiva"])
-    ws.append(["P-0001", "individual", "", "jurado1@ejemplo.co", "Evaluación Individual"])
-    # Hoja referencia
-    ws2 = wb.create_sheet("Propuestas")
-    ws2.append(["código", "nombre", "subregión", "estado"])
+
+    headers_label = [
+        "Código propuesta *",
+        "Tipo de evaluación *",
+        "Código terna (solo colectiva)",
+        "Email del jurado (solo individual)",
+        "Etapa (opcional)",
+    ]
+    headers_tech = ["propuesta_codigo", "tipo_evaluacion", "terna_codigo", "jurado_email", "etapa"]
+
+    ws.append(headers_label)
+    label_font = Font(bold=True, color="FFFFFF", size=11)
+    label_fill = PatternFill("solid", fgColor="14776A")
+    for cell in ws[1]:
+        cell.font = label_font
+        cell.fill = label_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws.row_dimensions[1].height = 30
+
+    ws.append(headers_tech)
+    intern_font = Font(italic=True, color="5E6878", size=9)
+    intern_fill = PatternFill("solid", fgColor="F1F4F7")
+    for cell in ws[2]:
+        cell.font = intern_font
+        cell.fill = intern_fill
+        cell.alignment = Alignment(horizontal="center")
+    ws.row_dimensions[2].height = 16
+
+    ws.append([ejemplo_propuesta, "colectiva", ejemplo_terna, "", "Evaluación Colectiva"])
+    ws.append([ejemplo_propuesta, "individual", "", ejemplo_jurado, "Evaluación Individual"])
+
+    for col_idx, h in enumerate(headers_label, start=1):
+        letter = ws.cell(row=1, column=col_idx).column_letter
+        ws.column_dimensions[letter].width = max(18, min(40, len(h) + 5))
+    ws.freeze_panes = "A3"
+
+    # Hoja Instrucciones
+    inst = wb.create_sheet("Instrucciones")
+    inst.append(["Campo (técnico)", "Etiqueta visible", "Tipo", "Obligatorio", "Valores aceptados"])
+    for cell in inst[1]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor="E8F3F0")
+    inst_rows = [
+        ("propuesta_codigo", "Código de la propuesta", "texto", "Sí", "Ver hoja 'Catálogos' → Propuestas (columna código)"),
+        ("tipo_evaluacion", "Tipo de evaluación", "lista", "Sí", "individual | colectiva"),
+        ("terna_codigo", "Código de la terna", "texto", "Solo si tipo=colectiva", "Ver hoja 'Catálogos' → Ternas"),
+        ("jurado_email", "Email del jurado", "email", "Solo si tipo=individual", "Ver hoja 'Catálogos' → Jurados"),
+        ("etapa", "Etapa del flujo", "texto", "No", "Por defecto: 'Evaluación Individual' o 'Evaluación Colectiva' según tipo"),
+    ]
+    for r in inst_rows:
+        inst.append(list(r))
+    inst.append([])
+    inst.append(["Reglas", "—", "—", "—",
+                 "No se permite la MISMA propuesta + MISMO jurado/terna + MISMA etapa duplicada. "
+                 "Las filas duplicadas se rechazan automáticamente."])
+    inst.column_dimensions["A"].width = 22
+    inst.column_dimensions["B"].width = 28
+    inst.column_dimensions["C"].width = 12
+    inst.column_dimensions["D"].width = 20
+    inst.column_dimensions["E"].width = 80
+
+    # Hoja Catálogos: propuestas, ternas, jurados, tipos
+    cat_sheet = wb.create_sheet("Catálogos")
+    cat_sheet.append(["Catálogo", "Valor", "Descripción / Referencia"])
+    for cell in cat_sheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="14776A")
+    # Tipos
+    for v in ("individual", "colectiva"):
+        cat_sheet.append(["Tipos de evaluación", v, ""])
+    # Etapas
+    for v in ("Evaluación Individual", "Evaluación Colectiva", "Consolidación", "Subregional"):
+        cat_sheet.append(["Etapas", v, ""])
+    # Propuestas
     for p in propuestas:
-        ws2.append([p.get("codigo"), p.get("nombre"), (p.get("datos") or {}).get("subregion"), p.get("estado")])
-    ws3 = wb.create_sheet("Ternas")
-    ws3.append(["código", "nombre", "subregion"])
+        cat_sheet.append(["Propuestas",
+                           p.get("codigo"),
+                           f'{p.get("nombre","") or ""} · {(p.get("datos") or {}).get("subregion","") or ""}'])
+    # Ternas
     for t in ternas:
-        ws3.append([t.get("codigo"), t.get("nombre"), t.get("subregion")])
-    ws4 = wb.create_sheet("Jurados")
-    ws4.append(["email", "nombre", "subregiones"])
+        cat_sheet.append(["Ternas",
+                           t.get("codigo"),
+                           f'{t.get("nombre","") or ""} · {t.get("subregion") or t.get("territorio","") or ""}'])
+    # Jurados
     for j in jurados:
-        ws4.append([j.get("email"), j.get("nombre"), "; ".join(j.get("subregiones", []))])
+        cat_sheet.append(["Jurados",
+                           j.get("email"),
+                           f'{j.get("nombre","")} · {"; ".join(j.get("subregiones", []) or [])}'])
+    cat_sheet.column_dimensions["A"].width = 22
+    cat_sheet.column_dimensions["B"].width = 38
+    cat_sheet.column_dimensions["C"].width = 60
+    cat_sheet.freeze_panes = "A2"
+
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": "attachment; filename=plantilla_asignaciones.xlsx"})
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                              headers={"Content-Disposition": "attachment; filename=plantilla_asignaciones.xlsx"})
 
 
 @router.post("/asignaciones-import")
@@ -1027,20 +1242,37 @@ async def import_asignaciones(convocatoria_id: str = Form(...), file: UploadFile
     rows = list(ws.iter_rows(values_only=True))
     if not rows:
         return {"creados": 0, "rechazados": 0, "errores": []}
-    headers = [str(h).strip() if h else "" for h in rows[0]]
-    # cache
+
+    # Detectar fila técnica: la plantilla nueva tiene etiqueta humana en fila 1 y
+    # nombre_interno en fila 2; la vieja sólo trae nombre_interno en fila 1.
+    def _is_tech(r):
+        if not r:
+            return False
+        return (str(r[0] or "")).strip().lower() == "propuesta_codigo"
+
+    header_row_idx = 0
+    if not _is_tech(rows[0]) and len(rows) > 1 and _is_tech(rows[1]):
+        header_row_idx = 1
+    headers = [str(h).strip() if h else "" for h in rows[header_row_idx]]
+    data_start = header_row_idx + 1
+
     propuestas = {p["codigo"]: p for p in await db.propuestas.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(5000)}
     ternas = {t["codigo"]: t for t in await db.ternas.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(500)}
     jurados = {j["email"]: j for j in await db.jurados.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(2000)}
     created, errors = 0, []
-    for idx, row in enumerate(rows[1:], start=2):
+    for idx, row in enumerate(rows[data_start:], start=data_start + 1):
         try:
+            if not any(c for c in row if c not in (None, "", " ")):
+                continue
             data = {headers[i]: row[i] if i < len(row) else None for i in range(len(headers))}
             pcode = str(data.get("propuesta_codigo") or "").strip()
             if not pcode or pcode not in propuestas:
                 errors.append({"fila": idx, "error": f"Propuesta no encontrada: {pcode}"})
                 continue
             tipo = (data.get("tipo_evaluacion") or "individual").strip().lower()
+            if tipo not in ("individual", "colectiva"):
+                errors.append({"fila": idx, "error": f"Tipo inválido: {tipo} (debe ser individual o colectiva)"})
+                continue
             etapa = (data.get("etapa") or ("Evaluación Colectiva" if tipo == "colectiva" else "Evaluación Individual")).strip()
             doc = {
                 "id": str(uuid.uuid4()),
@@ -1063,14 +1295,20 @@ async def import_asignaciones(convocatoria_id: str = Form(...), file: UploadFile
                     errors.append({"fila": idx, "error": f"Jurado no encontrado: {je}"})
                     continue
                 doc["jurado_id"] = jurados[je]["id"]
-            # check duplicate
-            dup_q = {"convocatoria_id": convocatoria_id, "propuesta_id": doc["propuesta_id"], "tipo_evaluacion": tipo}
+            # Check duplicado (mismo propuesta+jurado/terna+tipo+etapa, no cancelada)
+            dup_q = {
+                "convocatoria_id": convocatoria_id,
+                "propuesta_id": doc["propuesta_id"],
+                "tipo_evaluacion": tipo,
+                "etapa": etapa,
+                "estado": {"$ne": "Cancelada"},
+            }
             if "jurado_id" in doc:
                 dup_q["jurado_id"] = doc["jurado_id"]
             if "terna_id" in doc:
                 dup_q["terna_id"] = doc["terna_id"]
             if await db.asignaciones.find_one(dup_q):
-                errors.append({"fila": idx, "error": "Asignación duplicada"})
+                errors.append({"fila": idx, "error": f"Asignación duplicada (propuesta {pcode} ya tiene esta {'terna' if tipo == 'colectiva' else 'jurado'} en {etapa})"})
                 continue
             await db.asignaciones.insert_one(doc)
             if tipo == "individual":

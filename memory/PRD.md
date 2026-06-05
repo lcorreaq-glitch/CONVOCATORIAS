@@ -433,7 +433,42 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 ### v22.1 — Fix UX: input REINICIAR uppercase (Feb 2026)
 - ✅ El input de confirmación "REINICIAR" en Administración → Sistema usaba `className="uppercase"` (solo visual) pero comparaba con `=== "REINICIAR"` exacto. Si el usuario escribía minúsculas, veía mayúsculas pero el valor real no coincidía y el botón nunca se habilitaba. Corregido normalizando con `.toUpperCase()` en el `onChange`.
 
+### v22.3 — Asignaciones sin duplicados + masivas manuales + plantilla pro (Feb 2026)
+
+**Backend `routes_data.py`**:
+- ✅ `POST /api/asignaciones`: validación dupe activa. Bloquea misma propuesta + mismo jurado/terna + misma etapa + estado activo. Devuelve **HTTP 409** con mensaje claro. Si la asignación previa fue Cancelada, sí permite reasignar.
+- ✅ `POST /api/asignaciones-import`: mismo check de duplicados incluyendo etapa; detecta fila técnica en fila 1 o fila 2 (compatible con plantilla nueva).
+- ✅ **NUEVO** `POST /api/asignaciones/bulk-create`: producto cartesiano `propuesta_ids × jurado_ids` (o `× terna_id` para colectiva). Salta silenciosamente las duplicadas. Devuelve `{creadas, duplicadas, erroneas}`.
+- ✅ **NUEVO** `POST /api/asignaciones/bulk-delete`: cancela N asignaciones en lote + anula evaluaciones individuales en Borrador/Iniciada asociadas.
+- ✅ **Plantilla bonita** `GET /api/asignaciones-template`: 2 filas header + 2 filas ejemplo + hojas **Instrucciones** y **Catálogos** (Tipos · Etapas · Propuestas · Ternas · Jurados).
+
+**Frontend `Asignaciones.jsx`**:
+- ✅ Modal "Nueva" rediseñado con dos pickers paralelos (multi-select con búsqueda) + resumen en vivo del cartesiano.
+- ✅ Tabla con checkboxes + barra de acción masiva (botón rojo "Cancelar N asignaciones") + toggle "Mostrar canceladas".
+
 ### v22.2 — Tipografía consistente, vista previa perfil jurado, QR de verificación de actas (Feb 2026)
+- ✅ `POST /api/asignaciones`: validación dupe activa. Bloquea misma propuesta + mismo jurado/terna + misma etapa + estado activo. Devuelve **HTTP 409** con mensaje claro. Si la asignación previa fue Cancelada, sí permite reasignar.
+- ✅ `POST /api/asignaciones-import`: mismo check de duplicados incluyendo etapa; detecta fila técnica en fila 1 o fila 2 (compatible con plantilla nueva).
+- ✅ **NUEVO** `POST /api/asignaciones/bulk-create`: producto cartesiano `propuesta_ids × jurado_ids` (o `× terna_id` para colectiva). Salta silenciosamente las duplicadas. Devuelve `{creadas, duplicadas, erroneas}`.
+- ✅ **NUEVO** `POST /api/asignaciones/bulk-delete`: cancela N asignaciones en lote + anula evaluaciones individuales en Borrador/Iniciada asociadas.
+- ✅ **Plantilla bonita** `GET /api/asignaciones-template`: 2 filas header (etiqueta + técnico) + 2 filas ejemplo + hojas **Instrucciones** (con regla "no duplicar") y **Catálogos** (Tipos · Etapas · Propuestas · Ternas · Jurados con email + subregiones).
+
+**Frontend `Asignaciones.jsx`**:
+- ✅ Modal "Nueva" rediseñado: dos pickers paralelos con búsqueda + multi-select con checkboxes. Toggle "Sel. todas" / "Limpiar". Resumen en vivo del producto cartesiano ("Se crearán X asignaciones").
+- ✅ Tabla con **checkboxes** por fila + "Seleccionar todas las activas" en el header.
+- ✅ **Barra de acción masiva**: botón rojo "Cancelar N asignaciones" aparece cuando hay selección.
+- ✅ Toggle "Mostrar canceladas" + contador (activas / canceladas / visibles).
+- ✅ Las filas canceladas se muestran con `opacity-60` y sin checkbox; el botón eliminar individual desaparece.
+- ✅ Capitalización consistente del nombre de la propuesta (igual que en `/propuestas`).
+
+**Validación e2e (curl)**:
+- 1ra asignación individual → 200 OK.
+- 2da idéntica → **409** "Ya existe una asignación activa para esta propuesta + jurado + etapa".
+- bulk-create 2 propuestas × 2 jurados → `{creadas: 3, duplicadas: 1}` (la 4ta era la ya existente).
+- bulk-delete con 4 ids → `{canceladas: 4}`.
+- Plantilla nueva: 3 hojas (`Asignaciones`, `Instrucciones`, `Catálogos`), 2 ejemplos prellenos con valores reales.
+
+
 
 **Tipografía consistente en `/propuestas`**:
 - ✅ Columnas Código (font-mono tabular-nums, color muted), Nombre (capitalize + lowercase para normalizar MAYÚSCULAS heredadas de Excel) y Organización (idem) ahora se muestran con estilo uniforme. Los datos en BD permanecen iguales — solo se transforma para visualización.
