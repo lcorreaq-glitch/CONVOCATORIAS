@@ -141,6 +141,23 @@ async def save_eval(eid: str, payload: EvalUpdate, user: dict = Depends(get_curr
         for c in criterios:
             if c.get("obligatorio") and c["id"] not in payload.puntajes:
                 raise HTTPException(status_code=400, detail=f"Falta puntaje obligatorio en '{c['nombre']}'")
+        # Validar observaciones por criterio obligatorias
+        for c in criterios:
+            if c.get("observacion_obligatoria"):
+                obs = (payload.observaciones or {}).get(c["id"], "")
+                if not obs or not str(obs).strip():
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"La observación de '{c['nombre']}' es obligatoria. Sustenta tu puntaje antes de finalizar.",
+                    )
+        # Validar observación final si la convocatoria la marca obligatoria (default True)
+        conv = await db.convocatorias.find_one({"id": ev["convocatoria_id"]}, {"_id": 0, "observacion_final_obligatoria": 1})
+        if (conv or {}).get("observacion_final_obligatoria", True):
+            if not payload.observacion_final or not str(payload.observacion_final).strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail="La observación final / conclusiones es obligatoria. Escribe una síntesis antes de finalizar.",
+                )
         updates["estado"] = "Finalizada"
         updates["fecha_finalizacion"] = now_iso()
 

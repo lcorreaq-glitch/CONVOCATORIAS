@@ -310,6 +310,23 @@ export default function ConvocatoriaDetail() {
                 data-testid="conv-jurados-por-propuesta"
               />
             </div>
+
+            <div className="border-t border-border pt-4">
+              <div className="flex items-center justify-between border border-amber-200 bg-amber-50/40 rounded-lg p-3">
+                <div className="flex-1 pr-4">
+                  <Label className="text-xs font-semibold">Observación final / conclusiones obligatoria</Label>
+                  <p className="text-[11.5px] text-muted-foreground mt-1">
+                    Si está activo, el jurado <strong>debe escribir conclusiones</strong> al final de cada evaluación individual
+                    antes de poder finalizarla. Recomendado para procesos institucionales y actas robustas.
+                  </p>
+                </div>
+                <Switch
+                  checked={f.observacion_final_obligatoria !== false}
+                  onCheckedChange={(v) => setF({ ...f, observacion_final_obligatoria: v })}
+                  data-testid="conv-obs-final-obligatoria"
+                />
+              </div>
+            </div>
           </div>
         </TabsContent>
       </Tabs>

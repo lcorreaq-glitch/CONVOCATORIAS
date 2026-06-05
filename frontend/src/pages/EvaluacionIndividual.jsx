@@ -93,6 +93,21 @@ export default function EvaluacionIndividual() {
       }, 0);
 
   const save = async (finalize = false) => {
+    if (finalize) {
+      // Pre-validación local (UX): mismas reglas que el backend para evitar viaje innecesario
+      const obsFaltantes = criterios
+        .filter((c) => c.observacion_obligatoria && !((observaciones[c.id] || "").trim()))
+        .map((c) => c.nombre);
+      if (obsFaltantes.length) {
+        toast.error(`Faltan observaciones obligatorias en: ${obsFaltantes.join(" · ")}`);
+        return;
+      }
+      const obsFinalObligatoria = conv?.observacion_final_obligatoria !== false;
+      if (obsFinalObligatoria && !obsFinal.trim()) {
+        toast.error("La observación final / conclusiones es obligatoria. Escribe una síntesis antes de finalizar.");
+        return;
+      }
+    }
     setSaving(true);
     try {
       const r = await api.patch(`/evaluaciones-individuales/${id}`, {
@@ -374,10 +389,10 @@ export default function EvaluacionIndividual() {
                       data-testid={`eval-obs-${c.id}`}
                       disabled={isLocked}
                       rows={2}
-                      placeholder="Observación (opcional) — sustenta tu puntaje…"
+                      placeholder={c.observacion_obligatoria ? "Observación obligatoria * — sustenta tu puntaje…" : "Observación (opcional) — sustenta tu puntaje…"}
                       value={observaciones[c.id] || ""}
                       onChange={(e) => setObs(c.id, e.target.value)}
-                      className="rounded-lg text-[13px] resize-none"
+                      className={`rounded-lg text-[13px] resize-none ${c.observacion_obligatoria && !((observaciones[c.id] || "").trim()) ? "border-amber-400 ring-1 ring-amber-200" : ""}`}
                     />
                     {!isLocked && (
                       <button type="button" onClick={() => sugerirObs(c.id)} data-testid={`ai-suggest-${c.id}`}
@@ -394,9 +409,10 @@ export default function EvaluacionIndividual() {
 
         {/* Observación final + Totales */}
         <div className="mt-6 grid lg:grid-cols-[2fr_1fr] gap-4">
-          <div className="rounded-lg border border-border bg-white p-4">
-            <label className="text-[10px] uppercase tracking-[0.16em] font-display font-bold text-muted-foreground mb-2 block">
+          <div className={`rounded-lg border bg-white p-4 ${(conv?.observacion_final_obligatoria !== false) && !obsFinal.trim() && !isLocked ? "border-amber-300 ring-1 ring-amber-100" : "border-border"}`}>
+            <label className="text-[10px] uppercase tracking-[0.16em] font-display font-bold text-muted-foreground mb-2 block flex items-center gap-1">
               Observación final / Conclusiones
+              {(conv?.observacion_final_obligatoria !== false) && <span className="text-red-500" title="Obligatoria">*</span>}
             </label>
             <Textarea
               data-testid="eval-obs-final"
@@ -404,9 +420,16 @@ export default function EvaluacionIndividual() {
               rows={5}
               value={obsFinal}
               onChange={(e) => setObsFinal(e.target.value)}
-              placeholder="Conclusiones y observaciones generales de la evaluación…"
+              placeholder={(conv?.observacion_final_obligatoria !== false)
+                ? "Obligatorio — Resume tus conclusiones, fortalezas, debilidades y recomendaciones de la evaluación…"
+                : "Conclusiones y observaciones generales de la evaluación…"}
               className="rounded-sm"
             />
+            {(conv?.observacion_final_obligatoria !== false) && (
+              <p className="text-[10.5px] text-amber-700 mt-1.5 italic">
+                Esta convocatoria exige conclusiones obligatorias antes de finalizar la evaluación.
+              </p>
+            )}
           </div>
           <div className="space-y-3">
             <div className="rounded-lg border border-[#CDE7E1] bg-gradient-to-br from-[#F0F7F5] to-white p-4">

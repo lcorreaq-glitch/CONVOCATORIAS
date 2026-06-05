@@ -433,6 +433,29 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 ### v22.1 — Fix UX: input REINICIAR uppercase (Feb 2026)
 - ✅ El input de confirmación "REINICIAR" en Administración → Sistema usaba `className="uppercase"` (solo visual) pero comparaba con `=== "REINICIAR"` exacto. Si el usuario escribía minúsculas, veía mayúsculas pero el valor real no coincidía y el botón nunca se habilitaba. Corregido normalizando con `.toUpperCase()` en el `onChange`.
 
+### v22.7 — Observaciones obligatorias parametrizables (Feb 2026)
+
+**Backend**:
+- ✅ Modelo `Convocatoria`: nuevo campo `observacion_final_obligatoria: bool = True` configurable en Configuración avanzada.
+- ✅ Modelo `Criterio`: nuevo campo `observacion_obligatoria: bool = False` por criterio (parametrizable desde Configuración → Criterios).
+- ✅ `PATCH /api/evaluaciones-individuales/{eid}` ahora valida al finalizar:
+  - Observaciones por criterio marcadas como obligatorias (rechaza con 400 + nombre del criterio).
+  - Observación final si la convocatoria la marca obligatoria (rechaza con 400 con mensaje claro).
+
+**Frontend**:
+- ✅ **Configuración → Criterios** (`CriteriosPanel.jsx`): nuevo toggle **"Observación obligatoria"** (color ámbar) en el formulario de cada criterio + columna en la lista mostrando este flag.
+- ✅ **Convocatoria → Configuración avanzada**: nuevo toggle **"Observación final / conclusiones obligatoria"** (Switch grande con ayuda contextual).
+- ✅ **`EvaluacionIndividual.jsx`**:
+  - Placeholder dinámico en cada criterio: "Observación obligatoria * — sustenta tu puntaje…" vs "Observación (opcional) — …" según configuración.
+  - Recuadro ámbar (`border-amber-400 ring`) en textarea cuando está pendiente y es obligatoria.
+  - Observación final muestra asterisco rojo `*` si es obligatoria, placeholder distinto y banner de aviso.
+  - Pre-validación local antes de finalizar (toast inmediato sin viaje al backend).
+
+**Validación e2e (curl)**:
+- Finalizar sin observación de criterio obligatorio → 400 "La observación de 'Incidencia e Impacto Comunitario' es obligatoria".
+- Finalizar sin observación final → 400 "La observación final / conclusiones es obligatoria".
+- Finalizar con todo OK → 200 Finalizada.
+
 ### v22.6 — Reasignar (sin re-evaluar) + modal con errores detallados (Feb 2026)
 
 **Backend `routes_data.py`**:

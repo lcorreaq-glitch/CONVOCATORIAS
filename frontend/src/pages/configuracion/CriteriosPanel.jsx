@@ -15,6 +15,7 @@ const CRITERIO_FLAGS = [
   { key: "oficial", label: "oficial", tone: "success", help: "El puntaje suma al total final." },
   { key: "diferencial", label: "diferencial", tone: "warning", help: "Información complementaria que no afecta el total." },
   { key: "obligatorio", label: "obligatorio", tone: "info", help: "El jurado debe diligenciarlo para finalizar." },
+  { key: "observacion_obligatoria", label: "obs. obligatoria", tone: "warning", help: "El jurado debe escribir una observación/sustentación para este criterio antes de finalizar." },
 ];
 
 export default function CriteriosPanel({ criterios, convId, reload }) {
@@ -22,7 +23,7 @@ export default function CriteriosPanel({ criterios, convId, reload }) {
   const [editing, setEditing] = useState(null);
   const [puntajeMax, setPuntajeMax] = useState(100);
   const [savingMax, setSavingMax] = useState(false);
-  const blank = { nombre: "", descripcion: "", puntaje_min: 0, puntaje_max: 10, ponderacion: 10, oficial: true, diferencial: false, orden: 0 };
+  const blank = { nombre: "", descripcion: "", puntaje_min: 0, puntaje_max: 10, ponderacion: 10, oficial: true, diferencial: false, obligatorio: true, observacion_obligatoria: false, orden: 0 };
   const [f, setF] = useState(blank);
 
   // cargar puntaje_max_evaluacion de la convocatoria
@@ -139,6 +140,11 @@ export default function CriteriosPanel({ criterios, convId, reload }) {
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex items-center justify-between border border-border rounded-lg p-2"><Label className="text-xs">Oficial (suma al total)</Label><Switch checked={!!f.oficial} onCheckedChange={(v) => setF({ ...f, oficial: v })} /></div>
                 <div className="flex items-center justify-between border border-border rounded-lg p-2"><Label className="text-xs">Diferencial</Label><Switch checked={!!f.diferencial} onCheckedChange={(v) => setF({ ...f, diferencial: v })} /></div>
+                <div className="flex items-center justify-between border border-border rounded-lg p-2"><Label className="text-xs">Puntaje obligatorio</Label><Switch checked={!!f.obligatorio} onCheckedChange={(v) => setF({ ...f, obligatorio: v })} data-testid="crit-obligatorio" /></div>
+                <div className="flex items-center justify-between border border-amber-200 bg-amber-50/50 rounded-lg p-2" title="Si está activo, el jurado debe escribir una sustentación para este criterio antes de finalizar la evaluación.">
+                  <Label className="text-xs">Observación obligatoria</Label>
+                  <Switch checked={!!f.observacion_obligatoria} onCheckedChange={(v) => setF({ ...f, observacion_obligatoria: v })} data-testid="crit-obs-obligatoria" />
+                </div>
               </div>
             </div>
             <DialogFooter>

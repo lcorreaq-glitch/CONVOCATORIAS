@@ -24,7 +24,8 @@ class ConvocatoriaIn(BaseModel):
     fechas: dict = Field(default_factory=dict)
     modalidad_evaluacion_colectiva: str = "promedio_individuales"
     modelo_expediente: str = "externo"
-    jurados_por_propuesta: int = 3  # número objetivo/máximo de jurados individuales por propuesta
+    jurados_por_propuesta: int = 3
+    observacion_final_obligatoria: bool = True  # si True, el jurado DEBE escribir conclusiones antes de finalizar la evaluación individual
     imagen_grafica: dict = Field(default_factory=dict)
 
 
@@ -255,6 +256,7 @@ class CriterioIn(BaseModel):
     oficial: bool = True
     diferencial: bool = False
     obligatorio: bool = True
+    observacion_obligatoria: bool = False  # si True, el jurado DEBE escribir sustentación para este criterio antes de finalizar
     orden: int = 0
 
 
