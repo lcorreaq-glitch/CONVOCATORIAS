@@ -393,3 +393,20 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - Patrón de inserción Mongo: siempre `await db.X.insert_one(doc); doc.pop("_id", None)` antes de retornar (motor muta el dict).
 - Auth cross-origin: usar Bearer token via `Authorization` header, NO cookies (CORS wildcard + credentials no es válido).
 - Lock_key de brute-force: identifier-only (no IP) para sobrevivir a k8s ingress.
+
+### v22 — Plantilla de carga masiva alineada al formulario dinámico (Feb 2026)
+**Backend `routes_data.py` — `GET /api/propuestas-template`**:
+- ✅ Mapeo de tipos corregido: reconoce los tipos reales del sistema (`lista`, `seleccion_multiple`, `si_no`, `texto_corto`, `texto_largo`, `numero_entero`, `numero_decimal`, `fecha`, `hora`, `url`, `email`, `archivo`).
+- ✅ Nueva columna **"Estado (opcional)"** al final de la plantilla con valor por defecto sugerido del catálogo.
+- ✅ Nueva hoja **"Catálogos"** con todos los valores válidos de cada catálogo referenciado por algún campo del formulario (referencia rápida al usuario).
+- ✅ Hoja "Instrucciones" actualizada con descripciones precisas por tipo y referencia cruzada a la hoja Catálogos.
+
+**Backend `routes_data.py` — `POST /api/propuestas-import`**:
+- ✅ Lee la columna `estado` del Excel y la valida contra el catálogo "Estados de Propuesta" si existe. Si el valor no es válido, rechaza la fila con mensaje claro. Si está vacío, default `Registrada`.
+- ✅ Recupera la forma canónica (case-insensitive match) del valor del catálogo.
+
+**Frontend `Administracion.jsx`**:
+- ✅ Removido panel "Catálogo Estados de Propuesta" de Administración → Sistema. Ahora se gestiona exclusivamente desde **Configuración → Catálogos** como solicitó el usuario, sin botones duplicados/confusos.
+
+**Validación e2e**: descarga plantilla (3 hojas, 18 columnas) → llena fila con estado="Asignada" + fila inválida → import 200 → creados=1, rechazados=1, error "Estado 'EstadoQueNoExiste' no es válido (ver hoja 'Catálogos')".
+

@@ -947,7 +947,6 @@ function SistemaPanel() {
   });
   const [resetResult, setResetResult] = useState(null);
   const [seedResult, setSeedResult] = useState(null);
-  const [estadosResult, setEstadosResult] = useState(null);
 
   const doReset = async () => {
     if (resetForm.confirmacion !== "REINICIAR") {
@@ -977,17 +976,6 @@ function SistemaPanel() {
       const r = await api.post(`/admin/seed-test-users${qs}`);
       setSeedResult(r.data);
       toast.success(`${r.data.creados} creados, ${r.data.actualizados} actualizados`);
-    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
-    finally { setBusy(false); }
-  };
-
-  const doSeedEstados = async () => {
-    if (!activeConvocatoriaId) { toast.error("Selecciona una convocatoria"); return; }
-    setBusy(true);
-    try {
-      const r = await api.post(`/admin/seed-estados-propuesta?convocatoria_id=${activeConvocatoriaId}`);
-      setEstadosResult(r.data);
-      toast.success(r.data.ya_existia ? "El catálogo ya existía" : "Catálogo creado");
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     finally { setBusy(false); }
   };
@@ -1077,28 +1065,8 @@ function SistemaPanel() {
         )}
       </div>
 
-      {/* SEED ESTADOS PROPUESTA */}
-      <div className="border border-[#E2E7EC] rounded-xl bg-white p-5 shadow-card">
-        <h3 className="font-display font-bold text-[15px] flex items-center gap-2">
-          <ClipboardList className="w-5 h-5 text-[#14776A]" /> Catálogo "Estados de Propuesta"
-        </h3>
-        <p className="text-[13px] text-[#5E6878] mt-1">
-          Crea (idempotente) el catálogo de estados que se usa en el workflow de habilitación documental:
-          Registrada → En revisión documental → Habilitada / No habilitada / Subsanación pendiente → Subsanada → … → Ganadora.
-          Luego puedes editarlo desde <strong>Configuración → Catálogos</strong>.
-        </p>
-        <div className="flex justify-end mt-3">
-          <Button onClick={doSeedEstados} disabled={busy || !activeConvocatoriaId} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-md gap-2" data-testid="seed-estados-btn">
-            <ClipboardList className="w-4 h-4" /> Generar catálogo en la convocatoria activa
-          </Button>
-        </div>
-        {!activeConvocatoriaId && <p className="mt-2 text-[12px] text-amber-700">Selecciona primero una convocatoria activa en el sidebar.</p>}
-        {estadosResult && (
-          <div className="mt-3 bg-emerald-50 border border-emerald-200 rounded-md p-3 text-[12px]">
-            ✓ {estadosResult.ya_existia ? "El catálogo ya existía" : "Catálogo creado correctamente"}.
-          </div>
-        )}
-      </div>
+      {/* Nota: el catálogo "Estados de Propuesta" se gestiona exclusivamente desde
+          Configuración → Catálogos. Aquí no aparece duplicado para evitar confusión. */}
     </div>
   );
 }

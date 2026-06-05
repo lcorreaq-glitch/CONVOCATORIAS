@@ -125,18 +125,27 @@ async def propuestas_template(convocatoria_id: str, user: dict = Depends(get_cur
     cat_by_id = {c["id"]: c for c in catalogos}
     cat_by_nombre = {c["nombre"]: c for c in catalogos}
 
+    # Catálogo "Estados de Propuesta" (si existe se usa para validar/sugerir; si no, fallback estático)
+    estados_cat = cat_by_nombre.get("Estados de Propuesta") or cat_by_nombre.get("Estados de propuesta")
+    if estados_cat:
+        estados_validos = [v.get("valor") for v in (estados_cat.get("valores") or []) if v.get("activo") is not False]
+    else:
+        estados_validos = ["Registrada", "En revisión", "Habilitada", "No habilitada", "Subsanación pendiente"]
+
     wb = Workbook()
     ws = wb.active
     ws.title = "Propuestas"
 
-    # Encabezados técnicos (lo que el importer lee). Solo `codigo` y `nombre` son top-level fijos.
+    # Encabezados técnicos (lo que el importer lee). `codigo`, `nombre` y `estado` son top-level fijos.
     # La organización viene como campo dinámico (ej. `nombre_organizacion`) para no duplicar.
-    headers_tech = ["codigo", "nombre"] + [c["nombre_interno"] for c in campos]
+    headers_tech = ["codigo", "nombre"] + [c["nombre_interno"] for c in campos] + ["estado"]
     # Encabezados humanos
     headers_label = [
         "Código (opcional)",
         "Nombre de la propuesta *",
-    ] + [((c.get("nombre_visible") or c["nombre_interno"]) + (" *" if c.get("obligatorio") else "")) for c in campos]
+    ] + [((c.get("nombre_visible") or c["nombre_interno"]) + (" *" if c.get("obligatorio") else "")) for c in campos] + [
+        "Estado (opcional)",
+    ]
 
     # Fila 1: etiquetas humanas (visualmente clara para el usuario)
     ws.append(headers_label)
@@ -159,13 +168,48 @@ async def propuestas_template(convocatoria_id: str, user: dict = Depends(get_cur
     ws.row_dimensions[2].height = 16
 
     # Fila 3: ejemplo
-    ws.append(["P-0001", "Mi propuesta ejemplo"] + ["" for _ in campos])
+    ws.append(["P-0001", "Mi propuesta ejemplo"] + ["" for _ in campos] + [estados_validos[0] if estados_validos else "Registrada"])
 
     # Ancho de columnas razonable
     for col_idx, h in enumerate(headers_label, start=1):
         letter = ws.cell(row=1, column=col_idx).column_letter
         ws.column_dimensions[letter].width = max(16, min(38, len(h) + 4))
     ws.freeze_panes = "A3"
+
+    # Mapeo de tipos: traduce los tipos reales del sistema a una descripción amigable.
+    def _describe_field(c):
+        tipo = c.get("tipo", "texto")
+        # Tipos basados en catálogo
+        if tipo in ("lista", "catalogo", "select"):
+            cat_ref = c.get("catalogo_id") or c.get("catalogo")
+            cat = cat_by_id.get(cat_ref) or cat_by_nombre.get(cat_ref or "")
+            if cat:
+                vals = [v.get("valor") for v in (cat.get("valores") or []) if v.get("activo") is not False]
+                return "lista", f"Valor exacto de: {cat.get('nombre')}  →  Ver hoja 'Catálogos'"
+            return tipo, "Texto libre"
+        if tipo in ("multi_catalogo", "multi_select", "seleccion_multiple", "multiseleccion"):
+            cat_ref = c.get("catalogo_id") or c.get("catalogo")
+            cat = cat_by_id.get(cat_ref) or cat_by_nombre.get(cat_ref or "")
+            if cat:
+                return "multi-lista", f"Uno o varios separados por ;  de: {cat.get('nombre')}  →  Ver hoja 'Catálogos'"
+            return tipo, "Texto libre (separar con ;)"
+        if tipo in ("si_no", "boolean", "booleano"):
+            return tipo, "sí | no  (también acepta true/false, 1/0)"
+        if tipo == "fecha":
+            return tipo, "Formato YYYY-MM-DD (ej. 2026-03-15)"
+        if tipo == "hora":
+            return tipo, "Formato HH:MM (24h, ej. 14:30)"
+        if tipo in ("numero", "numero_entero", "numero_decimal", "entero", "decimal"):
+            return tipo, "Número entero o decimal"
+        if tipo in ("url", "enlace"):
+            return tipo, "URL completa (https://...)"
+        if tipo in ("texto_corto", "texto", "texto_largo", "textarea"):
+            return tipo, "Texto libre"
+        if tipo in ("email", "correo"):
+            return tipo, "Correo electrónico válido"
+        if tipo == "archivo":
+            return tipo, "(Subir luego desde la UI, no se carga por Excel)"
+        return tipo, "Texto libre"
 
     # Hoja "Instrucciones" con valores válidos de catálogos por campo
     inst = wb.create_sheet("Instrucciones")
@@ -176,39 +220,50 @@ async def propuestas_template(convocatoria_id: str, user: dict = Depends(get_cur
     inst.append(["codigo", "Código", "texto", "No", "Opcional. Si vacío se autogenera (P-0001, P-0002...)"])
     inst.append(["nombre", "Nombre de la propuesta", "texto", "Sí", "Cualquier texto"])
     for c in campos:
-        valores = ""
-        tipo = c.get("tipo", "texto")
-        if tipo in ("catalogo", "multi_catalogo", "select", "multi_select"):
-            cat_ref = c.get("catalogo_id") or c.get("catalogo")
-            cat = cat_by_id.get(cat_ref) or cat_by_nombre.get(cat_ref or "")
-            if cat:
-                vals = [v.get("valor") for v in (cat.get("valores") or []) if v.get("activo") is not False]
-                if tipo.startswith("multi"):
-                    valores = "Separar varios con ; — Valores: " + " | ".join(vals)
-                else:
-                    valores = " | ".join(vals)
-        elif tipo == "boolean":
-            valores = "true | false  (también acepta sí/no, 1/0)"
-        elif tipo == "fecha":
-            valores = "Formato YYYY-MM-DD (ej. 2026-03-15)"
-        elif tipo == "numero":
-            valores = "Número entero o decimal"
-        elif tipo == "url":
-            valores = "URL completa (https://...)"
+        tipo_label, valores = _describe_field(c)
         inst.append(
             [
                 c["nombre_interno"],
                 c.get("nombre_visible") or c["nombre_interno"],
-                tipo,
+                tipo_label,
                 "Sí" if c.get("obligatorio") else "No",
-                valores or "Texto libre",
+                valores,
             ]
         )
+    # Fila final: estado
+    inst.append(["estado", "Estado de la propuesta", "lista", "No",
+                 ("Uno de: " + " | ".join(estados_validos)) if estados_validos else "Texto libre — por defecto 'Registrada'"])
     inst.column_dimensions["A"].width = 28
     inst.column_dimensions["B"].width = 32
     inst.column_dimensions["C"].width = 14
     inst.column_dimensions["D"].width = 12
     inst.column_dimensions["E"].width = 70
+
+    # Hoja "Catálogos" — referencia rápida con todos los valores válidos
+    cat_sheet = wb.create_sheet("Catálogos")
+    cat_sheet.append(["Catálogo", "Valor", "Descripción / Padre"])
+    for cell in cat_sheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="14776A")
+    # Solo catálogos referenciados por algún campo del formulario o por estado
+    cat_ids_usados = set()
+    for c in campos:
+        ref = c.get("catalogo_id") or c.get("catalogo")
+        if ref:
+            cat_ids_usados.add(ref)
+    if estados_cat:
+        cat_ids_usados.add(estados_cat.get("id"))
+    for cat in catalogos:
+        if cat.get("id") not in cat_ids_usados and cat.get("nombre") not in cat_ids_usados:
+            continue
+        for v in (cat.get("valores") or []):
+            if v.get("activo") is False:
+                continue
+            cat_sheet.append([cat.get("nombre"), v.get("valor"), v.get("descripcion") or v.get("padre_valor") or ""])
+    cat_sheet.column_dimensions["A"].width = 28
+    cat_sheet.column_dimensions["B"].width = 36
+    cat_sheet.column_dimensions["C"].width = 40
+    cat_sheet.freeze_panes = "A2"
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -228,6 +283,19 @@ async def import_propuestas(convocatoria_id: str = Form(...), file: UploadFile =
     rows = list(ws.iter_rows(values_only=True))
     if not rows:
         return {"creados": 0, "rechazados": 0, "errores": []}
+
+    # Cargar catálogo "Estados de Propuesta" para validar la columna `estado`
+    estados_cat = await db.catalogos.find_one(
+        {"convocatoria_id": convocatoria_id, "nombre": {"$in": ["Estados de Propuesta", "Estados de propuesta"]}},
+        {"_id": 0},
+    )
+    estados_validos_lower = set()
+    if estados_cat:
+        estados_validos_lower = {
+            (v.get("valor") or "").strip().lower()
+            for v in (estados_cat.get("valores") or [])
+            if v.get("activo") is not False
+        }
 
     # Detectar fila de encabezados técnicos (nombre_interno). Puede ser fila 1 (plantilla vieja)
     # o fila 2 (plantilla nueva con etiquetas humanas arriba).
@@ -253,7 +321,26 @@ async def import_propuestas(convocatoria_id: str = Form(...), file: UploadFile =
             if not data.get("nombre"):
                 errors.append({"fila": idx, "error": "Falta nombre"})
                 continue
-            datos = {k: v for k, v in data.items() if k not in ("codigo", "nombre", "organizacion") and v is not None}
+            # Procesar estado (validar contra catálogo si existe)
+            estado_raw = (data.get("estado") or "").strip() if isinstance(data.get("estado"), str) else (data.get("estado") or "")
+            estado = "Registrada"
+            if estado_raw:
+                estado_str = str(estado_raw).strip()
+                if estados_validos_lower:
+                    if estado_str.lower() not in estados_validos_lower:
+                        errors.append({"fila": idx, "error": f"Estado '{estado_str}' no es válido (ver hoja 'Catálogos')"})
+                        continue
+                    # Recuperar la forma canónica del valor
+                    for v in (estados_cat.get("valores") or []):
+                        if (v.get("valor") or "").strip().lower() == estado_str.lower():
+                            estado = v.get("valor")
+                            break
+                else:
+                    estado = estado_str
+            datos = {
+                k: v for k, v in data.items()
+                if k not in ("codigo", "nombre", "organizacion", "estado") and v is not None
+            }
             # Convert dates/times to string if needed
             for k, v in datos.items():
                 if hasattr(v, "isoformat"):
@@ -270,7 +357,7 @@ async def import_propuestas(convocatoria_id: str = Form(...), file: UploadFile =
                 "nombre": str(data["nombre"]),
                 "organizacion": str(org),
                 "datos": datos,
-                "estado": "Registrada",
+                "estado": estado,
                 "created_at": now_iso(),
             }
             await db.propuestas.insert_one(doc)
