@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { toast } from "sonner";
 import {
-  ArrowLeft, ExternalLink, Save, CheckCircle2, PenLine, FileText, Lock, Sparkles,
+  ArrowLeft, ExternalLink, Save, CheckCircle2, PenLine, FileText, Lock, Sparkles, RefreshCw,
   Building2, MapPin, Calendar, Layers, Eye, ChevronDown, Eye as EyeIcon,
 } from "lucide-react";
 import { TID } from "@/constants/testIds";
@@ -153,7 +153,10 @@ export default function EvaluacionIndividual() {
     .filter((c) => !["link_expediente"].includes(c.nombre_interno)), [campos]);
 
   if (!ev || !propuesta) return <div className="p-10 text-muted-foreground">Cargando…</div>;
-  const isLocked = ["Bloqueada", "Firmada", "Anulada"].includes(ev.estado);
+  // Bloqueo: para jurado, Finalizada también es de solo lectura (debe solicitar reapertura).
+  // Para admin/super, Finalizada permite editar para correcciones puntuales.
+  const isLocked = ["Bloqueada", "Firmada", "Anulada"].includes(ev.estado) ||
+                   (isJurado && ev.estado === "Finalizada");
   const totalOf = total(true);
   const maxOf = conv?.configuracion?.puntaje_max_evaluacion || 100;
   const totalDif = total(false);
@@ -213,6 +216,44 @@ export default function EvaluacionIndividual() {
           {(ev.estado === "Firmada" || ev.estado === "Finalizada") && !isJurado && (
             <Button onClick={downloadActa} variant="outline" className="rounded-sm gap-2" data-testid="download-acta-btn">
               <FileText className="w-4 h-4" />Acta PDF
+            </Button>
+          )}
+          {/* Reabrir (solo admin, evaluación Finalizada — no Firmada) */}
+          {ev.estado === "Finalizada" && !isJurado && (
+            <Button
+              onClick={async () => {
+                const motivo = window.prompt("Motivo de la reapertura (queda en auditoría):");
+                if (!motivo || !motivo.trim()) return;
+                try {
+                  await api.post(`/evaluaciones-individuales/${ev.id}/reabrir`, { motivo });
+                  toast.success("Evaluación reabierta. El jurado puede modificarla.");
+                  const r = await api.get(`/evaluaciones-individuales/${ev.id}`);
+                  setEv(r.data);
+                } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+              }}
+              variant="outline"
+              className="rounded-sm gap-2 text-amber-700 border-amber-300 hover:bg-amber-50"
+              data-testid="eval-reabrir-btn"
+            >
+              <RefreshCw className="w-4 h-4" />Reabrir
+            </Button>
+          )}
+          {/* Solicitar reapertura (solo jurado, evaluación Finalizada) */}
+          {ev.estado === "Finalizada" && isJurado && (
+            <Button
+              onClick={async () => {
+                const motivo = window.prompt("¿Por qué necesitas modificar esta evaluación finalizada? (el admin debe aprobar)");
+                if (!motivo || !motivo.trim()) return;
+                try {
+                  await api.post(`/evaluaciones-individuales/${ev.id}/solicitar-reapertura`, { motivo });
+                  toast.success("Solicitud enviada al administrador. Espera su aprobación.");
+                } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+              }}
+              variant="outline"
+              className="rounded-sm gap-2 text-amber-700 border-amber-300 hover:bg-amber-50"
+              data-testid="eval-solicitar-reapertura-btn"
+            >
+              <RefreshCw className="w-4 h-4" />Solicitar reapertura
             </Button>
           )}
         </div>

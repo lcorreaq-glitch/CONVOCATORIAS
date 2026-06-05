@@ -433,6 +433,37 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 ### v22.1 — Fix UX: input REINICIAR uppercase (Feb 2026)
 - ✅ El input de confirmación "REINICIAR" en Administración → Sistema usaba `className="uppercase"` (solo visual) pero comparaba con `=== "REINICIAR"` exacto. Si el usuario escribía minúsculas, veía mayúsculas pero el valor real no coincidía y el botón nunca se habilitaba. Corregido normalizando con `.toUpperCase()` en el `onChange`.
 
+### v22.8 — Bloqueo post-finalización + Reapertura con flujo de aprobación + Historial de versiones (Feb 2026)
+
+**Backend `routes_eval.py`**:
+- ✅ **Bloqueo definitivo para jurado**: PATCH a una evaluación `Finalizada` devuelve 403 con mensaje "Debes solicitar al administrador la reapertura". Estados `Firmada/Bloqueada/Anulada` siguen bloqueados para todos.
+- ✅ **NUEVO** `POST /api/evaluaciones-individuales/{eid}/reabrir` (admin) — Requiere motivo obligatorio. Bloqueado si estado=Firmada (institucional: tras firma, sólo corrección/adenda). Crea snapshot en `evaluaciones_versiones` antes de cambiar estado a "Reabierta".
+- ✅ **NUEVO** `POST /api/evaluaciones-individuales/{eid}/solicitar-reapertura` (jurado) — Crea solicitud Pendiente con motivo. Evita duplicados.
+- ✅ **NUEVOS** `GET /api/reapertura-solicitudes`, `POST /reapertura-solicitudes/{sid}/aprobar`, `/rechazar` — Panel admin para gestionar solicitudes. Aprobar reabre automáticamente la evaluación.
+- ✅ **NUEVO** `GET /api/evaluaciones-individuales/{eid}/versiones` — Historial de snapshots (anteriores a cada reapertura).
+- ✅ Estado nuevo: **"Reabierta"** (editable por jurado, semánticamente distinto a Borrador).
+- ✅ Contadores en evaluación: `reaperturas`, `ultima_reapertura_at`, `ultima_reapertura_motivo`, `ultima_reapertura_por`.
+
+**Frontend `EvaluacionIndividual.jsx`**:
+- ✅ `isLocked` ahora incluye `Finalizada` cuando el usuario es jurado.
+- ✅ Botón **"Reabrir"** (ámbar) para admin cuando la evaluación está Finalizada — pide motivo.
+- ✅ Botón **"Solicitar reapertura"** (ámbar) para jurado cuando está Finalizada — pide motivo y muestra toast.
+
+**Frontend `Administracion.jsx`** — Nuevo tab **"Reaperturas"**:
+- ✅ Lista de solicitudes con filtro (Pendientes / Aprobadas / Rechazadas / Todas).
+- ✅ Cada fila: jurado, propuesta, motivo, fecha, estado. Botones Aprobar/Rechazar (rechazo pide motivo).
+- ✅ Tras aprobar, la evaluación pasa a "Reabierta" automáticamente.
+
+**Ranking**: usa la evaluación actual (no las versiones históricas), por lo que tras una reapertura aprobada el jurado ajusta sus puntajes y al volver a finalizar, el ranking refleja el valor más reciente. Las versiones quedan como auditoría.
+
+**Validación e2e (curl)**:
+- Admin PATCH Finalizada → 200 (admin sí puede para correcciones puntuales).
+- Jurado PATCH Finalizada → **403** "Debes solicitar al administrador la reapertura".
+- Jurado solicita reapertura → 200 con `solicitud_id` y `estado: Pendiente`.
+- Duplicar solicitud pendiente → **409**.
+- Admin aprueba → 200, evaluación pasa a `Reabierta`, contador `reaperturas=1`, snapshot creado en `evaluaciones_versiones` con `estado=Finalizada` y `puntaje_total=30.0`.
+- Jurado PATCH Reabierta → 200 (ahora sí puede editar).
+
 ### v22.7 — Observaciones obligatorias parametrizables (Feb 2026)
 
 **Backend**:

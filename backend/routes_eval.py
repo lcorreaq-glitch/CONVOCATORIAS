@@ -2,7 +2,7 @@
 import uuid
 import os
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Body
 from pydantic import BaseModel, Field
 
 from db import get_db, now_iso
@@ -83,12 +83,20 @@ async def save_eval(eid: str, payload: EvalUpdate, user: dict = Depends(get_curr
     if not ev:
         raise HTTPException(status_code=404, detail="Evaluación no encontrada")
     # Auth: solo el jurado dueño o admin
-    if user["role"] not in ("admin_general", "admin_convocatoria"):
+    is_admin = user["role"] in ("admin_general", "admin_convocatoria")
+    if not is_admin:
         jurado = await db.jurados.find_one({"id": ev["jurado_id"]})
         if not jurado or jurado.get("email") != user["email"]:
             raise HTTPException(status_code=403, detail="No autorizado para editar esta evaluación")
+    # Estados terminales sin escapatoria
     if ev["estado"] in ("Bloqueada", "Firmada", "Anulada"):
-        raise HTTPException(status_code=400, detail=f"Evaluación en estado {ev['estado']} no editable")
+        raise HTTPException(status_code=400, detail=f"Evaluación en estado {ev['estado']} no editable. Una evaluación firmada o bloqueada no puede modificarse.")
+    # Jurado: si está Finalizada, no puede editar — debe solicitar reapertura primero.
+    if ev["estado"] == "Finalizada" and not is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="La evaluación está Finalizada. Debes solicitar al administrador la reapertura para poder modificarla.",
+        )
 
     # Validar puntajes contra criterios
     criterios = await db.criterios.find({"convocatoria_id": ev["convocatoria_id"]}, {"_id": 0}).to_list(100)
@@ -243,11 +251,162 @@ async def firmar_eval(eid: str, user: dict = Depends(get_current_user)):
 
 
 @router.post("/evaluaciones-individuales/{eid}/reabrir")
-async def reabrir_eval(eid: str, user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+async def reabrir_eval(eid: str, body: dict = Body(default={}),
+                       user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    """Reabre una evaluación Finalizada para que el jurado pueda modificarla.
+    - Bloqueada si la evaluación está Firmada/Bloqueada/Anulada (estado terminal).
+    - Crea snapshot en `evaluaciones_versiones` para auditoría histórica.
+    - Estado pasa a 'Reabierta' (editable, computado por el frontend igual que Borrador).
+    - El motivo es obligatorio y queda en la auditoría.
+    """
     db = get_db()
-    await db.evaluaciones_individuales.update_one({"id": eid}, {"$set": {"estado": "En edición"}})
-    await audit(user, "reopen", "evaluaciones_individuales", eid)
-    return {"ok": True}
+    ev = await db.evaluaciones_individuales.find_one({"id": eid}, {"_id": 0})
+    if not ev:
+        raise HTTPException(404, "Evaluación no encontrada")
+    if ev.get("estado") in ("Firmada", "Bloqueada", "Anulada"):
+        raise HTTPException(
+            409,
+            f"No se puede reabrir: la evaluación está {ev['estado']}. "
+            f"Si hay un error tras la firma debe registrarse una corrección/adenda en lugar de modificar.",
+        )
+    if ev.get("estado") not in ("Finalizada",):
+        raise HTTPException(409, f"La evaluación está en estado '{ev['estado']}', no requiere reapertura.")
+    motivo = (body or {}).get("motivo") or ""
+    if not motivo.strip():
+        raise HTTPException(400, "El motivo de la reapertura es obligatorio")
+    # Snapshot histórico
+    snap = {k: ev.get(k) for k in ("estado", "puntajes", "observaciones", "observacion_final",
+                                     "puntaje_total", "puntaje_diferencial_total", "fecha_finalizacion")}
+    await db.evaluaciones_versiones.insert_one({
+        "id": str(uuid.uuid4()),
+        "evaluacion_id": eid,
+        "convocatoria_id": ev["convocatoria_id"],
+        "snapshot": snap,
+        "motivo_reapertura": motivo,
+        "reabierta_por": user.get("username"),
+        "reabierta_at": now_iso(),
+    })
+    # Marcar reabierta
+    await db.evaluaciones_individuales.update_one(
+        {"id": eid},
+        {"$set": {"estado": "Reabierta", "reaperturas": (ev.get("reaperturas", 0) + 1),
+                  "ultima_reapertura_at": now_iso(), "ultima_reapertura_motivo": motivo,
+                  "ultima_reapertura_por": user.get("username")},
+         "$unset": {"fecha_finalizacion": ""}}
+    )
+    # Aprobar todas las solicitudes pendientes de esta evaluación (si las hay)
+    await db.reapertura_solicitudes.update_many(
+        {"evaluacion_id": eid, "estado": "Pendiente"},
+        {"$set": {"estado": "Aprobada", "resuelta_at": now_iso(), "resuelta_por": user.get("username")}}
+    )
+    await audit(user, "reopen", "evaluaciones_individuales", eid, detalle=motivo)
+    return {"ok": True, "estado": "Reabierta", "version_guardada": True}
+
+
+# ==================== SOLICITUDES DE REAPERTURA (Jurado → Admin) ====================
+@router.post("/evaluaciones-individuales/{eid}/solicitar-reapertura")
+async def solicitar_reapertura(eid: str, body: dict = Body(...),
+                                 user: dict = Depends(get_current_user)):
+    """El jurado solicita reapertura de su evaluación Finalizada.
+    El admin la verá en /reapertura-solicitudes y podrá aprobar o rechazar.
+    Bloqueada si la evaluación está Firmada/Bloqueada/Anulada.
+    """
+    db = get_db()
+    ev = await db.evaluaciones_individuales.find_one({"id": eid}, {"_id": 0})
+    if not ev:
+        raise HTTPException(404, "Evaluación no encontrada")
+    # Auth: el jurado dueño
+    jurado = await db.jurados.find_one({"id": ev["jurado_id"]})
+    if not jurado or jurado.get("email") != user.get("email"):
+        if user["role"] not in ("admin_general", "admin_convocatoria"):
+            raise HTTPException(403, "Solo el jurado dueño puede solicitar la reapertura")
+    if ev.get("estado") in ("Firmada", "Bloqueada", "Anulada"):
+        raise HTTPException(409, f"No se puede solicitar: la evaluación está {ev['estado']}. "
+                                  f"Si requiere modificación tras firma, debe registrarse una corrección/adenda.")
+    if ev.get("estado") != "Finalizada":
+        raise HTTPException(409, f"La evaluación está en estado '{ev['estado']}' — ya es editable.")
+    motivo = (body or {}).get("motivo") or ""
+    if not motivo.strip():
+        raise HTTPException(400, "Debes indicar el motivo de la solicitud")
+    # Evitar duplicar solicitudes pendientes
+    ya = await db.reapertura_solicitudes.find_one({"evaluacion_id": eid, "estado": "Pendiente"})
+    if ya:
+        raise HTTPException(409, "Ya tienes una solicitud Pendiente para esta evaluación")
+    sid = str(uuid.uuid4())
+    await db.reapertura_solicitudes.insert_one({
+        "id": sid,
+        "evaluacion_id": eid,
+        "convocatoria_id": ev["convocatoria_id"],
+        "propuesta_id": ev["propuesta_id"],
+        "jurado_id": ev["jurado_id"],
+        "solicitada_por": user.get("username"),
+        "motivo": motivo,
+        "estado": "Pendiente",
+        "created_at": now_iso(),
+    })
+    await audit(user, "request_reopen", "evaluaciones_individuales", eid, detalle=motivo)
+    return {"ok": True, "solicitud_id": sid, "estado": "Pendiente"}
+
+
+@router.get("/reapertura-solicitudes")
+async def listar_solicitudes(convocatoria_id: str, estado: Optional[str] = None,
+                              user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    db = get_db()
+    q = {"convocatoria_id": convocatoria_id}
+    if estado:
+        q["estado"] = estado
+    items = await db.reapertura_solicitudes.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+    # Enriquecer
+    jurs = {j["id"]: j for j in await db.jurados.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(2000)}
+    props = {p["id"]: p for p in await db.propuestas.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(5000)}
+    for it in items:
+        j = jurs.get(it.get("jurado_id"), {})
+        p = props.get(it.get("propuesta_id"), {})
+        it["jurado_nombre"] = j.get("nombre")
+        it["jurado_email"] = j.get("email")
+        it["propuesta_codigo"] = p.get("codigo")
+        it["propuesta_nombre"] = p.get("nombre")
+    return items
+
+
+@router.post("/reapertura-solicitudes/{sid}/aprobar")
+async def aprobar_solicitud(sid: str, user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    db = get_db()
+    sol = await db.reapertura_solicitudes.find_one({"id": sid}, {"_id": 0})
+    if not sol:
+        raise HTTPException(404, "Solicitud no encontrada")
+    if sol.get("estado") != "Pendiente":
+        raise HTTPException(409, f"La solicitud ya está {sol['estado']}")
+    # Reabrir la evaluación reusando la lógica
+    await reabrir_eval(sol["evaluacion_id"], body={"motivo": f"[Aprobado] {sol.get('motivo','')}"}, user=user)
+    return {"ok": True, "estado": "Aprobada"}
+
+
+@router.post("/reapertura-solicitudes/{sid}/rechazar")
+async def rechazar_solicitud(sid: str, body: dict = Body(default={}),
+                              user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    db = get_db()
+    sol = await db.reapertura_solicitudes.find_one({"id": sid}, {"_id": 0})
+    if not sol:
+        raise HTTPException(404, "Solicitud no encontrada")
+    if sol.get("estado") != "Pendiente":
+        raise HTTPException(409, f"La solicitud ya está {sol['estado']}")
+    motivo = (body or {}).get("motivo_rechazo") or ""
+    await db.reapertura_solicitudes.update_one(
+        {"id": sid},
+        {"$set": {"estado": "Rechazada", "resuelta_at": now_iso(), "resuelta_por": user.get("username"),
+                  "motivo_rechazo": motivo}}
+    )
+    await audit(user, "reject_reopen_request", "reapertura_solicitudes", sid, detalle=motivo)
+    return {"ok": True, "estado": "Rechazada"}
+
+
+@router.get("/evaluaciones-individuales/{eid}/versiones")
+async def listar_versiones(eid: str, user: dict = Depends(get_current_user)):
+    """Historial de versiones (snapshots tomados antes de cada reapertura)."""
+    db = get_db()
+    versiones = await db.evaluaciones_versiones.find({"evaluacion_id": eid}, {"_id": 0}).sort("reabierta_at", -1).to_list(50)
+    return versiones
 
 
 # ==================== EVALUACIÓN COLECTIVA ====================

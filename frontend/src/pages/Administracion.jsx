@@ -39,6 +39,7 @@ export default function Administracion() {
           <TabsTrigger value="sendgrid" className="rounded-md gap-2" data-testid="admin-tab-sendgrid"><Mail className="w-4 h-4" />Correos (SendGrid)</TabsTrigger>
           <TabsTrigger value="branding" className="rounded-md gap-2" data-testid="admin-tab-branding"><Palette className="w-4 h-4" />Imagen gráfica</TabsTrigger>
           <TabsTrigger value="sistema" className="rounded-md gap-2" data-testid="admin-tab-sistema"><Wrench className="w-4 h-4" />Sistema</TabsTrigger>
+          <TabsTrigger value="reaperturas" className="rounded-md gap-2" data-testid="admin-tab-reaperturas"><RefreshCw className="w-4 h-4" />Reaperturas</TabsTrigger>
         </TabsList>
 
         <TabsContent value="usuarios"><UsersPanel /></TabsContent>
@@ -47,6 +48,7 @@ export default function Administracion() {
         <TabsContent value="sendgrid"><SendGridPanel /></TabsContent>
         <TabsContent value="branding"><BrandingPanel /></TabsContent>
         <TabsContent value="sistema"><SistemaPanel /></TabsContent>
+        <TabsContent value="reaperturas"><ReaperturasPanel /></TabsContent>
       </Tabs>
     </div>
   );
@@ -1070,3 +1072,115 @@ function SistemaPanel() {
     </div>
   );
 }
+
+// ===========================================================================
+// PANEL: Solicitudes de reapertura de evaluaciones (Jurado → Admin)
+// ===========================================================================
+function ReaperturasPanel() {
+  const { activeConvocatoriaId } = useAuth();
+  const [items, setItems] = React.useState([]);
+  const [estado, setEstado] = React.useState("Pendiente");
+  const [busy, setBusy] = React.useState(false);
+
+  const load = React.useCallback(async () => {
+    if (!activeConvocatoriaId) return;
+    try {
+      const r = await api.get(`/reapertura-solicitudes?convocatoria_id=${activeConvocatoriaId}${estado === "todas" ? "" : `&estado=${estado}`}`);
+      setItems(r.data || []);
+    } catch (e) { toast.error("No se pudieron cargar solicitudes"); }
+  }, [activeConvocatoriaId, estado]);
+  React.useEffect(() => { load(); }, [load]);
+
+  const aprobar = async (sid) => {
+    if (!confirm("Aprobar la reapertura. La evaluación volverá a estar editable para el jurado. ¿Continuar?")) return;
+    setBusy(true);
+    try { await api.post(`/reapertura-solicitudes/${sid}/aprobar`); toast.success("Solicitud aprobada"); load(); }
+    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setBusy(false); }
+  };
+  const rechazar = async (sid) => {
+    const motivo = window.prompt("Motivo del rechazo:");
+    if (!motivo || !motivo.trim()) return;
+    setBusy(true);
+    try { await api.post(`/reapertura-solicitudes/${sid}/rechazar`, { motivo_rechazo: motivo }); toast.success("Solicitud rechazada"); load(); }
+    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="border border-[#E2E7EC] rounded-xl bg-white p-5 shadow-card">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="font-display font-bold text-[15px] flex items-center gap-2">
+              <RefreshCw className="w-5 h-5 text-[#14776A]" /> Solicitudes de reapertura
+            </h3>
+            <p className="text-[12.5px] text-[#5E6878] mt-0.5">
+              Cuando un jurado solicita reabrir su evaluación finalizada, la solicitud aparece aquí para tu aprobación.
+            </p>
+          </div>
+          <select value={estado} onChange={(e) => setEstado(e.target.value)} className="border border-border rounded-md text-[12.5px] px-3 py-1.5" data-testid="reap-filter-estado">
+            <option value="Pendiente">Pendientes</option>
+            <option value="Aprobada">Aprobadas</option>
+            <option value="Rechazada">Rechazadas</option>
+            <option value="todas">Todas</option>
+          </select>
+        </div>
+
+        {!items.length ? (
+          <div className="text-center py-10 text-muted-foreground">
+            <RefreshCw className="w-8 h-8 mx-auto mb-2 opacity-40" />
+            <p className="text-[13px]">Sin solicitudes {estado === "Pendiente" ? "pendientes" : ""} en esta convocatoria.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full dense-table">
+              <thead>
+                <tr>
+                  <th>Jurado</th><th>Propuesta</th><th>Motivo</th><th>Fecha</th><th>Estado</th><th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((s) => (
+                  <tr key={s.id} data-testid={`reap-row-${s.id}`}>
+                    <td>
+                      <div className="font-semibold text-[13px]">{s.jurado_nombre}</div>
+                      <div className="text-[11px] text-muted-foreground">{s.jurado_email}</div>
+                    </td>
+                    <td>
+                      <div className="font-mono text-[11px] text-muted-foreground tabular-nums">{s.propuesta_codigo}</div>
+                      <div className="text-[12.5px] capitalize">{(s.propuesta_nombre || "").toLowerCase()}</div>
+                    </td>
+                    <td className="text-[12.5px] max-w-[28ch]" title={s.motivo}>{s.motivo}</td>
+                    <td className="text-[11.5px] text-muted-foreground tabular-nums">
+                      {new Date(s.created_at).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })}
+                    </td>
+                    <td>
+                      <Badge tone={s.estado === "Pendiente" ? "warning" : s.estado === "Aprobada" ? "success" : "muted"}>{s.estado}</Badge>
+                    </td>
+                    <td className="text-right">
+                      {s.estado === "Pendiente" && (
+                        <div className="inline-flex items-center gap-1">
+                          <Button size="sm" onClick={() => aprobar(s.id)} disabled={busy} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-md gap-1 text-[12px]" data-testid={`reap-approve-${s.id}`}>
+                            Aprobar
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => rechazar(s.id)} disabled={busy} className="rounded-md gap-1 text-[12px] text-red-600 border-red-200 hover:bg-red-50" data-testid={`reap-reject-${s.id}`}>
+                            Rechazar
+                          </Button>
+                        </div>
+                      )}
+                      {s.estado !== "Pendiente" && s.motivo_rechazo && (
+                        <span className="text-[10.5px] italic text-muted-foreground">"{s.motivo_rechazo}"</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
