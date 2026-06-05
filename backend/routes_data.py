@@ -821,12 +821,93 @@ async def create_terna(payload: TernaIn, user: dict = Depends(require_roles("adm
     return doc
 
 
+@router.get("/ternas/{tid}/cobertura")
+async def terna_cobertura(tid: str, user: dict = Depends(get_current_user)):
+    """Devuelve las subregiones cubiertas dinámicamente por una terna
+    (unión de subregiones de las propuestas asignadas)."""
+    db = get_db()
+    cols = await db.asignaciones.find({
+        "terna_id": tid, "tipo_evaluacion": "colectiva", "estado": {"$ne": "Cancelada"}
+    }, {"_id": 0, "propuesta_id": 1}).to_list(2000)
+    propuesta_ids = [c["propuesta_id"] for c in cols]
+    if not propuesta_ids:
+        return {"subregiones": [], "propuestas_count": 0}
+    propuestas = await db.propuestas.find({"id": {"$in": propuesta_ids}}, {"_id": 0, "datos": 1}).to_list(5000)
+    subs = set()
+    for p in propuestas:
+        s = (p.get("datos") or {}).get("subregion")
+        if s:
+            subs.add(s)
+    return {"subregiones": sorted(subs), "propuestas_count": len(propuesta_ids)}
+
+
 @router.patch("/ternas/{tid}")
 async def update_terna(tid: str, payload: dict, user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
     db = get_db()
     payload.pop("id", None)
+    # Capturar integrantes previos para detectar altas/bajas
+    prev = await db.ternas.find_one({"id": tid}, {"_id": 0, "integrantes": 1, "convocatoria_id": 1})
+    prev_ids = {i.get("jurado_id") for i in (prev or {}).get("integrantes", []) if i.get("jurado_id")}
+    new_ids = {i.get("jurado_id") for i in (payload.get("integrantes") or []) if i.get("jurado_id")} if "integrantes" in payload else prev_ids
+
     await db.ternas.update_one({"id": tid}, {"$set": payload})
     await audit(user, "update", "ternas", tid, valor_nuevo=payload)
+
+    # Sincronizar asignaciones individuales con los integrantes:
+    # - Salientes: anular evaluaciones Borrador/Iniciada y cancelar asignaciones que fueron auto-creadas por esta terna
+    # - Nuevos: crear asignaciones individuales en Borrador para todas las propuestas que la terna ya tiene asignadas
+    if "integrantes" in payload and prev_ids != new_ids:
+        conv_id = (prev or {}).get("convocatoria_id")
+        salientes = prev_ids - new_ids
+        nuevos = new_ids - prev_ids
+
+        # Propuestas asignadas a esta terna (colectivas activas)
+        cols = await db.asignaciones.find({"terna_id": tid, "tipo_evaluacion": "colectiva", "estado": {"$ne": "Cancelada"}}, {"_id": 0, "propuesta_id": 1, "id": 1}).to_list(2000)
+        propuestas_terna = list({c["propuesta_id"] for c in cols})
+
+        # Salientes
+        for jid in salientes:
+            # Sólo cancelar las que fueron auto-creadas y no finalizadas (no tocar las manualmente creadas o ya finalizadas)
+            saliente_asigs = await db.asignaciones.find({
+                "jurado_id": jid,
+                "tipo_evaluacion": "individual",
+                "propuesta_id": {"$in": propuestas_terna},
+                "auto_creada_por_colectiva": {"$exists": True},
+                "estado": {"$ne": "Cancelada"},
+            }, {"_id": 0, "id": 1}).to_list(2000)
+            ids_to_cancel = [a["id"] for a in saliente_asigs]
+            # Anular sus evaluaciones en Borrador/Iniciada
+            await db.evaluaciones_individuales.update_many(
+                {"asignacion_id": {"$in": ids_to_cancel}, "estado": {"$in": ["Borrador", "Iniciada"]}},
+                {"$set": {"estado": "Anulada"}}
+            )
+            await db.asignaciones.update_many({"id": {"$in": ids_to_cancel}}, {"$set": {"estado": "Cancelada"}})
+
+        # Nuevos: crear individuales por cada propuesta de la terna
+        for jid in nuevos:
+            for pid in propuestas_terna:
+                # Si ya tiene asignación individual activa, no duplicar
+                ya = await db.asignaciones.find_one({
+                    "convocatoria_id": conv_id, "propuesta_id": pid,
+                    "tipo_evaluacion": "individual", "jurado_id": jid,
+                    "estado": {"$ne": "Cancelada"}
+                })
+                if ya:
+                    continue
+                aid_ind = str(uuid.uuid4())
+                await db.asignaciones.insert_one({
+                    "id": aid_ind, "convocatoria_id": conv_id, "propuesta_id": pid,
+                    "tipo_evaluacion": "individual", "jurado_id": jid,
+                    "etapa": "Evaluación Individual", "estado": "Creada",
+                    "auto_creada_por_colectiva": "terna-update",
+                    "created_at": now_iso(),
+                })
+                await db.evaluaciones_individuales.insert_one({
+                    "id": str(uuid.uuid4()), "convocatoria_id": conv_id, "propuesta_id": pid,
+                    "jurado_id": jid, "asignacion_id": aid_ind, "estado": "Borrador",
+                    "puntajes": {}, "observaciones": {}, "observacion_final": "",
+                    "puntaje_total": 0, "puntaje_diferencial_total": 0, "created_at": now_iso(),
+                })
     return await db.ternas.find_one({"id": tid}, {"_id": 0})
 
 
@@ -1148,14 +1229,10 @@ async def create_asignacion(payload: AsignacionIn, user: dict = Depends(require_
     doc["estado"] = "Creada"
     doc["created_at"] = now_iso()
     await db.asignaciones.insert_one(doc)
-    doc.pop("_id", None)
-
-    # Auto-crear evaluación individual en estado Borrador si tipo=individual
-    if doc["tipo_evaluacion"] == "individual" and doc.get("jurado_id"):
-        eval_id = str(uuid.uuid4())
+    if doc["tipo_evaluacion"] == "individual":
         await db.evaluaciones_individuales.insert_one(
             {
-                "id": eval_id,
+                "id": str(uuid.uuid4()),
                 "convocatoria_id": doc["convocatoria_id"],
                 "propuesta_id": doc["propuesta_id"],
                 "jurado_id": doc["jurado_id"],
@@ -1169,8 +1246,54 @@ async def create_asignacion(payload: AsignacionIn, user: dict = Depends(require_
                 "created_at": now_iso(),
             }
         )
+    elif doc["tipo_evaluacion"] == "colectiva" and doc.get("terna_id"):
+        # Auto-crear asignaciones individuales para los integrantes de la terna
+        # (regla: primero individual, luego colectiva). Las ya existentes no se duplican.
+        terna_doc = await db.ternas.find_one({"id": doc["terna_id"]}, {"_id": 0, "integrantes": 1})
+        for integ in (terna_doc or {}).get("integrantes", []):
+            jid = integ.get("jurado_id")
+            if not jid:
+                continue
+            # Skip si ya existe
+            ya = await db.asignaciones.find_one({
+                "convocatoria_id": doc["convocatoria_id"],
+                "propuesta_id": doc["propuesta_id"],
+                "tipo_evaluacion": "individual",
+                "jurado_id": jid,
+                "estado": {"$ne": "Cancelada"},
+            })
+            if ya:
+                continue
+            aid_ind = str(uuid.uuid4())
+            await db.asignaciones.insert_one({
+                "id": aid_ind,
+                "convocatoria_id": doc["convocatoria_id"],
+                "propuesta_id": doc["propuesta_id"],
+                "tipo_evaluacion": "individual",
+                "jurado_id": jid,
+                "etapa": "Evaluación Individual",
+                "estado": "Creada",
+                "auto_creada_por_colectiva": doc["id"],
+                "created_at": now_iso(),
+            })
+            await db.evaluaciones_individuales.insert_one({
+                "id": str(uuid.uuid4()),
+                "convocatoria_id": doc["convocatoria_id"],
+                "propuesta_id": doc["propuesta_id"],
+                "jurado_id": jid,
+                "asignacion_id": aid_ind,
+                "estado": "Borrador",
+                "puntajes": {}, "observaciones": {}, "observacion_final": "",
+                "puntaje_total": 0, "puntaje_diferencial_total": 0,
+                "created_at": now_iso(),
+            })
     await audit(user, "create", "asignaciones", doc["id"])
+    doc.pop("_id", None)
     return doc
+
+
+async def _legacy_create_done():
+    return None
 
 
 @router.patch("/asignaciones/{aid}")
@@ -1305,76 +1428,9 @@ async def delete_asignacion(aid: str, user: dict = Depends(require_roles("admin_
     return {"ok": True}
 
 
-class AsignacionMasivaIn(BaseModel):
-    convocatoria_id: str
-    terna_id: str
-    subregion: str  # asigna todas las propuestas habilitadas de la subregión
-
-
-@router.post("/asignaciones/masiva-subregion")
-async def asignacion_masiva_subregion(payload: AsignacionMasivaIn, user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
-    db = get_db()
-    propuestas = await db.propuestas.find({"convocatoria_id": payload.convocatoria_id, "datos.subregion": payload.subregion, "estado": {"$nin": ["Anulada", "No habilitada"]}}).to_list(5000)
-    creados = 0
-    for p in propuestas:
-        existing = await db.asignaciones.find_one({"convocatoria_id": payload.convocatoria_id, "propuesta_id": p["id"], "terna_id": payload.terna_id})
-        if existing:
-            continue
-        await db.asignaciones.insert_one(
-            {
-                "id": str(uuid.uuid4()),
-                "convocatoria_id": payload.convocatoria_id,
-                "propuesta_id": p["id"],
-                "terna_id": payload.terna_id,
-                "tipo_evaluacion": "colectiva",
-                "etapa": "Evaluación Colectiva",
-                "estado": "Creada",
-                "created_at": now_iso(),
-            }
-        )
-        creados += 1
-    # También crear asignaciones individuales para cada integrante de la terna
-    terna = await db.ternas.find_one({"id": payload.terna_id})
-    if terna:
-        for p in propuestas:
-            for integ in terna.get("integrantes", []):
-                jid = integ.get("jurado_id")
-                if not jid:
-                    continue
-                if await db.asignaciones.find_one({"convocatoria_id": payload.convocatoria_id, "propuesta_id": p["id"], "jurado_id": jid, "tipo_evaluacion": "individual"}):
-                    continue
-                aid = str(uuid.uuid4())
-                await db.asignaciones.insert_one(
-                    {
-                        "id": aid,
-                        "convocatoria_id": payload.convocatoria_id,
-                        "propuesta_id": p["id"],
-                        "jurado_id": jid,
-                        "terna_id": payload.terna_id,
-                        "tipo_evaluacion": "individual",
-                        "etapa": "Evaluación Individual",
-                        "estado": "Creada",
-                        "created_at": now_iso(),
-                    }
-                )
-                await db.evaluaciones_individuales.insert_one(
-                    {
-                        "id": str(uuid.uuid4()),
-                        "convocatoria_id": payload.convocatoria_id,
-                        "propuesta_id": p["id"],
-                        "jurado_id": jid,
-                        "asignacion_id": aid,
-                        "estado": "Borrador",
-                        "puntajes": {},
-                        "observaciones": {},
-                        "observacion_final": "",
-                        "puntaje_total": 0,
-                        "puntaje_diferencial_total": 0,
-                        "created_at": now_iso(),
-                    }
-                )
-    await audit(user, "bulk_assign", "asignaciones", payload.convocatoria_id, detalle=f"Terna {payload.terna_id} ↔ subregión {payload.subregion}: {creados} propuestas")
-    return {"asignaciones_creadas": creados, "propuestas_alcanzadas": len(propuestas)}
+# NOTE: el antiguo endpoint /asignaciones/masiva-subregion fue removido en v23.0.
+# La funcionalidad (filtrar propuestas por subregión y asignarlas a una terna) se
+# integró en el modal "Nueva asignación" de la página /asignaciones — usar bulk-create.
 
 
 # ==================== ASIGNACIONES: PLANTILLA / IMPORT MASIVO / AUTO ====================
@@ -1498,6 +1554,44 @@ async def bulk_create_asignaciones(payload: AsignacionBulkIn,
                         "puntaje_total": 0, "puntaje_diferencial_total": 0,
                         "created_at": now_iso(),
                     })
+                else:  # colectiva
+                    # Auto-crear individuales para los 3 integrantes
+                    terna_doc = await db.ternas.find_one({"id": tgt}, {"_id": 0, "integrantes": 1})
+                    for integ in (terna_doc or {}).get("integrantes", []):
+                        jid = integ.get("jurado_id")
+                        if not jid:
+                            continue
+                        if await db.asignaciones.find_one({
+                            "convocatoria_id": payload.convocatoria_id,
+                            "propuesta_id": pid,
+                            "tipo_evaluacion": "individual",
+                            "jurado_id": jid,
+                            "estado": {"$ne": "Cancelada"},
+                        }):
+                            continue
+                        aid_ind = str(uuid.uuid4())
+                        await db.asignaciones.insert_one({
+                            "id": aid_ind,
+                            "convocatoria_id": payload.convocatoria_id,
+                            "propuesta_id": pid,
+                            "tipo_evaluacion": "individual",
+                            "jurado_id": jid,
+                            "etapa": "Evaluación Individual",
+                            "estado": "Creada",
+                            "auto_creada_por_colectiva": aid,
+                            "created_at": now_iso(),
+                        })
+                        await db.evaluaciones_individuales.insert_one({
+                            "id": str(uuid.uuid4()),
+                            "convocatoria_id": payload.convocatoria_id,
+                            "propuesta_id": pid,
+                            "jurado_id": jid,
+                            "asignacion_id": aid_ind,
+                            "estado": "Borrador",
+                            "puntajes": {}, "observaciones": {}, "observacion_final": "",
+                            "puntaje_total": 0, "puntaje_diferencial_total": 0,
+                            "created_at": now_iso(),
+                        })
                 creadas += 1
             except Exception as e:
                 erroneas.append({"propuesta_id": pid, "target": tgt, "error": str(e)})

@@ -433,6 +433,33 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 ### v22.1 — Fix UX: input REINICIAR uppercase (Feb 2026)
 - ✅ El input de confirmación "REINICIAR" en Administración → Sistema usaba `className="uppercase"` (solo visual) pero comparaba con `=== "REINICIAR"` exacto. Si el usuario escribía minúsculas, veía mayúsculas pero el valor real no coincidía y el botón nunca se habilitaba. Corregido normalizando con `.toUpperCase()` en el `onChange`.
 
+### v23.0 — Terna sin territorio, cobertura calculada, auto-crear individuales en colectiva (Feb 2026)
+
+**Concepto refactorizado**: una terna es **solo un grupo de jurados**, sin territorio asociado. Las subregiones que evalúa se calculan dinámicamente como unión de las subregiones de las propuestas asignadas a esa terna.
+
+**Backend `routes_data.py`**:
+- ✅ **Auto-creación de individuales en colectivas**: `POST /api/asignaciones` con tipo colectiva ahora crea automáticamente las 3 asignaciones individuales (una por integrante de la terna) + sus evaluaciones individuales en Borrador. Si ya existen, no se duplican. Las creadas llevan flag `auto_creada_por_colectiva: <id_colectiva>`. Mismo comportamiento en `bulk-create`.
+- ✅ **PATCH terna sincroniza integrantes ↔ asignaciones individuales**:
+  - Integrantes nuevos: se les crean asignaciones individuales para todas las propuestas que la terna ya tiene asignadas (estado Borrador).
+  - Integrantes salientes: las asignaciones individuales **auto-creadas** se cancelan y sus evaluaciones en Borrador/Iniciada se anulan. Las manuales o finalizadas se conservan (auditoría).
+- ✅ **NUEVO** `GET /api/ternas/{tid}/cobertura`: devuelve `{subregiones, propuestas_count}` calculado en tiempo real desde las propuestas asignadas.
+- ✅ **Eliminado** `POST /api/asignaciones/masiva-subregion` (funcionalidad movida al modal Nueva asignación con filtro por subregión).
+
+**Frontend `Ternas.jsx`**:
+- ✅ Quitado el dropdown "Territorio (subregión)" del modal Editar/Crear.
+- ✅ Quitado el botón "Asignar por subregión" de cada card.
+- ✅ Card ahora muestra "Subregiones que evalúa: Urabá, Norte · 6 prop." calculado dinámicamente.
+- ✅ Nota informativa en el modal: "Una terna es solo un grupo de jurados. Las subregiones se calculan según las propuestas asignadas".
+
+**Frontend `Asignaciones.jsx`**:
+- ✅ En el modal "Nueva asignación", picker de Propuestas tiene ahora un selector **"Filtrar por subregión"** (Todas / cada subregión presente en las propuestas). Combina con la búsqueda libre.
+
+**Validación e2e (curl)**:
+- Cobertura T1: 200 con 6 propuestas y sus subregiones únicas.
+- Crear asignación colectiva → estado 200, sistema crea 1 colectiva + 3 individuales con `auto_creada_por_colectiva` poblado.
+- 3 evaluaciones individuales en Borrador creadas automáticamente.
+- `masiva-subregion` removido: 405 Method Not Allowed.
+
 ### v22.9 — UX: Notificaciones visibles + Invalidación de acta tras reapertura + Banner de firma (Feb 2026)
 
 **1. Toasts más visibles (Sonner)**:

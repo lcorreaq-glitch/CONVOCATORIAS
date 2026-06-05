@@ -29,6 +29,7 @@ export default function Asignaciones() {
   // Formulario masivo manual
   const [f, setF] = useState({ propuesta_ids: [], jurado_ids: [], terna_id: "", tipo_evaluacion: "individual" });
   const [propSearch, setPropSearch] = useState("");
+  const [propSubregionFiltro, setPropSubregionFiltro] = useState("__all__");
   const [jurSearch, setJurSearch] = useState("");
   const [submitting, setSubmitting] = useState(false);
   // Selección masiva en la tabla
@@ -148,9 +149,20 @@ export default function Asignaciones() {
 
   // Filtros para los pickers del modal
   const propuestasFiltradas = useMemo(() => {
+    let arr = propuestas;
+    if (propSubregionFiltro && propSubregionFiltro !== "__all__") {
+      arr = arr.filter((p) => (p.datos?.subregion || "").toLowerCase() === propSubregionFiltro.toLowerCase());
+    }
     const s = propSearch.toLowerCase();
-    return s ? propuestas.filter((p) => `${p.codigo} ${p.nombre} ${p.organizacion || ""}`.toLowerCase().includes(s)) : propuestas;
-  }, [propuestas, propSearch]);
+    if (s) arr = arr.filter((p) => `${p.codigo} ${p.nombre} ${p.organizacion || ""}`.toLowerCase().includes(s));
+    return arr;
+  }, [propuestas, propSearch, propSubregionFiltro]);
+  // Subregiones únicas presentes en propuestas (para el dropdown)
+  const subregionesDisponibles = useMemo(() => {
+    const set = new Set();
+    propuestas.forEach((p) => { if (p.datos?.subregion) set.add(p.datos.subregion); });
+    return Array.from(set).sort();
+  }, [propuestas]);
   const juradosFiltrados = useMemo(() => {
     const s = jurSearch.toLowerCase();
     return s ? jurados.filter((j) => `${j.nombre} ${j.email}`.toLowerCase().includes(s)) : jurados;
@@ -234,7 +246,16 @@ export default function Asignaciones() {
                         {f.propuesta_ids.length === propuestasFiltradas.length && propuestasFiltradas.length > 0 ? "Limpiar" : "Sel. todas"}
                       </button>
                     </div>
-                    <div className="px-3 py-2 border-b border-border">
+                    <div className="px-3 py-2 border-b border-border space-y-2">
+                      <Select value={propSubregionFiltro} onValueChange={setPropSubregionFiltro}>
+                        <SelectTrigger className="h-8 text-[12px] rounded-md" data-testid="asig-propuesta-subregion">
+                          <SelectValue placeholder="Filtrar por subregión…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__all__">Todas las subregiones</SelectItem>
+                          {subregionesDisponibles.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
                       <div className="relative">
                         <Search className="w-3.5 h-3.5 absolute left-2 top-2 text-muted-foreground" />
                         <Input value={propSearch} onChange={(e) => setPropSearch(e.target.value)} placeholder="Buscar por código, nombre u organización…" className="h-8 pl-7 text-[12px] rounded-md" data-testid="asig-propuesta-search" />

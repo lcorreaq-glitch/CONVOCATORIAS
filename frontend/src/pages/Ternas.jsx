@@ -9,21 +9,18 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, UsersRound, Wand2, Pencil, Trash2, Download, Upload, Search, Loader2 } from "lucide-react";
+import { Plus, UsersRound, Pencil, Trash2, Download, Upload, Search, Loader2 } from "lucide-react";
 import { TID } from "@/constants/testIds";
 
-const EMPTY_FORM = { nombre: "", tipo: "Terna", integrantes: [], territorio: "" };
+const EMPTY_FORM = { nombre: "", tipo: "Terna", integrantes: [] };
 
 export default function Ternas() {
   const { activeConvocatoriaId, user } = useAuth();
   const [items, setItems] = useState([]);
   const [jurados, setJurados] = useState([]);
-  const [catalogos, setCatalogos] = useState([]);
+  const [coberturas, setCoberturas] = useState({}); // {terna_id: {subregiones: [], propuestas_count}}
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [assignOpen, setAssignOpen] = useState(false);
-  const [activeTernaId, setActiveTernaId] = useState(null);
-  const [selectedSubregion, setSelectedSubregion] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [file, setFile] = useState(null);
   const [importResult, setImportResult] = useState(null);
@@ -35,16 +32,23 @@ export default function Ternas() {
 
   const load = async () => {
     if (!activeConvocatoriaId) return;
-    const [t, j, c] = await Promise.all([
+    const [t, j] = await Promise.all([
       api.get(`/ternas?convocatoria_id=${activeConvocatoriaId}`),
       api.get(`/jurados?convocatoria_id=${activeConvocatoriaId}`),
-      api.get(`/catalogos?convocatoria_id=${activeConvocatoriaId}`),
     ]);
-    setItems(t.data); setJurados(j.data); setCatalogos(c.data);
+    setItems(t.data); setJurados(j.data);
+    // Cargar cobertura de cada terna en paralelo
+    const cov = {};
+    await Promise.all(t.data.map(async (terna) => {
+      try {
+        const r = await api.get(`/ternas/${terna.id}/cobertura`);
+        cov[terna.id] = r.data;
+      } catch (_) { cov[terna.id] = { subregiones: [], propuestas_count: 0 }; }
+    }));
+    setCoberturas(cov);
   };
   useEffect(() => { load(); }, [activeConvocatoriaId]);
 
-  const subregiones = catalogos.find((x) => x.nombre.toLowerCase().includes("subreg"))?.valores || [];
   const juradosFiltrados = useMemo(() => {
     const s = juradoSearch.toLowerCase();
     return s ? jurados.filter((j) => `${j.nombre} ${j.email}`.toLowerCase().includes(s)) : jurados;
@@ -57,7 +61,6 @@ export default function Ternas() {
       nombre: t.nombre || "",
       tipo: t.tipo || "Terna",
       integrantes: (t.integrantes || []).map((i) => ({ jurado_id: i.jurado_id, nombre: i.nombre || jurados.find((j) => j.id === i.jurado_id)?.nombre, rol: i.rol || "Evaluador" })),
-      territorio: t.territorio || "",
       estado: t.estado || "Activo",
     });
     setJuradoSearch("");
@@ -112,17 +115,6 @@ export default function Ternas() {
   };
   const cambiarRol = (jid, rol) => setF({ ...f, integrantes: f.integrantes.map((x) => x.jurado_id === jid ? { ...x, rol } : x) });
 
-  const asignarSubregion = async () => {
-    if (!activeTernaId || !selectedSubregion) return;
-    try {
-      const r = await api.post("/asignaciones/masiva-subregion", {
-        convocatoria_id: activeConvocatoriaId, terna_id: activeTernaId, subregion: selectedSubregion,
-      });
-      toast.success(`${r.data.asignaciones_creadas} asignaciones creadas`);
-      setAssignOpen(false);
-    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
-  };
-
   const doImport = async () => {
     if (!file) return;
     setBusy(true);
@@ -173,7 +165,19 @@ export default function Ternas() {
               </div>
               <Badge tone={estadoTone(t.estado)}>{t.estado}</Badge>
             </div>
-            {t.territorio && <div className="text-xs mb-2"><span className="text-muted-foreground">Territorio:</span> <strong>{t.territorio}</strong></div>}
+            {(() => {
+              const cov = coberturas[t.id];
+              if (cov && cov.propuestas_count > 0) {
+                return (
+                  <div className="text-xs mb-2">
+                    <span className="text-muted-foreground">Subregiones que evalúa:</span>{" "}
+                    <strong>{cov.subregiones.length ? cov.subregiones.join(", ") : "—"}</strong>
+                    <span className="text-muted-foreground"> · {cov.propuestas_count} prop.</span>
+                  </div>
+                );
+              }
+              return null;
+            })()}
             <div className="text-xs text-muted-foreground mb-2">{t.integrantes?.length || 0} integrantes</div>
             <div className="space-y-1">
               {t.integrantes?.slice(0, 4).map((i) => {
@@ -189,9 +193,6 @@ export default function Ternas() {
               })}
             </div>
             <div className="mt-4 pt-3 border-t border-border space-y-2">
-              <Button size="sm" variant="outline" className="rounded-sm gap-2 w-full" data-testid={`assign-subregion-${t.codigo}`} onClick={() => { setActiveTernaId(t.id); setAssignOpen(true); }}>
-                <Wand2 className="w-3.5 h-3.5" /> Asignar por subregión
-              </Button>
               {canEdit && (
                 <div className="grid grid-cols-2 gap-2">
                   <Button size="sm" variant="outline" className="rounded-sm gap-1.5 text-[12px]" onClick={() => openEdit(t)} data-testid={`terna-edit-${t.codigo}`}>
@@ -216,14 +217,12 @@ export default function Ternas() {
             {editingId && <p className="text-[12px] text-muted-foreground">Puedes cambiar integrantes para registrar novedades (renuncias, sustituciones).</p>}
           </DialogHeader>
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Nombre</Label><Input value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} className="rounded-sm" data-testid="terna-nombre" placeholder="Terna Urabá" /></div>
-              <div><Label>Territorio (subregión)</Label>
-                <Select value={f.territorio || ""} onValueChange={(v) => setF({ ...f, territorio: v })}>
-                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="—" /></SelectTrigger>
-                  <SelectContent>{subregiones.map((s) => <SelectItem key={s.id} value={s.valor}>{s.valor}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
+            <div>
+              <Label>Nombre</Label>
+              <Input value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} className="rounded-sm" data-testid="terna-nombre" placeholder="Terna Urabá" />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Una terna es solo un grupo de jurados. Las subregiones cubiertas se calculan según las propuestas que se le asignen desde el módulo <strong>Asignaciones</strong>.
+              </p>
             </div>
 
             {editingId && (
@@ -297,24 +296,6 @@ export default function Ternas() {
               {busy && <Loader2 className="w-4 h-4 animate-spin" />}
               {editingId ? "Guardar cambios" : "Crear"}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Modal asignar por subregión */}
-      <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
-        <DialogContent className="rounded-sm max-w-md">
-          <DialogHeader><DialogTitle className="font-display">Asignar propuestas por subregión</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">Se crearán asignaciones individuales y colectivas para todas las propuestas habilitadas de la subregión.</p>
-            <Select value={selectedSubregion} onValueChange={setSelectedSubregion}>
-              <SelectTrigger className="rounded-sm"><SelectValue placeholder="Subregión…" /></SelectTrigger>
-              <SelectContent>{subregiones.map((s) => <SelectItem key={s.id} value={s.valor}>{s.valor}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAssignOpen(false)} className="rounded-sm">Cancelar</Button>
-            <Button onClick={asignarSubregion} disabled={!selectedSubregion} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm" data-testid="confirm-assign-subregion">Asignar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
