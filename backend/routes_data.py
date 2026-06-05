@@ -129,13 +129,13 @@ async def propuestas_template(convocatoria_id: str, user: dict = Depends(get_cur
     ws = wb.active
     ws.title = "Propuestas"
 
-    # Encabezados técnicos (lo que el importer lee). Mantener compatibilidad con el código existente.
-    headers_tech = ["codigo", "nombre", "organizacion"] + [c["nombre_interno"] for c in campos]
+    # Encabezados técnicos (lo que el importer lee). Solo `codigo` y `nombre` son top-level fijos.
+    # La organización viene como campo dinámico (ej. `nombre_organizacion`) para no duplicar.
+    headers_tech = ["codigo", "nombre"] + [c["nombre_interno"] for c in campos]
     # Encabezados humanos
     headers_label = [
         "Código (opcional)",
         "Nombre de la propuesta *",
-        "Organización",
     ] + [((c.get("nombre_visible") or c["nombre_interno"]) + (" *" if c.get("obligatorio") else "")) for c in campos]
 
     # Fila 1: etiquetas humanas (visualmente clara para el usuario)
@@ -159,7 +159,7 @@ async def propuestas_template(convocatoria_id: str, user: dict = Depends(get_cur
     ws.row_dimensions[2].height = 16
 
     # Fila 3: ejemplo
-    ws.append(["P-0001", "Mi propuesta ejemplo", "Mi Organización"] + ["" for _ in campos])
+    ws.append(["P-0001", "Mi propuesta ejemplo"] + ["" for _ in campos])
 
     # Ancho de columnas razonable
     for col_idx, h in enumerate(headers_label, start=1):
@@ -175,7 +175,6 @@ async def propuestas_template(convocatoria_id: str, user: dict = Depends(get_cur
         cell.fill = PatternFill("solid", fgColor="E8F3F0")
     inst.append(["codigo", "Código", "texto", "No", "Opcional. Si vacío se autogenera (P-0001, P-0002...)"])
     inst.append(["nombre", "Nombre de la propuesta", "texto", "Sí", "Cualquier texto"])
-    inst.append(["organizacion", "Organización", "texto", "No", "Cualquier texto"])
     for c in campos:
         valores = ""
         tipo = c.get("tipo", "texto")
@@ -260,12 +259,16 @@ async def import_propuestas(convocatoria_id: str = Form(...), file: UploadFile =
                 if hasattr(v, "isoformat"):
                     datos[k] = v.isoformat()
             codigo = data.get("codigo") or f"P-{await db.propuestas.count_documents({'convocatoria_id': convocatoria_id}) + created + 1:04d}"
+            # Detectar org dinámicamente: `organizacion`, `nombre_organizacion` o cualquier campo
+            # del formulario que apunte a "organización". Permite que el formulario sea la fuente única.
+            org = (data.get("organizacion") or data.get("nombre_organizacion")
+                   or datos.get("nombre_organizacion") or datos.get("organizacion") or "")
             doc = {
                 "id": str(uuid.uuid4()),
                 "convocatoria_id": convocatoria_id,
                 "codigo": str(codigo),
                 "nombre": str(data["nombre"]),
-                "organizacion": str(data.get("organizacion") or ""),
+                "organizacion": str(org),
                 "datos": datos,
                 "estado": "Registrada",
                 "created_at": now_iso(),
