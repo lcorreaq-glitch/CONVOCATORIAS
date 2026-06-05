@@ -831,11 +831,221 @@ async def update_terna(tid: str, payload: dict, user: dict = Depends(require_rol
 
 
 @router.delete("/ternas/{tid}")
-async def delete_terna(tid: str, user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+async def delete_terna(tid: str, force: bool = False, user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    """Desactiva una terna. Validación:
+    - Si tiene evaluaciones colectivas FINALIZADAS (estado != Borrador/Iniciada/Anulada), NO se permite eliminar
+      (con o sin force) porque hay actas firmadas que la referencian.
+    - Si solo tiene evaluaciones colectivas en Borrador/Iniciada, se requiere force=true. Esas evaluaciones
+      se anulan y las asignaciones colectivas activas se cancelan.
+    """
     db = get_db()
+    terna = await db.ternas.find_one({"id": tid}, {"_id": 0})
+    if not terna:
+        raise HTTPException(404, "Terna no encontrada")
+    # ¿Tiene evaluaciones colectivas finalizadas?
+    finalizada = await db.evaluaciones_colectivas.find_one({
+        "terna_id": tid,
+        "estado": {"$nin": ["Borrador", "Iniciada", "Anulada"]},
+    })
+    if finalizada:
+        raise HTTPException(
+            409,
+            "No se puede eliminar: la terna ya tiene evaluaciones colectivas finalizadas/firmadas. "
+            "Edita los integrantes si necesitas hacer un cambio de miembro por novedad.",
+        )
+    # ¿Tiene asignaciones colectivas activas o evaluaciones en borrador?
+    has_drafts = await db.evaluaciones_colectivas.find_one({"terna_id": tid, "estado": {"$in": ["Borrador", "Iniciada"]}})
+    has_asignaciones = await db.asignaciones.find_one({"terna_id": tid, "estado": {"$ne": "Cancelada"}})
+    if (has_drafts or has_asignaciones) and not force:
+        raise HTTPException(
+            409,
+            "La terna tiene asignaciones o evaluaciones en borrador. Confirma con 'force=true' para anularlas y desactivar la terna.",
+        )
+    if has_drafts or has_asignaciones:
+        await db.evaluaciones_colectivas.update_many(
+            {"terna_id": tid, "estado": {"$in": ["Borrador", "Iniciada"]}},
+            {"$set": {"estado": "Anulada"}},
+        )
+        await db.asignaciones.update_many(
+            {"terna_id": tid, "estado": {"$ne": "Cancelada"}},
+            {"$set": {"estado": "Cancelada"}},
+        )
     await db.ternas.update_one({"id": tid}, {"$set": {"estado": "Inactivo"}})
-    await audit(user, "deactivate", "ternas", tid)
-    return {"ok": True}
+    await audit(user, "deactivate", "ternas", tid, detalle=f"force={force}")
+    return {"ok": True, "force": force}
+
+
+# ============================================================
+# TERNAS: CARGA MASIVA — plantilla + import
+# ============================================================
+@router.get("/ternas-template")
+async def ternas_template(convocatoria_id: str, user: dict = Depends(get_current_user)):
+    """Plantilla XLSX con jurados existentes para crear ternas en lote.
+    Formato: 1 fila por terna, 3 columnas de email para los 3 integrantes (o más si se requiere).
+    """
+    from openpyxl.styles import Font, PatternFill, Alignment
+    db = get_db()
+    jurados = await db.jurados.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(2000)
+    catalogos = await db.catalogos.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(200)
+    subreg = next((c for c in catalogos if c.get("nombre") in ("Subregiones", "subregiones")), None)
+    subreg_valores = [v.get("valor") for v in (subreg.get("valores") or []) if v.get("activo") is not False] if subreg else []
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Ternas"
+
+    headers_label = ["Código (opcional)", "Nombre *", "Territorio / Subregión",
+                     "Email integrante 1 *", "Email integrante 2 *", "Email integrante 3 *",
+                     "Estado (opcional)"]
+    headers_tech = ["codigo", "nombre", "territorio", "email_1", "email_2", "email_3", "estado"]
+
+    ws.append(headers_label)
+    label_font = Font(bold=True, color="FFFFFF", size=11)
+    label_fill = PatternFill("solid", fgColor="14776A")
+    for cell in ws[1]:
+        cell.font = label_font
+        cell.fill = label_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws.row_dimensions[1].height = 30
+
+    ws.append(headers_tech)
+    intern_font = Font(italic=True, color="5E6878", size=9)
+    intern_fill = PatternFill("solid", fgColor="F1F4F7")
+    for cell in ws[2]:
+        cell.font = intern_font
+        cell.fill = intern_fill
+        cell.alignment = Alignment(horizontal="center")
+    ws.row_dimensions[2].height = 16
+
+    # Ejemplo
+    e1 = jurados[0]["email"] if len(jurados) > 0 else "jurado1@ejemplo.co"
+    e2 = jurados[1]["email"] if len(jurados) > 1 else "jurado2@ejemplo.co"
+    e3 = jurados[2]["email"] if len(jurados) > 2 else "jurado3@ejemplo.co"
+    ejemplo_subreg = subreg_valores[0] if subreg_valores else "Urabá"
+    ws.append(["T-EJEMPLO", "Terna ejemplo", ejemplo_subreg, e1, e2, e3, "Activo"])
+
+    for col_idx, h in enumerate(headers_label, start=1):
+        letter = ws.cell(row=1, column=col_idx).column_letter
+        ws.column_dimensions[letter].width = max(18, min(40, len(h) + 4))
+    ws.freeze_panes = "A3"
+
+    # Hoja Instrucciones
+    inst = wb.create_sheet("Instrucciones")
+    inst.append(["Campo (técnico)", "Etiqueta visible", "Tipo", "Obligatorio", "Valores aceptados"])
+    for cell in inst[1]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor="E8F3F0")
+    rows = [
+        ("codigo", "Código", "texto", "No", "Si vacío se autogenera (T1, T2, T3...)"),
+        ("nombre", "Nombre de la terna", "texto", "Sí", "Ej. 'Terna Urabá', 'Grupo Mujeres'"),
+        ("territorio", "Territorio / Subregión", "lista", "No", "Ver hoja 'Catálogos' → Subregiones"),
+        ("email_1", "Email integrante 1", "email", "Sí", "Debe existir en Jurados (hoja 'Catálogos')"),
+        ("email_2", "Email integrante 2", "email", "Sí", "Idem"),
+        ("email_3", "Email integrante 3", "email", "Sí", "Idem"),
+        ("estado", "Estado", "lista", "No", "Activo | Inactivo | Creado (default 'Activo')"),
+    ]
+    for r in rows:
+        inst.append(list(r))
+    inst.append([])
+    inst.append(["Reglas", "—", "—", "—",
+                 "Los 3 emails deben ser distintos. Si un email no se encuentra en jurados, la fila se rechaza."])
+    inst.column_dimensions["A"].width = 22
+    inst.column_dimensions["B"].width = 28
+    inst.column_dimensions["C"].width = 12
+    inst.column_dimensions["D"].width = 12
+    inst.column_dimensions["E"].width = 70
+
+    # Catálogos
+    cat_sheet = wb.create_sheet("Catálogos")
+    cat_sheet.append(["Catálogo", "Valor", "Descripción"])
+    for cell in cat_sheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="14776A")
+    for v in subreg_valores:
+        cat_sheet.append(["Subregiones", v, ""])
+    for j in jurados:
+        cat_sheet.append(["Jurados", j.get("email"), j.get("nombre", "")])
+    cat_sheet.column_dimensions["A"].width = 22
+    cat_sheet.column_dimensions["B"].width = 38
+    cat_sheet.column_dimensions["C"].width = 50
+    cat_sheet.freeze_panes = "A2"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                              headers={"Content-Disposition": "attachment; filename=plantilla_ternas.xlsx"})
+
+
+@router.post("/ternas-import")
+async def import_ternas(convocatoria_id: str = Form(...), file: UploadFile = File(...),
+                         user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    db = get_db()
+    content = await file.read()
+    wb = load_workbook(io.BytesIO(content))
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        return {"creadas": 0, "rechazadas": 0, "errores": []}
+
+    def _is_tech(r):
+        if not r:
+            return False
+        return (str(r[0] or "")).strip().lower() == "codigo" and (str(r[1] or "")).strip().lower() == "nombre"
+
+    header_row_idx = 0
+    if not _is_tech(rows[0]) and len(rows) > 1 and _is_tech(rows[1]):
+        header_row_idx = 1
+    headers = [str(h).strip() if h else "" for h in rows[header_row_idx]]
+    data_start = header_row_idx + 1
+
+    jurados = {j["email"].lower(): j for j in await db.jurados.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(5000)}
+    created, errors = 0, []
+    base_count = await db.ternas.count_documents({"convocatoria_id": convocatoria_id})
+    for idx, row in enumerate(rows[data_start:], start=data_start + 1):
+        try:
+            if not any(c for c in row if c not in (None, "", " ")):
+                continue
+            data = {headers[i]: row[i] if i < len(row) else None for i in range(len(headers))}
+            nombre = (data.get("nombre") or "").strip()
+            if not nombre:
+                errors.append({"fila": idx, "error": "Falta nombre"})
+                continue
+            emails = [(data.get("email_1") or "").strip().lower(),
+                      (data.get("email_2") or "").strip().lower(),
+                      (data.get("email_3") or "").strip().lower()]
+            emails = [e for e in emails if e]
+            if len(emails) < 3:
+                errors.append({"fila": idx, "error": f"Se requieren 3 emails, vinieron {len(emails)}"})
+                continue
+            if len(set(emails)) != 3:
+                errors.append({"fila": idx, "error": "Los 3 emails deben ser distintos"})
+                continue
+            missing = [e for e in emails if e not in jurados]
+            if missing:
+                errors.append({"fila": idx, "error": f"Jurado(s) no encontrado(s): {', '.join(missing)}"})
+                continue
+            tid = str(uuid.uuid4())
+            codigo = (data.get("codigo") or "").strip() or f"T{base_count + created + 1}"
+            integrantes = [{"jurado_id": jurados[e]["id"], "rol": "Miembro"} for e in emails]
+            integrantes[0]["rol"] = "Coordinador"
+            doc = {
+                "id": tid,
+                "convocatoria_id": convocatoria_id,
+                "codigo": codigo,
+                "nombre": nombre,
+                "tipo": "Terna",
+                "territorio": (data.get("territorio") or "").strip() or None,
+                "integrantes": integrantes,
+                "estado": (data.get("estado") or "Activo").strip(),
+                "created_at": now_iso(),
+            }
+            await db.ternas.insert_one(doc)
+            created += 1
+        except Exception as e:
+            errors.append({"fila": idx, "error": str(e)})
+    await audit(user, "import", "ternas", convocatoria_id, detalle=f"creadas={created}")
+    return {"creadas": created, "rechazadas": len(errors), "errores": errors[:50]}
 
 
 # ==================== ASIGNACIONES ====================
@@ -871,6 +1081,17 @@ async def create_asignacion(payload: AsignacionIn, user: dict = Depends(require_
     doc = payload.model_dump()
     if not doc.get("jurado_id") and not doc.get("terna_id"):
         raise HTTPException(status_code=400, detail="Debe especificar jurado_id o terna_id")
+    # ──────────── Validar existencia + estado del target ────────────
+    if doc.get("terna_id"):
+        t = await db.ternas.find_one({"id": doc["terna_id"], "convocatoria_id": doc["convocatoria_id"]}, {"_id": 0, "estado": 1, "codigo": 1, "nombre": 1})
+        if not t:
+            raise HTTPException(404, "La terna no existe en esta convocatoria")
+        if t.get("estado") == "Inactivo":
+            raise HTTPException(409, f"La terna {t.get('codigo','')} · {t.get('nombre','')} está inactiva. Reactívala o usa otra.")
+    if doc.get("jurado_id"):
+        j = await db.jurados.find_one({"id": doc["jurado_id"], "convocatoria_id": doc["convocatoria_id"]}, {"_id": 0, "estado": 1, "nombre": 1})
+        if not j:
+            raise HTTPException(404, "El jurado no existe en esta convocatoria")
     # ──────────────── Prevenir duplicados ────────────────
     dup_q = {
         "convocatoria_id": doc["convocatoria_id"],
@@ -1061,6 +1282,20 @@ async def bulk_create_asignaciones(payload: AsignacionBulkIn,
         raise HTTPException(400, "Selecciona al menos un jurado")
     if payload.tipo_evaluacion == "colectiva" and not payload.terna_id:
         raise HTTPException(400, "Selecciona una terna")
+
+    # ──────────── Validar existencia + estado de los targets ────────────
+    if payload.tipo_evaluacion == "colectiva":
+        t = await db.ternas.find_one({"id": payload.terna_id, "convocatoria_id": payload.convocatoria_id}, {"_id": 0, "estado": 1, "codigo": 1, "nombre": 1})
+        if not t:
+            raise HTTPException(404, "La terna no existe en esta convocatoria")
+        if t.get("estado") == "Inactivo":
+            raise HTTPException(409, f"La terna {t.get('codigo','')} · {t.get('nombre','')} está inactiva")
+    else:
+        existing = await db.jurados.find({"id": {"$in": payload.jurado_ids}, "convocatoria_id": payload.convocatoria_id}, {"_id": 0, "id": 1}).to_list(2000)
+        existing_ids = {j["id"] for j in existing}
+        missing = [jid for jid in payload.jurado_ids if jid not in existing_ids]
+        if missing:
+            raise HTTPException(404, f"{len(missing)} jurado(s) no existen en esta convocatoria")
 
     etapa = payload.etapa or ("Evaluación Colectiva" if payload.tipo_evaluacion == "colectiva" else "Evaluación Individual")
     creadas, duplicadas, erroneas = 0, 0, []

@@ -433,6 +433,34 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 ### v22.1 — Fix UX: input REINICIAR uppercase (Feb 2026)
 - ✅ El input de confirmación "REINICIAR" en Administración → Sistema usaba `className="uppercase"` (solo visual) pero comparaba con `=== "REINICIAR"` exacto. Si el usuario escribía minúsculas, veía mayúsculas pero el valor real no coincidía y el botón nunca se habilitaba. Corregido normalizando con `.toUpperCase()` en el `onChange`.
 
+### v22.5 — Ternas: editar, eliminar con validación, carga masiva + validación de existencia (Feb 2026)
+
+**Backend `routes_data.py`**:
+- ✅ `DELETE /api/ternas/{tid}` mejorado con 3 niveles de validación:
+  1. Si tiene evaluaciones colectivas FINALIZADAS (firmadas/aprobadas), **bloquea 409** ("Edita los integrantes en lugar de eliminar").
+  2. Si solo tiene Borrador/Iniciada o asignaciones activas, devuelve **409** pidiendo `?force=true`.
+  3. Con `force=true`, anula evaluaciones en Borrador/Iniciada y cancela asignaciones colectivas activas antes de marcar Inactiva.
+- ✅ **NUEVOS** `GET /api/ternas-template` y `POST /api/ternas-import`:
+  - 3 hojas (Ternas · Instrucciones · Catálogos con Subregiones + Jurados) — mismo look & feel.
+  - 2 filas header (etiqueta + nombre técnico) + fila ejemplo prellena con emails reales.
+  - Importador valida: 3 emails distintos, todos presentes en jurados, rechaza con mensaje por fila.
+- ✅ `POST /api/asignaciones` valida que la terna/jurado EXISTAN en la convocatoria (404 con mensaje claro) y que no estén Inactivos (409).
+- ✅ `POST /api/asignaciones/bulk-create` aplica las mismas validaciones (terna + jurados existentes).
+
+**Frontend `Ternas.jsx`** (reescrita):
+- ✅ Botones **Editar** (lápiz) y **Eliminar** (rojo) en cada card.
+- ✅ Modal unificado crear/editar: input búsqueda de jurados + lista de integrantes seleccionados con **rol editable** (Coordinador / Evaluador / Suplente) y botón quitar.
+- ✅ Selector de **Estado** (Activo/Creado/Inactivo) en edición.
+- ✅ Botones "Plantilla" + "Importar" con flujo similar al de Propuestas/Jurados/Asignaciones.
+- ✅ Confirmación inteligente al eliminar: si backend devuelve 409 pidiendo force, ofrece confirm secundario explicando consecuencias y reintenta con force=true.
+- ✅ Validación local: mínimo 3 integrantes antes de guardar.
+
+**Validación e2e (curl)**:
+- Plantilla: 3 hojas, ejemplo prellena con 3 emails reales de jurados.
+- Asignación a terna inexistente → 404 "La terna no existe en esta convocatoria".
+- Crear → Editar integrante → Eliminar (limpia) → 200.
+- Eliminar con asignaciones SIN force → 409 con mensaje. Con force → 200 (cancela asignaciones).
+
 ### v22.4 — Validaciones avanzadas de asignación + dedup one-shot + límite configurable (Feb 2026)
 
 **Backend**:
