@@ -1011,7 +1011,7 @@ function SistemaPanel() {
           </div>
           <div className="col-span-3">
             <Label className="text-[12px] font-semibold text-red-700">Escribe <strong>REINICIAR</strong> para habilitar el botón</Label>
-            <Input value={resetForm.confirmacion} onChange={(e) => setResetForm({ ...resetForm, confirmacion: e.target.value })} placeholder="REINICIAR" className="rounded-md font-mono uppercase" data-testid="reset-confirm-input" />
+            <Input value={resetForm.confirmacion} onChange={(e) => setResetForm({ ...resetForm, confirmacion: e.target.value.toUpperCase() })} placeholder="REINICIAR" className="rounded-md font-mono uppercase" data-testid="reset-confirm-input" />
           </div>
         </div>
         <div className="flex justify-end mt-3">
