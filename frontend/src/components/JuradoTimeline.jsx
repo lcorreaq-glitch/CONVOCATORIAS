@@ -36,15 +36,29 @@ export default function JuradoTimeline({ convocatoriaId }) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
+  const [actasInfo, setActasInfo] = useState(null);
 
   useEffect(() => {
     if (user?.role !== "jurado" || !convocatoriaId) return;
     api.get(`/dashboards/mi-timeline?convocatoria_id=${convocatoriaId}`)
       .then((r) => setData(r.data))
       .catch(() => setData(null));
+    // Cargar info de actas para detectar firma pendiente/re-firma
+    api.get(`/actas?convocatoria_id=${convocatoriaId}`)
+      .then((r) => setActasInfo(r.data))
+      .catch(() => setActasInfo(null));
   }, [user, convocatoriaId]);
 
   if (user?.role !== "jurado" || !data || !data.phases?.length) return null;
+
+  // Banner CTA de firma: detecta acta del jurado actual
+  const miActa = actasInfo?.individual?.find((r) => r.jurado_id === user?.jurado_id);
+  const necesitaFirma = miActa && (
+    (miActa.finalizadas === miActa.total && miActa.total > 0 && !miActa.firma_acta_at) ||
+    miActa.estado === "Re-firma pendiente" ||
+    miActa.acta_invalidada
+  );
+  const esRefirma = miActa && (miActa.estado === "Re-firma pendiente" || miActa.acta_invalidada);
 
   const goAction = (extra) => {
     if (extra?.action === "mi_perfil") navigate("/mi-perfil");
@@ -52,6 +66,34 @@ export default function JuradoTimeline({ convocatoriaId }) {
   };
 
   return (
+    <>
+      {necesitaFirma && (
+        <div className={`rounded-xl border-2 p-4 mb-4 flex items-start gap-3 ${esRefirma ? "border-amber-300 bg-amber-50" : "border-emerald-300 bg-emerald-50"}`}
+             data-testid="jurado-firma-banner">
+          <div className={`shrink-0 w-10 h-10 rounded-full grid place-items-center ${esRefirma ? "bg-amber-200 text-amber-800" : "bg-emerald-200 text-emerald-800"}`}>
+            {esRefirma ? <Clock className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
+          </div>
+          <div className="flex-1">
+            <div className={`font-display font-bold text-[14px] ${esRefirma ? "text-amber-900" : "text-emerald-900"}`}>
+              {esRefirma
+                ? "Tu acta requiere re-firma"
+                : "¡Felicitaciones! Has finalizado todas tus evaluaciones"}
+            </div>
+            <p className={`text-[12.5px] mt-0.5 ${esRefirma ? "text-amber-800" : "text-emerald-800"}`}>
+              {esRefirma
+                ? "Has reabierto evaluaciones después de haber firmado. Por favor vuelve a firmar tu acta para que refleje los puntajes actualizados."
+                : `Firma tu acta consolidada (${miActa.finalizadas} de ${miActa.total} evaluaciones) para completar el proceso institucional.`}
+            </p>
+          </div>
+          <button
+            onClick={() => navigate("/actas")}
+            data-testid="jurado-firma-cta"
+            className={`shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-md font-display font-bold text-[12.5px] transition-colors text-white ${esRefirma ? "bg-amber-600 hover:bg-amber-700" : "bg-[#14776A] hover:bg-[#0F5E54]"}`}
+          >
+            {esRefirma ? "Re-firmar ahora" : "Firmar mi acta"} <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
     <div className="rounded-xl border border-border bg-white p-5 mb-6" data-testid="jurado-timeline">
       <div className="flex items-center justify-between mb-5">
         <div>
@@ -123,5 +165,6 @@ export default function JuradoTimeline({ convocatoriaId }) {
         </div>
       )}
     </div>
+    </>
   );
 }

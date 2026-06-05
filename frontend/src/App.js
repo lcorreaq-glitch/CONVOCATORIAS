@@ -32,7 +32,21 @@ export default function App() {
     <div className="App">
       <BrowserRouter>
         <AuthProvider>
-          <Toaster position="top-right" />
+          <Toaster
+            position="top-center"
+            richColors
+            expand
+            closeButton
+            toastOptions={{
+              duration: 6000,
+              style: {
+                fontSize: "14px",
+                padding: "14px 18px",
+                minWidth: "360px",
+                fontWeight: 500,
+              },
+            }}
+          />
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />

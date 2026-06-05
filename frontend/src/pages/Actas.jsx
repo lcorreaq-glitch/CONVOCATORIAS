@@ -11,8 +11,10 @@ import { FileText, Download, Zap, PenLine, Map, Users, AlertCircle, CheckCircle2
 
 const ESTADO_TONE = {
   "Emitible": "success",
+  "Firmada": "success",
   "Pendiente": "muted",
   "Requiere firma": "warning",
+  "Re-firma pendiente": "warning",
   "Falta firma terna": "warning",
   "Falta firmar": "warning",
 };
@@ -133,6 +135,30 @@ export default function Actas() {
 
         {/* INDIVIDUAL */}
         <TabsContent value="individual" className="mt-6">
+          {(() => {
+            const myActa = isJurado ? data.individual.find((r) => r.jurado_id === user?.jurado_id) : null;
+            const needsRefirma = myActa && (myActa.estado === "Re-firma pendiente" || myActa.acta_invalidada);
+            if (needsRefirma) {
+              return (
+                <div className="mb-4 border border-amber-300 bg-amber-50 rounded-lg p-4 flex items-start gap-3" data-testid="acta-refirma-banner">
+                  <AlertCircle className="w-5 h-5 text-amber-700 mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <div className="font-display font-bold text-[14px] text-amber-900">Tu acta requiere re-firma</div>
+                    <p className="text-[12.5px] text-amber-800 mt-0.5">
+                      Has reabierto una o más evaluaciones después de haber firmado. La firma anterior fue invalidada para reflejar tus puntajes actualizados.
+                      <strong> Por favor vuelve a firmar el acta</strong> cuando termines de ajustar tus evaluaciones.
+                    </p>
+                  </div>
+                  {myActa.finalizadas === myActa.total && myActa.tiene_firma && (
+                    <Button size="sm" onClick={firmarMiActaIndividual} disabled={busy} className="bg-amber-600 hover:bg-amber-700 text-white gap-1 rounded-md text-[12px]" data-testid="acta-refirma-btn">
+                      <PenLine className="w-3.5 h-3.5" /> Re-firmar ahora
+                    </Button>
+                  )}
+                </div>
+              );
+            }
+            return null;
+          })()}
           <IntroBanner
             icon={FileText}
             text="Una acta por jurado. Se genera cuando completa todas sus evaluaciones individuales (o el admin la fuerza). Requiere que el jurado tenga su firma cargada en Mi Perfil."
@@ -143,7 +169,7 @@ export default function Actas() {
               <tbody>
                 {data.individual.map((r) => {
                   const isMine = user?.jurado_id === r.jurado_id;
-                  const canDownload = r.estado === "Emitible" || (r.estado === "Requiere firma" && isAdmin);
+                  const canDownload = r.estado === "Emitible" || r.estado === "Firmada" || r.estado === "Re-firma pendiente" || (r.estado === "Requiere firma" && isAdmin);
                   return (
                     <tr key={r.jurado_id}>
                       <td>
@@ -178,10 +204,10 @@ export default function Actas() {
                             <PenLine className="w-3 h-3" /> Cargar firma
                           </Button>
                         )}
-                        {/* Jurado: si tiene firma + avance 100% + no firmada aún, botón verde para firmar */}
-                        {isJurado && isMine && r.tiene_firma && r.finalizadas === r.total && r.total > 0 && !r.firma_acta_at && (
+                        {/* Jurado: si tiene firma + avance 100% + no firmada aún O necesita re-firma */}
+                        {isJurado && isMine && r.tiene_firma && r.finalizadas === r.total && r.total > 0 && (!r.firma_acta_at || r.estado === "Re-firma pendiente") && (
                           <Button size="sm" onClick={firmarMiActaIndividual} disabled={busy} className="bg-[#0F5E54] hover:bg-[#0B4A42] text-white gap-1 rounded-sm text-[11px] h-7" data-testid="actas-ind-firmar-mia">
-                            <PenLine className="w-3 h-3" /> Firmar mi acta
+                            <PenLine className="w-3 h-3" /> {r.estado === "Re-firma pendiente" ? "Re-firmar" : "Firmar mi acta"}
                           </Button>
                         )}
                         {canDownload && (

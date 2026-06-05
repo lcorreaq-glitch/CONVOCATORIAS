@@ -433,6 +433,34 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 ### v22.1 — Fix UX: input REINICIAR uppercase (Feb 2026)
 - ✅ El input de confirmación "REINICIAR" en Administración → Sistema usaba `className="uppercase"` (solo visual) pero comparaba con `=== "REINICIAR"` exacto. Si el usuario escribía minúsculas, veía mayúsculas pero el valor real no coincidía y el botón nunca se habilitaba. Corregido normalizando con `.toUpperCase()` en el `onChange`.
 
+### v22.9 — UX: Notificaciones visibles + Invalidación de acta tras reapertura + Banner de firma (Feb 2026)
+
+**1. Toasts más visibles (Sonner)**:
+- ✅ Reconfigurado en `App.js`: `position="top-center"`, `richColors`, `expand`, `closeButton`, `duration=6000ms`, ancho mínimo 360px y tamaño de fuente 14px. Fondos fuertes (rojo errores, ámbar warnings, verde éxito).
+
+**2. Invalidación automática del acta al reabrir evaluación**:
+- ✅ Backend `routes_eval.py` → `reabrir_eval`: invalida la firma del acta del jurado (`acta_individual_firma_at` se copia a `_anterior` y se borra; se marca `acta_invalidada_por_reapertura=True` + timestamp).
+- ✅ Endpoint `/actas-pendientes` ahora reporta `estado="Re-firma pendiente"` cuando hay invalidación o evaluaciones Reabiertas. Devuelve también `acta_invalidada`, `reabiertas`, `firma_acta_at`.
+- ✅ Al firmar el acta nuevamente, se limpian las banderas de invalidación automáticamente (`re_firma: true` en respuesta).
+- ✅ **PDF con watermark "VERSIÓN DESACTUALIZADA — REQUIERE RE-FIRMA"** en banner rojo arriba del documento si está invalidado (validado con pypdf que el texto aparece en la primera página).
+
+**3. Frontend `Actas.jsx`**:
+- ✅ Banner ámbar persistente en la tab Individuales si el jurado tiene acta invalidada o "Re-firma pendiente" — con botón directo "Re-firmar ahora".
+- ✅ Botón "Re-firmar" reemplaza "Firmar mi acta" cuando el estado es "Re-firma pendiente".
+
+**4. Modal de celebración al completar todas las evaluaciones (`EvaluacionIndividual.jsx`)**:
+- ✅ Al guardar la última evaluación finalizada del jurado, se abre un modal con gradiente verde (🎉) "¡Felicitaciones!" + lista de pasos + CTA "Firmar mi acta" → navega a `/actas`.
+
+**5. Banner persistente en Dashboard del jurado (`JuradoTimeline.jsx`)**:
+- ✅ Banner verde "¡Felicitaciones! Has finalizado todas tus evaluaciones" con CTA "Firmar mi acta" cuando aplica.
+- ✅ Banner ámbar "Tu acta requiere re-firma" con CTA "Re-firmar ahora" cuando hay invalidación.
+- ✅ Se oculta automáticamente cuando ya está firmada.
+
+**Validación e2e (curl)**:
+- Tras `POST /reabrir`: estado eval → "Reabierta", acta del jurado: `estado="Re-firma pendiente"`, `acta_invalidada=true`, `reabiertas=1`, `firma_acta_at=false`.
+- PDF descargado contiene literal: `"VERSIÓN DESACTUALIZADA — REQUIERE RE-FIRMA"` en la primera página (verificado con `pypdf`).
+- Tras re-firmar: banderas limpiadas + flag `re_firma=true` en respuesta.
+
 ### v22.8 — Bloqueo post-finalización + Reapertura con flujo de aprobación + Historial de versiones (Feb 2026)
 
 **Backend `routes_eval.py`**:

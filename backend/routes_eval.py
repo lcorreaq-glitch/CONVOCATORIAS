@@ -294,6 +294,18 @@ async def reabrir_eval(eid: str, body: dict = Body(default={}),
                   "ultima_reapertura_por": user.get("username")},
          "$unset": {"fecha_finalizacion": ""}}
     )
+    # ── Invalidar la firma del acta individual del jurado si existía ──
+    # El acta agrupada del jurado debe rehacerse cuando se modifican puntajes que la sustentan.
+    jurado_id = ev.get("jurado_id")
+    if jurado_id:
+        jur = await db.jurados.find_one({"id": jurado_id}, {"_id": 0, "datos": 1})
+        datos = (jur or {}).get("datos") or {}
+        if datos.get("acta_individual_firma_at"):
+            datos["acta_individual_firma_at_anterior"] = datos.get("acta_individual_firma_at")
+            datos.pop("acta_individual_firma_at", None)
+            datos["acta_invalidada_por_reapertura"] = True
+            datos["acta_invalidada_at"] = now_iso()
+            await db.jurados.update_one({"id": jurado_id}, {"$set": {"datos": datos}})
     # Aprobar todas las solicitudes pendientes de esta evaluación (si las hay)
     await db.reapertura_solicitudes.update_many(
         {"evaluacion_id": eid, "estado": "Pendiente"},

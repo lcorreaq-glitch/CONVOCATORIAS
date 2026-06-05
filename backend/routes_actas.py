@@ -430,8 +430,20 @@ async def list_actas_pendientes(convocatoria_id: str, user: dict = Depends(get_c
         forzada = bool(((j.get("datos") or {}).get("acta_individual_forzada")))
         firma_url = ((j.get("datos") or {}).get("firma_url"))
         cedula = ((j.get("datos") or {}).get("cedula"))
-        if forzada or finalizadas >= total:
+        invalidada = bool(((j.get("datos") or {}).get("acta_invalidada_por_reapertura")))
+        ya_firmada = bool(((j.get("datos") or {}).get("acta_individual_firma_at")))
+        # Si una evaluación fue reabierta, el acta puede quedar en estado "Reabierta" o "Borrador"
+        reabiertas = sum(1 for e in evs if e.get("estado") == "Reabierta")
+        if invalidada or reabiertas > 0:
+            # El acta requiere re-firma porque hubo reapertura tras firma anterior.
             if firma_url:
+                estado = "Re-firma pendiente"
+            else:
+                estado = "Requiere firma"
+        elif forzada or finalizadas >= total:
+            if ya_firmada:
+                estado = "Firmada"
+            elif firma_url:
                 estado = "Emitible"
             else:
                 estado = "Requiere firma"
@@ -440,9 +452,10 @@ async def list_actas_pendientes(convocatoria_id: str, user: dict = Depends(get_c
         individuales.append({
             "jurado_id": j["id"], "jurado_nombre": j["nombre"], "jurado_email": j.get("email"),
             "subregiones": j.get("subregiones") or [], "documento": cedula,
-            "total": total, "finalizadas": finalizadas, "estado": estado,
+            "total": total, "finalizadas": finalizadas, "reabiertas": reabiertas, "estado": estado,
             "forzada": forzada, "tiene_firma": bool(firma_url),
             "firma_acta_at": ((j.get("datos") or {}).get("acta_individual_firma_at")),
+            "acta_invalidada": invalidada,
             "porcentaje": round((finalizadas / total) * 100) if total else 0,
         })
 
@@ -564,9 +577,13 @@ async def firmar_acta_individual(jurado_id: str, user: dict = Depends(get_curren
     )
     datos = jur.get("datos") or {}
     datos["acta_individual_firma_at"] = now_iso()
+    # Limpiar bandera de invalidación si existía (caso re-firma)
+    re_firma = bool(datos.get("acta_invalidada_por_reapertura"))
+    datos.pop("acta_invalidada_por_reapertura", None)
+    datos.pop("acta_invalidada_at", None)
     await db.jurados.update_one({"id": jurado_id}, {"$set": {"datos": datos}})
-    await audit(user, "sign", "actas", jurado_id, detalle=f"acta_individual ({total} evals)")
-    return {"ok": True, "firmadas": total}
+    await audit(user, "sign", "actas", jurado_id, detalle=f"acta_individual ({total} evals){' [RE-FIRMA]' if re_firma else ''}")
+    return {"ok": True, "firmadas": total, "re_firma": re_firma}
 
 
 # ============================================================
@@ -791,8 +808,10 @@ def _firmantes_table(firmantes: list, st) -> Table:
 
 def _build_pdf(tmpl: dict, ctx: dict, conv: dict, tabla_headers: list,
                 tabla_rows: list, firmantes: list, branding: dict = None,
-                verificacion: dict = None) -> bytes:
-    """verificacion = {'codigo': str, 'url': str} (opcional, agrega QR al pie)"""
+                verificacion: dict = None, watermark: str = None) -> bytes:
+    """verificacion = {'codigo': str, 'url': str} (opcional, agrega QR al pie)
+    watermark = string opcional a estampar como banner rojo arriba (ej. 'VERSIÓN DESACTUALIZADA')
+    """
     buf = io.BytesIO()
     has_footer = bool((branding or {}).get("footer_image_url"))
     bottom_margin = 3.2 * cm if has_footer else 1.6 * cm  # espacio reservado para el footer fijo
@@ -800,6 +819,16 @@ def _build_pdf(tmpl: dict, ctx: dict, conv: dict, tabla_headers: list,
                              topMargin=1.6*cm, bottomMargin=bottom_margin)
     st = _base_styles()
     el = []
+    # ── Banner watermark si aplica (ej. VERSIÓN DESACTUALIZADA) ──
+    if watermark:
+        wm_style = ParagraphStyle(
+            "wm", parent=st["body"], alignment=TA_CENTER, fontSize=11, leading=14,
+            textColor=rl_colors.HexColor("#B91C1C"), borderColor=rl_colors.HexColor("#FCA5A5"),
+            borderWidth=1, borderPadding=8, backColor=rl_colors.HexColor("#FEF2F2"),
+            fontName="Helvetica-Bold", spaceAfter=10,
+        )
+        el.append(Paragraph(f"<b>{watermark}</b>", wm_style))
+        el.append(Spacer(1, 6))
     _header_block(el, ctx, conv, tmpl, st, branding or {})
 
     # Datos del jurado/subregion (si aplica)
@@ -1003,9 +1032,13 @@ async def acta_individual_jurado(jurado_id: str, user: dict = Depends(get_curren
         "firma_url": (jur.get("datos") or {}).get("firma_url"),
         "subregion": ", ".join(jur.get("subregiones") or []),
     }]
+    # Detectar si el acta tiene firma desactualizada por reaperturas posteriores
+    invalidada = bool(((jur.get("datos") or {}).get("acta_invalidada_por_reapertura")))
     pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes, _get_branding(conv),
                      verificacion=await _build_verificacion(db, "individual", jur["convocatoria_id"], jurado_id,
-                                                            meta={"jurado_nombre": jur.get("nombre"), "subregiones": jur.get("subregiones")}))
+                                                            meta={"jurado_nombre": jur.get("nombre"), "subregiones": jur.get("subregiones"),
+                                                                  "version_desactualizada": invalidada}),
+                     watermark="VERSIÓN DESACTUALIZADA — REQUIERE RE-FIRMA" if invalidada else None)
     await audit(user, "generate_acta", "actas", jurado_id, detalle="individual_jurado")
     return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
                              headers={"Content-Disposition": f'inline; filename="acta_individual_{jur["nombre"].replace(" ","_")}.pdf"'})

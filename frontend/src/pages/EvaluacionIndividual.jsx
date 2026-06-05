@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import {
   ArrowLeft, ExternalLink, Save, CheckCircle2, PenLine, FileText, Lock, Sparkles, RefreshCw,
@@ -38,6 +39,7 @@ export default function EvaluacionIndividual() {
   const [saving, setSaving] = useState(false);
   const [v1Ref, setV1Ref] = useState(null);
   const [showFicha, setShowFicha] = useState(false);
+  const [showCelebracion, setShowCelebracion] = useState(false);
 
   useEffect(() => {
     api.get(`/evaluaciones-individuales/${id}`).then(async (r) => {
@@ -115,6 +117,17 @@ export default function EvaluacionIndividual() {
       });
       setEv(r.data);
       toast.success(finalize ? "Evaluación finalizada" : "Cambios guardados");
+      // Si finalizó y es jurado, verificar si completó TODAS sus evaluaciones para celebrar + ir a firmar
+      if (finalize && isJurado) {
+        try {
+          const myEvs = await api.get(`/evaluaciones-individuales?convocatoria_id=${ev.convocatoria_id}&jurado_id=${ev.jurado_id}`);
+          const items = myEvs.data || [];
+          const todasFinalizadas = items.length > 0 && items.every((e) => ["Finalizada", "Firmada"].includes(e.estado));
+          if (todasFinalizadas) {
+            setShowCelebracion(true);
+          }
+        } catch (_) { /* silent */ }
+      }
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     setSaving(false);
   };
@@ -533,6 +546,35 @@ export default function EvaluacionIndividual() {
           </div>
         </DrawerContent>
       </Drawer>
+
+      {/* Modal de celebración al completar todas las evaluaciones */}
+      <Dialog open={showCelebracion} onOpenChange={setShowCelebracion}>
+        <DialogContent className="rounded-xl max-w-md p-0 overflow-hidden">
+          <div className="bg-gradient-to-br from-[#14776A] to-[#0F5E54] text-white px-7 py-8 text-center">
+            <div className="text-5xl mb-2">🎉</div>
+            <DialogTitle className="font-display text-2xl font-bold mb-1">¡Felicitaciones!</DialogTitle>
+            <p className="text-[13.5px] opacity-90">
+              Has finalizado <strong>todas tus evaluaciones individuales</strong> en esta convocatoria.
+            </p>
+          </div>
+          <div className="px-7 py-5 bg-white">
+            <p className="text-[13px] text-[#1A1F2C] mb-4">
+              El siguiente paso es <strong>firmar tu acta individual</strong>, que consolida todas tus evaluaciones en un único documento oficial con tu firma para los registros institucionales.
+            </p>
+            <ol className="text-[12.5px] text-muted-foreground space-y-1.5 mb-5 list-decimal pl-5">
+              <li>Asegúrate de tener tu firma cargada en <strong>Mi Perfil</strong>.</li>
+              <li>Dirígete a <strong>Actas</strong> y firma tu acta consolidada.</li>
+              <li>Descarga el PDF para tu archivo personal.</li>
+            </ol>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowCelebracion(false)} className="flex-1 rounded-md">Más tarde</Button>
+              <Button onClick={() => { setShowCelebracion(false); navigate("/actas"); }} className="flex-1 bg-[#14776A] hover:bg-[#0F5E54] rounded-md gap-2" data-testid="celebracion-ir-actas">
+                <PenLine className="w-4 h-4" /> Firmar mi acta
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
