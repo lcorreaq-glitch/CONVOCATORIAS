@@ -1428,6 +1428,51 @@ async def delete_asignacion(aid: str, user: dict = Depends(require_roles("admin_
     return {"ok": True}
 
 
+@router.get("/asignaciones/resumen-jurados")
+async def resumen_jurados(convocatoria_id: str, user: dict = Depends(get_current_user)):
+    """Resumen agregado: por jurado activo, contar propuestas asignadas,
+    finalizadas, en borrador, canceladas; subregiones cubiertas; promedio puntaje."""
+    db = get_db()
+    jurados = await db.jurados.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(2000)
+    ases = await db.asignaciones.find({"convocatoria_id": convocatoria_id, "tipo_evaluacion": "individual"}, {"_id": 0}).to_list(20000)
+    evs = await db.evaluaciones_individuales.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(20000)
+    props = {p["id"]: p for p in await db.propuestas.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(20000)}
+    ases_by_j: Dict[str, list] = {}
+    for a in ases:
+        ases_by_j.setdefault(a.get("jurado_id"), []).append(a)
+    evs_by_j: Dict[str, list] = {}
+    for e in evs:
+        evs_by_j.setdefault(e.get("jurado_id"), []).append(e)
+    out = []
+    for j in jurados:
+        jid = j["id"]
+        my_a = ases_by_j.get(jid, [])
+        activas = [a for a in my_a if a.get("estado") != "Cancelada"]
+        my_e = evs_by_j.get(jid, [])
+        finalizadas = sum(1 for e in my_e if e.get("estado") in ("Finalizada", "Firmada"))
+        borrador = sum(1 for e in my_e if e.get("estado") in ("Borrador", "Iniciada", "Reabierta"))
+        anuladas = sum(1 for e in my_e if e.get("estado") == "Anulada")
+        # Subregiones de las propuestas asignadas
+        subs = set()
+        for a in activas:
+            p = props.get(a.get("propuesta_id"))
+            s = (p or {}).get("datos", {}).get("subregion")
+            if s:
+                subs.add(s)
+        finalizadas_evs = [e for e in my_e if e.get("estado") in ("Finalizada", "Firmada")]
+        avg = round(sum(e.get("puntaje_total", 0) or 0 for e in finalizadas_evs) / max(1, len(finalizadas_evs)), 2) if finalizadas_evs else None
+        pct = round((finalizadas / len(activas)) * 100) if activas else 0
+        out.append({
+            "jurado_id": jid, "nombre": j.get("nombre"), "email": j.get("email"),
+            "estado": j.get("estado"), "subregiones_jurado": j.get("subregiones") or [],
+            "asignadas": len(activas), "finalizadas": finalizadas, "borrador": borrador,
+            "anuladas": anuladas, "porcentaje": pct,
+            "subregiones_propuestas": sorted(subs), "promedio_puntaje": avg,
+        })
+    out.sort(key=lambda x: (-x["asignadas"], x["nombre"] or ""))
+    return out
+
+
 # NOTE: el antiguo endpoint /asignaciones/masiva-subregion fue removido en v23.0.
 # La funcionalidad (filtrar propuestas por subregión y asignarlas a una terna) se
 # integró en el modal "Nueva asignación" de la página /asignaciones — usar bulk-create.

@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
-import { Trophy, Sparkles, FileText, Crown, Eye, History, ChevronRight, Users, Layers } from "lucide-react";
+import { Trophy, Sparkles, FileText, Crown, Eye, History, ChevronRight, Users, Layers, Trash2 } from "lucide-react";
 import { TID } from "@/constants/testIds";
 
 const FUENTE_LABEL = {

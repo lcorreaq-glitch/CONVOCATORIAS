@@ -433,6 +433,19 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 ### v22.1 — Fix UX: input REINICIAR uppercase (Feb 2026)
 - ✅ El input de confirmación "REINICIAR" en Administración → Sistema usaba `className="uppercase"` (solo visual) pero comparaba con `=== "REINICIAR"` exacto. Si el usuario escribía minúsculas, veía mayúsculas pero el valor real no coincidía y el botón nunca se habilitaba. Corregido normalizando con `.toUpperCase()` en el `onChange`.
 
+### v23.1 — Panel Resumen por jurado + Fix Trash2 en Ranking (Feb 2026)
+
+**Bug crítico corregido**:
+- ✅ `Ranking.jsx` rompía con `ReferenceError: Trash2 is not defined` impidiendo entrar a la página. Causa: el botón eliminar usaba `<Trash2 />` pero el icono no estaba en el import de lucide-react. Agregado al import.
+
+**Panel "Resumen por jurado"**:
+- ✅ Backend: nuevo endpoint `GET /api/asignaciones/resumen-jurados?convocatoria_id=...` devuelve por jurado: asignadas, finalizadas, borrador, anuladas, %, subregiones cubiertas (calculadas), promedio de puntaje. Ordenado por carga descendente.
+- ✅ Frontend `Asignaciones.jsx`: botón "Resumen por jurado" en el toolbar abre un Dialog grande con:
+  - 4 KPI cards (jurados activos, asignaciones totales, finalizadas, avance promedio).
+  - Tabla por jurado con barra de progreso visual, badges de subregiones, promedio de puntaje.
+
+**Validación e2e**: endpoint devuelve 49 jurados con carga balanceada (top: 6/5/5 asignadas con subregiones diferentes). Frontend login carga correctamente.
+
 ### v23.0 — Terna sin territorio, cobertura calculada, auto-crear individuales en colectiva (Feb 2026)
 
 **Concepto refactorizado**: una terna es **solo un grupo de jurados**, sin territorio asociado. Las subregiones que evalúa se calculan dinámicamente como unión de las subregiones de las propuestas asignadas a esa terna.

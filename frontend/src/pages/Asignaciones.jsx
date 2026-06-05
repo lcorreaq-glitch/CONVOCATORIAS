@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Workflow, Trash2, Download, Upload, Sparkles, Loader2, Search, CheckSquare, ShieldAlert, ArrowRightLeft, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Plus, Workflow, Trash2, Download, Upload, Sparkles, Loader2, Search, CheckSquare, ShieldAlert, ArrowRightLeft, AlertTriangle, CheckCircle2, BarChart3 } from "lucide-react";
 import ConvocatoriaContextBanner from "@/components/ConvocatoriaContextBanner";
 
 export default function Asignaciones() {
@@ -35,6 +35,8 @@ export default function Asignaciones() {
   // Selección masiva en la tabla
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showCanceladas, setShowCanceladas] = useState(false);
+  const [resumenOpen, setResumenOpen] = useState(false);
+  const [resumen, setResumen] = useState([]);
   const [busy, setBusy] = useState(false);
   // Modal de resultado masivo (errores + duplicados)
   const [bulkResult, setBulkResult] = useState(null);
@@ -121,6 +123,14 @@ export default function Asignaciones() {
     finally { setBusy(false); }
   };
 
+  const openResumen = async () => {
+    setResumenOpen(true);
+    try {
+      const r = await api.get(`/asignaciones/resumen-jurados?convocatoria_id=${activeConvocatoriaId}`);
+      setResumen(r.data || []);
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
   // Reasignar una asignación: cambiar jurado/terna si NO fue evaluada todavía
   const openReassign = (asig) => {
     setReassignTarget(asig);
@@ -199,6 +209,9 @@ export default function Asignaciones() {
               <>
                 <Button onClick={() => setAutoOpen(true)} variant="outline" className="rounded-sm gap-2 border-[#14776A] text-[#14776A] hover:bg-[#F0F7F5]" data-testid="asig-auto-btn">
                   <Sparkles className="w-4 h-4" />Asignación automática
+                </Button>
+                <Button variant="outline" className="rounded-sm gap-2" onClick={openResumen} data-testid="asig-resumen-btn" title="Resumen por jurado: carga, avance, subregiones">
+                  <BarChart3 className="w-4 h-4" />Resumen por jurado
                 </Button>
                 <Button variant="outline" className="rounded-sm gap-2 text-amber-700 border-amber-300 hover:bg-amber-50" onClick={dedupe} disabled={busy} data-testid="asig-dedupe-btn" title="Detecta y cancela duplicados activos pre-existentes">
                   <ShieldAlert className="w-4 h-4" />Limpiar duplicados
@@ -601,6 +614,75 @@ export default function Asignaciones() {
         </DialogContent>
       </Dialog>
 
+      {/* MODAL: Resumen por jurado (carga, avance, subregiones cubiertas) */}
+      <Dialog open={resumenOpen} onOpenChange={setResumenOpen}>
+        <DialogContent className="rounded-lg max-w-6xl max-h-[92vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-[#14776A]" /> Resumen por jurado
+            </DialogTitle>
+            <p className="text-[12px] text-muted-foreground">
+              Mini-dashboard de carga, avance y subregiones por jurado activo. Útil para balancear la asignación.
+            </p>
+          </DialogHeader>
+          {!resumen.length ? (
+            <div className="py-10 text-center text-muted-foreground text-[13px]">
+              <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" /> Cargando…
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-4 gap-3 mb-4">
+                <KPICard label="Jurados activos" value={resumen.length} />
+                <KPICard label="Asignaciones totales" value={resumen.reduce((a, r) => a + r.asignadas, 0)} />
+                <KPICard label="Finalizadas" value={resumen.reduce((a, r) => a + r.finalizadas, 0)} tone="success" />
+                <KPICard label="Avance promedio" value={`${Math.round(resumen.reduce((a, r) => a + r.porcentaje, 0) / resumen.length)}%`} tone="info" />
+              </div>
+              <div className="overflow-x-auto border border-border rounded-sm">
+                <table className="w-full dense-table">
+                  <thead>
+                    <tr>
+                      <th>Jurado</th><th className="text-right">Asignadas</th><th className="text-right">Finalizadas</th>
+                      <th className="text-right">Borrador</th><th>Avance</th><th className="text-right">Prom.</th><th>Subregiones que evalúa</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resumen.map((r) => (
+                      <tr key={r.jurado_id} data-testid={`resumen-row-${r.jurado_id}`}>
+                        <td>
+                          <div className="font-semibold text-[13px]">{r.nombre}</div>
+                          <div className="text-[10.5px] text-muted-foreground">{r.email}</div>
+                        </td>
+                        <td className="text-right font-mono tabular-nums font-semibold">{r.asignadas}</td>
+                        <td className="text-right font-mono tabular-nums text-emerald-700">{r.finalizadas}</td>
+                        <td className="text-right font-mono tabular-nums text-amber-700">{r.borrador}</td>
+                        <td>
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden min-w-[60px]">
+                              <div className="h-full bg-[#14776A]" style={{ width: `${r.porcentaje}%` }} />
+                            </div>
+                            <span className="text-[11px] font-mono tabular-nums w-9 text-right">{r.porcentaje}%</span>
+                          </div>
+                        </td>
+                        <td className="text-right font-mono tabular-nums text-muted-foreground">{r.promedio_puntaje ?? "—"}</td>
+                        <td className="text-[11.5px]">
+                          {r.subregiones_propuestas.length === 0 ? (
+                            <span className="italic text-muted-foreground">Sin propuestas asignadas</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {r.subregiones_propuestas.map((s) => <Badge key={s} tone="muted">{s}</Badge>)}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* MODAL: Reasignar (cambiar jurado/terna) */}
       <Dialog open={!!reassignTarget} onOpenChange={(v) => { if (!v) { setReassignTarget(null); setReassignChoice(""); } }}>
         <DialogContent className="rounded-lg max-w-md">
@@ -659,3 +741,16 @@ export default function Asignaciones() {
     </div>
   );
 }
+
+function KPICard({ label, value, tone = "default" }) {
+  const toneCls = tone === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+    : tone === "info" ? "border-sky-200 bg-sky-50 text-sky-800"
+    : "border-border bg-white text-foreground";
+  return (
+    <div className={`border rounded-lg p-3 ${toneCls}`}>
+      <div className="text-[10px] uppercase tracking-wide font-display font-bold opacity-70">{label}</div>
+      <div className="text-2xl font-display font-bold tabular-nums mt-1">{value}</div>
+    </div>
+  );
+}
+
