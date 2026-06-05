@@ -9,24 +9,68 @@ Render: ReportLab. Merge tags resueltos en _render_text(...).
 """
 import io
 import re
+import os
 import base64
+import hashlib
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Body
 from fastapi.responses import StreamingResponse
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import cm
+from reportlab.lib.units import cm, mm
 from reportlab.lib import colors as rl_colors
 from reportlab.lib.enums import TA_JUSTIFY, TA_CENTER, TA_LEFT
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, KeepTogether
 )
+from reportlab.graphics.barcode.qr import QrCodeWidget
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics import renderPDF
 
 from db import get_db, now_iso
 from auth import get_current_user, require_roles, audit
 
 router = APIRouter(prefix="/api", tags=["actas"])
+
+
+# ============================================================
+# CÓDIGO DE VERIFICACIÓN + QR
+# ============================================================
+def _acta_verification_code(tipo: str, conv_id: str, entity_id: str) -> str:
+    """Genera un código corto determinista para verificación pública.
+    tipo: individual | colectiva | subregional
+    entity_id: jurado_id | terna_id | f"{conv_id}:{subregion}"
+    """
+    raw = f"{tipo}|{conv_id}|{entity_id}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:12].upper()
+
+
+def _public_base_url() -> str:
+    """URL pública del frontend para construir el enlace de verificación.
+    Usa REACT_APP_BACKEND_URL del archivo frontend/.env como única fuente de verdad.
+    """
+    try:
+        with open("/app/frontend/.env", "r") as fh:
+            for line in fh:
+                if line.startswith("REACT_APP_BACKEND_URL="):
+                    return line.split("=", 1)[1].strip()
+    except Exception:
+        pass
+    return os.environ.get("PUBLIC_BASE_URL", "")
+
+
+def _build_qr_flowable(payload_url: str, size_cm: float = 2.8) -> Drawing:
+    """Construye un Flowable con un QR de verificación."""
+    qr = QrCodeWidget(payload_url)
+    bounds = qr.getBounds()
+    w = bounds[2] - bounds[0]
+    h = bounds[3] - bounds[1]
+    side = size_cm * cm
+    d = Drawing(side, side, transform=[side / w, 0, 0, side / h, 0, 0])
+    d.add(qr)
+    return d
+
 
 # ============================================================
 # DEFAULT TEMPLATES (INC2026 — texto literal de los .docx)
@@ -746,7 +790,9 @@ def _firmantes_table(firmantes: list, st) -> Table:
 
 
 def _build_pdf(tmpl: dict, ctx: dict, conv: dict, tabla_headers: list,
-                tabla_rows: list, firmantes: list, branding: dict = None) -> bytes:
+                tabla_rows: list, firmantes: list, branding: dict = None,
+                verificacion: dict = None) -> bytes:
+    """verificacion = {'codigo': str, 'url': str} (opcional, agrega QR al pie)"""
     buf = io.BytesIO()
     has_footer = bool((branding or {}).get("footer_image_url"))
     bottom_margin = 3.2 * cm if has_footer else 1.6 * cm  # espacio reservado para el footer fijo
@@ -830,6 +876,34 @@ def _build_pdf(tmpl: dict, ctx: dict, conv: dict, tabla_headers: list,
     el.append(Paragraph(tmpl.get("pie_firmantes_titulo", "FIRMANTES"), st["h2"]))
     el.append(_firmantes_table(firmantes, st))
 
+    # ====== QR de verificación pública del acta ======
+    if verificacion and verificacion.get("codigo"):
+        el.append(Spacer(1, 14))
+        qr_drawing = _build_qr_flowable(verificacion.get("url") or verificacion["codigo"], size_cm=2.6)
+        verif_style = ParagraphStyle("verif", parent=st["small"], alignment=TA_LEFT, fontSize=8.2, leading=10)
+        verif_text = (
+            f'<b>Código de verificación:</b> <font face="Courier-Bold">{verificacion["codigo"]}</font><br/>'
+            f'Cualquier persona puede escanear este QR o ingresar el código en la plataforma KRINOS '
+            f'para validar la autenticidad de esta acta, sus firmantes y la fecha de emisión.'
+        )
+        if verificacion.get("url"):
+            verif_text += f'<br/><font color="#0F5E54">{verificacion["url"]}</font>'
+        verif_table = Table(
+            [[qr_drawing, Paragraph(verif_text, verif_style)]],
+            colWidths=[3.0 * cm, 13.5 * cm],
+            hAlign="LEFT",
+        )
+        verif_table.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("BOX", (0, 0), (-1, -1), 0.5, rl_colors.HexColor("#CDE7E1")),
+            ("BACKGROUND", (0, 0), (-1, -1), rl_colors.HexColor("#F7FAF9")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        el.append(verif_table)
+
     # Footer institucional fijo al pie de página (callback canvas)
     footer_drawer = _make_footer_drawer(branding or {})
     if footer_drawer:
@@ -843,6 +917,52 @@ def _build_pdf(tmpl: dict, ctx: dict, conv: dict, tabla_headers: list,
 # ============================================================
 # GENERADORES PDF
 # ============================================================
+async def _build_verificacion(db, tipo: str, conv_id: str, entity_id: str, meta: dict = None) -> dict:
+    """Persiste/recupera el código de verificación del acta y devuelve {codigo,url}."""
+    codigo = _acta_verification_code(tipo, conv_id, entity_id)
+    existing = await db.actas_verificacion.find_one({"codigo": codigo})
+    if not existing:
+        await db.actas_verificacion.insert_one({
+            "codigo": codigo,
+            "tipo": tipo,
+            "convocatoria_id": conv_id,
+            "entity_id": entity_id,
+            "meta": meta or {},
+            "created_at": now_iso(),
+        })
+    else:
+        # actualizar meta (firmas, fecha emisión última) sin duplicar
+        await db.actas_verificacion.update_one(
+            {"codigo": codigo},
+            {"$set": {"meta": meta or existing.get("meta", {}), "last_emitted_at": now_iso()}}
+        )
+    base = _public_base_url().rstrip("/")
+    url = f"{base}/verificar/{codigo}" if base else codigo
+    return {"codigo": codigo, "url": url}
+
+
+@router.get("/actas/verificar/{codigo}")
+async def verificar_acta_publica(codigo: str):
+    """Endpoint PÚBLICO de verificación de actas.
+    Devuelve metadatos mínimos para que cualquiera pueda validar la autenticidad
+    escaneando el QR impreso o ingresando el código.
+    """
+    db = get_db()
+    v = await db.actas_verificacion.find_one({"codigo": codigo.upper()}, {"_id": 0})
+    if not v:
+        raise HTTPException(404, "Acta no encontrada o código inválido")
+    conv = await db.convocatorias.find_one({"id": v["convocatoria_id"]}, {"_id": 0, "id": 1, "nombre": 1, "codigo": 1})
+    return {
+        "valido": True,
+        "codigo": v["codigo"],
+        "tipo": v["tipo"],
+        "convocatoria": conv or {"id": v["convocatoria_id"]},
+        "emitida_inicialmente": v.get("created_at"),
+        "ultima_emision": v.get("last_emitted_at", v.get("created_at")),
+        "meta": v.get("meta") or {},
+    }
+
+
 @router.get("/actas/individual-jurado/{jurado_id}")
 async def acta_individual_jurado(jurado_id: str, user: dict = Depends(get_current_user)):
     db = get_db()
@@ -883,7 +1003,9 @@ async def acta_individual_jurado(jurado_id: str, user: dict = Depends(get_curren
         "firma_url": (jur.get("datos") or {}).get("firma_url"),
         "subregion": ", ".join(jur.get("subregiones") or []),
     }]
-    pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes, _get_branding(conv))
+    pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes, _get_branding(conv),
+                     verificacion=await _build_verificacion(db, "individual", jur["convocatoria_id"], jurado_id,
+                                                            meta={"jurado_nombre": jur.get("nombre"), "subregiones": jur.get("subregiones")}))
     await audit(user, "generate_acta", "actas", jurado_id, detalle="individual_jurado")
     return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
                              headers={"Content-Disposition": f'inline; filename="acta_individual_{jur["nombre"].replace(" ","_")}.pdf"'})
@@ -946,7 +1068,9 @@ async def acta_colectiva_terna(terna_id: str, user: dict = Depends(get_current_u
             "firma_url": garante.get("firma_url"),
             "subregion": garante.get("entidad_rol", ""),
         })
-    pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes, _get_branding(conv))
+    pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes, _get_branding(conv),
+                     verificacion=await _build_verificacion(db, "colectiva", terna["convocatoria_id"], terna_id,
+                                                            meta={"terna_codigo": terna.get("codigo"), "subregion": terna.get("subregion") or terna.get("territorio")}))
     await audit(user, "generate_acta", "actas", terna_id, detalle="colectiva_terna")
     return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
                              headers={"Content-Disposition": f'inline; filename="acta_colectiva_terna_{terna["codigo"]}.pdf"'})
@@ -1019,7 +1143,9 @@ async def acta_subregional(convocatoria_id: str, subregion: str,
             "firma_url": garante.get("firma_url"),
             "subregion": garante.get("entidad_rol", ""),
         })
-    pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes, _get_branding(conv))
+    pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes, _get_branding(conv),
+                     verificacion=await _build_verificacion(db, "subregional", convocatoria_id, f"sub:{subregion}",
+                                                            meta={"subregion": subregion, "n_propuestas": len(propuestas_ids), "n_firmantes": len(firmantes)}))
     await audit(user, "generate_acta", "actas", f"sub-{subregion}", detalle=f"subregional:{subregion}")
     return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
                              headers={"Content-Disposition": f'inline; filename="acta_subregional_{subregion.replace(" ","_")}.pdf"'})

@@ -12,6 +12,7 @@ import { Plus, Settings2, Trash2, Pencil, Link2, Eye } from "lucide-react";
 import SortableTable from "./SortableTable";
 import InlineFlagsEditor from "./InlineFlagsEditor";
 import PropuestaForm from "../propuestas/PropuestaForm";
+import JuradoPerfilPreview from "./JuradoPerfilPreview";
 
 const CAMPO_TIPOS = [
   "texto_corto", "texto_largo", "numero", "moneda", "porcentaje", "fecha",
@@ -126,10 +127,13 @@ export default function CamposPanel({ campos, convId, reload, catalogos, aplicaA
     <div>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="font-display font-bold text-[16px]">Campos del formulario de propuestas</h3>
+          <h3 className="font-display font-bold text-[16px]">
+            {aplicaA === "jurado" ? "Campos del perfil de jurados" : "Campos del formulario de propuestas"}
+          </h3>
           <p className="text-[12.5px] text-[#5E6878] mt-0.5">
-            Cada campo aparecerá al cargar una propuesta. El <strong>nombre interno</strong> es la clave
-            que se guarda en <code className="text-[11px] bg-secondary px-1 rounded">datos_dinamicos</code>.
+            {aplicaA === "jurado"
+              ? <>Cada campo aparecerá en el perfil del jurado (Mi Perfil) y en su vista de detalle. Usa <strong>rol especial</strong> para anclar firma / hoja de vida / documento / foto a su sección.</>
+              : <>Cada campo aparecerá al cargar una propuesta. El <strong>nombre interno</strong> es la clave que se guarda en <code className="text-[11px] bg-secondary px-1 rounded">datos_dinamicos</code>.</>}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -138,9 +142,9 @@ export default function CamposPanel({ campos, convId, reload, catalogos, aplicaA
             onClick={() => setPreviewOpen(true)}
             className="rounded-lg gap-2 text-[12.5px]"
             data-testid="campos-preview-form"
-            title="Ver el formulario tal como se verá al crear una propuesta"
+            title={aplicaA === "jurado" ? "Ver cómo se verá Mi Perfil del jurado" : "Ver el formulario tal como se verá al crear una propuesta"}
           >
-            <Eye className="w-4 h-4" /> Vista previa del formulario
+            <Eye className="w-4 h-4" /> {aplicaA === "jurado" ? "Vista previa del perfil" : "Vista previa del formulario"}
           </Button>
           <Dialog open={open} onOpenChange={(v) => { if (!v) { setEditing(null); setF(blank); } setOpen(v); }}>
             <DialogTrigger asChild>
@@ -225,17 +229,21 @@ export default function CamposPanel({ campos, convId, reload, catalogos, aplicaA
         emptyState={<EmptyState title="Sin campos configurados" hint="Crea los campos que tendrá cada propuesta." icon={Settings2} />}
       />
 
-      {/* Vista previa del formulario tal como se verá en /propuestas */}
-      <PropuestaForm
-        open={previewOpen}
-        onOpenChange={setPreviewOpen}
-        convocatoriaId={convId}
-        campos={campos}
-        catalogos={catalogos}
-        propuesta={null}
-        previewMode={true}
-        onSaved={() => {}}
-      />
+      {/* Vista previa: del formulario propuesta o del perfil del jurado según aplicaA */}
+      {aplicaA === "jurado" ? (
+        <JuradoPerfilPreview open={previewOpen} onOpenChange={setPreviewOpen} campos={campos} />
+      ) : (
+        <PropuestaForm
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          convocatoriaId={convId}
+          campos={campos}
+          catalogos={catalogos}
+          propuesta={null}
+          previewMode={true}
+          onSaved={() => {}}
+        />
+      )}
     </div>
   );
 }

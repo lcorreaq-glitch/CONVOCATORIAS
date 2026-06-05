@@ -8,6 +8,7 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
 import ResetPassword from "@/pages/ResetPassword";
+import VerificarActa from "@/pages/VerificarActa";
 import Dashboard from "@/pages/Dashboard";
 import Convocatorias from "@/pages/Convocatorias";
 import Configuracion from "@/pages/Configuracion";
@@ -35,6 +36,7 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/verificar/:codigo" element={<VerificarActa />} />
             <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/convocatorias" element={<Convocatorias />} />

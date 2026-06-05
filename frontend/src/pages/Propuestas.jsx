@@ -353,9 +353,9 @@ export default function Propuestas() {
           <tbody>
             {items.map((p) => (
               <tr key={p.id} data-testid={`propuesta-row-${p.codigo}`}>
-                <td className="font-mono text-xs">{p.codigo}</td>
-                <td><div className="font-semibold">{p.nombre}</div></td>
-                <td className="text-muted-foreground">{p.organizacion || p.datos?.nombre_organizacion || "—"}</td>
+                <td className="font-mono text-[12px] text-muted-foreground tabular-nums">{p.codigo}</td>
+                <td><div className="font-semibold text-[13px] text-foreground capitalize leading-snug">{(p.nombre || "").toLowerCase()}</div></td>
+                <td className="text-[12.5px] text-muted-foreground capitalize leading-snug">{((p.organizacion || p.datos?.nombre_organizacion || "") || "—").toLowerCase()}</td>
                 <td>
                   {canEdit ? (
                     <Select value={p.estado || "Registrada"} onValueChange={(v) => changeEstado(p, v)}>

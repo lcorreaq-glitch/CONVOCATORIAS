@@ -433,3 +433,21 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 ### v22.1 — Fix UX: input REINICIAR uppercase (Feb 2026)
 - ✅ El input de confirmación "REINICIAR" en Administración → Sistema usaba `className="uppercase"` (solo visual) pero comparaba con `=== "REINICIAR"` exacto. Si el usuario escribía minúsculas, veía mayúsculas pero el valor real no coincidía y el botón nunca se habilitaba. Corregido normalizando con `.toUpperCase()` en el `onChange`.
 
+### v22.2 — Tipografía consistente, vista previa perfil jurado, QR de verificación de actas (Feb 2026)
+
+**Tipografía consistente en `/propuestas`**:
+- ✅ Columnas Código (font-mono tabular-nums, color muted), Nombre (capitalize + lowercase para normalizar MAYÚSCULAS heredadas de Excel) y Organización (idem) ahora se muestran con estilo uniforme. Los datos en BD permanecen iguales — solo se transforma para visualización.
+
+**Vista previa del perfil del jurado** (`JuradoPerfilPreview.jsx`):
+- ✅ Nuevo componente en `Configuración → Campos` sub-tab Jurado. Botón "Vista previa del perfil" abre un modal que muestra exactamente cómo verá el jurado su pantalla "Mi Perfil" con los campos parametrizados actuales (foto, firma, hoja de vida, cédula con badges del rol especial), incluyendo la sección "Información adicional solicitada" que lista todos los campos extras.
+- ✅ Avisa cuando no hay campo con un `rol_especial` específico, indicando que se usa la clave legacy.
+
+**QR de verificación pública en actas PDF**:
+- ✅ Cada acta (Individual, Colectiva-Terna, Subregional) embedea un código de verificación corto (12 chars SHA256) + QR generado con ReportLab.
+- ✅ Persistencia en colección `actas_verificacion` con metadatos (jurado/terna/subregion, fecha emisión, conteo firmantes).
+- ✅ El QR apunta a `{FRONTEND_URL}/verificar/{codigo}` (página pública).
+- ✅ Endpoint **PÚBLICO** `GET /api/actas/verificar/{codigo}` devuelve metadatos sin requerir autenticación (válido / tipo / convocatoria / emisión inicial+última / meta).
+- ✅ Nueva ruta frontend `/verificar/:codigo` con UI institucional (banner verde con ShieldCheck, código grande monospace, cards de metadatos, mensaje de error rojo si código inválido).
+
+**Validación e2e**: Acta individual generada → PDF 60KB con QR + texto "Código de verificación: 43C333E2531E", endpoint público devuelve `{valido:true, jurado_nombre:"Alvaro Augusto Diaz Algarin", subregiones:["Bajo Cauca"]...}`, código falso → 404, página `/verificar/:codigo` renderiza correctamente.
+
