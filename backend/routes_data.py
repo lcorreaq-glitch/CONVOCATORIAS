@@ -474,20 +474,184 @@ async def update_jurado(jid: str, payload: dict, user: dict = Depends(require_ro
 
 
 @router.get("/jurados-template")
-async def jurados_template(convocatoria_id: Optional[str] = None, user: dict = Depends(get_current_user)):
-    """Genera plantilla dinámica: base + campos configurados con aplica_a=jurado."""
+async def jurados_template(convocatoria_id: str, user: dict = Depends(get_current_user)):
+    """Plantilla dinámica de jurados, con mismo look & feel que la de propuestas:
+    - 2 filas header (etiqueta humana + nombre interno) + fila de ejemplo.
+    - Hoja Instrucciones con tipo/obligatorio/valores.
+    - Hoja Catálogos con valores válidos (Subregiones, Estados de Jurado, ...).
+    - Columna `estado` validada contra catálogo "Estados de Jurado" si existe.
+    """
+    from openpyxl.styles import Font, PatternFill, Alignment
+
     db = get_db()
-    base_cols = ["nombre", "email", "telefono", "subregiones", "perfil"]
-    extra_cols = []
-    if convocatoria_id:
-        campos = await db.campos.find({"convocatoria_id": convocatoria_id, "aplica_a": "jurado"}, {"_id": 0}).sort("orden", 1).to_list(200)
-        extra_cols = [c["nombre_interno"] for c in campos if c["nombre_interno"] not in base_cols]
-    cols = base_cols + extra_cols
+    campos = await db.campos.find({"convocatoria_id": convocatoria_id, "aplica_a": "jurado"}, {"_id": 0}).sort("orden", 1).to_list(200)
+    catalogos = await db.catalogos.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(200)
+    cat_by_id = {c["id"]: c for c in catalogos}
+    cat_by_nombre = {c["nombre"]: c for c in catalogos}
+
+    subreg_cat = cat_by_nombre.get("Subregiones") or cat_by_nombre.get("subregiones")
+    subreg_valores = [v.get("valor") for v in (subreg_cat.get("valores") or []) if v.get("activo") is not False] if subreg_cat else []
+
+    estados_cat = cat_by_nombre.get("Estados de Jurado") or cat_by_nombre.get("Estados de jurado")
+    estados_validos = [v.get("valor") for v in (estados_cat.get("valores") or []) if v.get("activo") is not False] if estados_cat else ["Activo", "Inactivo", "Suspendido"]
+
+    # Filtrar campos a importar: excluir los de tipo archivo, los con rol_especial=firma/hoja_vida/foto,
+    # y los que duplican las columnas base (nombre, email, telefono, subregiones, perfil).
+    NO_IMPORT_ROLES = {"firma", "hoja_vida", "foto"}
+    BASE_INTERNOS = {"nombre", "email", "telefono", "subregiones", "perfil"}
+    campos_excel = [
+        c for c in campos
+        if c.get("tipo") != "archivo"
+        and c.get("rol_especial") not in NO_IMPORT_ROLES
+        and c.get("nombre_interno") not in BASE_INTERNOS
+    ]
+
+    base_specs = [
+        ("nombre", "Nombre completo *", True, "Texto libre"),
+        ("email", "Correo electrónico *", True, "Email válido (será su usuario de acceso)"),
+        ("telefono", "Teléfono", False, "Ej. 3001234567"),
+        ("subregiones", "Subregiones *", True, "Una o varias separadas por ; (ver hoja 'Catálogos')"),
+        ("perfil", "Perfil profesional", False, "Texto libre (formación, experiencia)"),
+    ]
+
     wb = Workbook()
     ws = wb.active
     ws.title = "Jurados"
-    ws.append(cols)
-    ws.append(["Ana Pérez", "ana.perez@ejemplo.co", "3001234567", "Urabá; Norte", "Magíster en Desarrollo Comunitario..."] + ["" for _ in extra_cols])
+
+    headers_tech = [k for k, _, _, _ in base_specs] + [c["nombre_interno"] for c in campos_excel] + ["estado"]
+    headers_label = [lbl for _, lbl, _, _ in base_specs] + [
+        ((c.get("nombre_visible") or c["nombre_interno"]) + (" *" if c.get("obligatorio") else "")) for c in campos_excel
+    ] + ["Estado (opcional)"]
+
+    ws.append(headers_label)
+    label_font = Font(bold=True, color="FFFFFF", size=11)
+    label_fill = PatternFill("solid", fgColor="14776A")
+    for cell in ws[1]:
+        cell.font = label_font
+        cell.fill = label_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws.row_dimensions[1].height = 28
+
+    ws.append(headers_tech)
+    intern_font = Font(italic=True, color="5E6878", size=9)
+    intern_fill = PatternFill("solid", fgColor="F1F4F7")
+    for cell in ws[2]:
+        cell.font = intern_font
+        cell.fill = intern_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[2].height = 16
+
+    # Fila de ejemplo
+    ejemplo_subreg = subreg_valores[0] + ("; " + subreg_valores[1] if len(subreg_valores) > 1 else "") if subreg_valores else "Urabá; Norte"
+    ejemplo = [
+        "Ana María Pérez",
+        "ana.perez@ejemplo.co",
+        "3001234567",
+        ejemplo_subreg,
+        "Magíster en Desarrollo Comunitario con 10 años de experiencia.",
+    ] + ["" for _ in campos_excel] + [estados_validos[0] if estados_validos else "Activo"]
+    ws.append(ejemplo)
+
+    for col_idx, h in enumerate(headers_label, start=1):
+        letter = ws.cell(row=1, column=col_idx).column_letter
+        ws.column_dimensions[letter].width = max(18, min(38, len(h) + 4))
+    ws.freeze_panes = "A3"
+
+    # Mapeo de tipos amigable
+    def _describe_field(c):
+        tipo = c.get("tipo", "texto")
+        if tipo in ("lista", "catalogo", "select"):
+            cat_ref = c.get("catalogo_id") or c.get("catalogo")
+            cat = cat_by_id.get(cat_ref) or cat_by_nombre.get(cat_ref or "")
+            if cat:
+                return "lista", f"Valor exacto de: {cat.get('nombre')}  →  Ver hoja 'Catálogos'"
+            return tipo, "Texto libre"
+        if tipo in ("multi_catalogo", "multi_select", "seleccion_multiple", "multiseleccion"):
+            cat_ref = c.get("catalogo_id") or c.get("catalogo")
+            cat = cat_by_id.get(cat_ref) or cat_by_nombre.get(cat_ref or "")
+            if cat:
+                return "multi-lista", f"Uno o varios separados por ;  de: {cat.get('nombre')}  →  Ver hoja 'Catálogos'"
+            return tipo, "Texto libre (separar con ;)"
+        if tipo in ("si_no", "boolean"):
+            return tipo, "sí | no  (también acepta true/false, 1/0)"
+        if tipo == "fecha":
+            return tipo, "Formato YYYY-MM-DD"
+        if tipo == "hora":
+            return tipo, "Formato HH:MM (24h)"
+        if tipo in ("numero", "numero_entero", "numero_decimal", "entero", "decimal"):
+            return tipo, "Número entero o decimal"
+        if tipo in ("url", "enlace"):
+            return tipo, "URL completa (https://...)"
+        if tipo in ("email", "correo"):
+            return tipo, "Correo electrónico válido"
+        if tipo in ("texto_corto", "texto", "texto_largo", "textarea"):
+            return tipo, "Texto libre"
+        return tipo, "Texto libre"
+
+    # Hoja Instrucciones
+    inst = wb.create_sheet("Instrucciones")
+    inst.append(["Campo (nombre interno)", "Etiqueta visible", "Tipo", "Obligatorio", "Valores aceptados / Catálogo"])
+    for cell in inst[1]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor="E8F3F0")
+    base_inst_rows = [
+        ("nombre", "Nombre completo", "texto", "Sí", "Texto libre"),
+        ("email", "Correo electrónico", "email", "Sí", "Email válido. Será el usuario de acceso del jurado."),
+        ("telefono", "Teléfono", "texto", "No", "Ej. 3001234567"),
+        ("subregiones", "Subregiones", "multi-lista", "Sí",
+         f"Uno o varios separados por ; de: Subregiones  →  Ver hoja 'Catálogos'" if subreg_valores else "Texto libre, separar con ;"),
+        ("perfil", "Perfil profesional", "texto_largo", "No", "Resumen de formación y experiencia"),
+    ]
+    for r in base_inst_rows:
+        inst.append(list(r))
+    for c in campos_excel:
+        tipo_label, valores = _describe_field(c)
+        inst.append([
+            c["nombre_interno"],
+            c.get("nombre_visible") or c["nombre_interno"],
+            tipo_label,
+            "Sí" if c.get("obligatorio") else "No",
+            valores,
+        ])
+    inst.append(["estado", "Estado del jurado", "lista", "No",
+                 "Uno de: " + " | ".join(estados_validos) if estados_validos else "Texto libre — por defecto 'Activo'"])
+    # Nota especial: anexos (firma/HV/foto) no se cargan por Excel
+    inst.append([])
+    inst.append(["—", "Anexos del jurado (firma, hoja de vida, foto…)", "archivo", "—",
+                 "Se cargan desde el perfil del jurado (Mi Perfil), no por Excel."])
+    inst.column_dimensions["A"].width = 28
+    inst.column_dimensions["B"].width = 32
+    inst.column_dimensions["C"].width = 14
+    inst.column_dimensions["D"].width = 12
+    inst.column_dimensions["E"].width = 70
+
+    # Hoja Catálogos
+    cat_sheet = wb.create_sheet("Catálogos")
+    cat_sheet.append(["Catálogo", "Valor", "Descripción / Padre"])
+    for cell in cat_sheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="14776A")
+    cat_ids_usados = set()
+    for c in campos_excel:
+        ref = c.get("catalogo_id") or c.get("catalogo")
+        if ref:
+            cat_ids_usados.add(ref)
+    if subreg_cat:
+        cat_ids_usados.add(subreg_cat.get("id"))
+    if estados_cat:
+        cat_ids_usados.add(estados_cat.get("id"))
+    for cat in catalogos:
+        if cat.get("id") not in cat_ids_usados and cat.get("nombre") not in cat_ids_usados:
+            continue
+        for v in (cat.get("valores") or []):
+            if v.get("activo") is False:
+                continue
+            cat_sheet.append([cat.get("nombre"), v.get("valor"), v.get("descripcion") or v.get("padre_valor") or ""])
+    cat_sheet.column_dimensions["A"].width = 28
+    cat_sheet.column_dimensions["B"].width = 36
+    cat_sheet.column_dimensions["C"].width = 40
+    cat_sheet.freeze_panes = "A2"
+
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -503,18 +667,62 @@ async def import_jurados(convocatoria_id: str = Form(...), file: UploadFile = Fi
     rows = list(ws.iter_rows(values_only=True))
     if not rows:
         return {"creados": 0, "rechazados": 0, "errores": []}
-    headers = [str(h).strip() if h else "" for h in rows[0]]
+
+    # Detectar fila técnica (nombre_interno). Soporta plantilla nueva (fila 2) y vieja (fila 1).
+    def _is_tech_header(r):
+        if not r:
+            return False
+        return (str(r[0] or "")).strip().lower() == "nombre" and (str(r[1] or "")).strip().lower() == "email"
+
+    header_row_idx = 0
+    if not _is_tech_header(rows[0]) and len(rows) > 1 and _is_tech_header(rows[1]):
+        header_row_idx = 1
+    headers = [str(h).strip() if h else "" for h in rows[header_row_idx]]
+    data_start = header_row_idx + 1
+
+    # Catálogo Estados de Jurado
+    estados_cat = await db.catalogos.find_one(
+        {"convocatoria_id": convocatoria_id, "nombre": {"$in": ["Estados de Jurado", "Estados de jurado"]}},
+        {"_id": 0},
+    )
+    estados_validos_lower = set()
+    if estados_cat:
+        estados_validos_lower = {
+            (v.get("valor") or "").strip().lower()
+            for v in (estados_cat.get("valores") or [])
+            if v.get("activo") is not False
+        }
+
     # campos jurado configurados de la convocatoria
     campos_jurado = await db.campos.find({"convocatoria_id": convocatoria_id, "aplica_a": "jurado"}, {"_id": 0}).to_list(200)
     campos_by_nombre = {c["nombre_interno"]: c for c in campos_jurado}
     BASE_KEYS = {"nombre", "email", "telefono", "subregiones", "perfil", "especialidad", "linea_experiencia", "territorio", "estado"}
     created, errors = 0, []
-    for idx, row in enumerate(rows[1:], start=2):
+    for idx, row in enumerate(rows[data_start:], start=data_start + 1):
         try:
+            if not any(c for c in row if c not in (None, "", " ")):
+                continue
             data = {headers[i]: (row[i] if i < len(row) else None) for i in range(len(headers))}
             if not data.get("email") or not data.get("nombre"):
                 errors.append({"fila": idx, "error": "Falta nombre o email"})
                 continue
+
+            # Validar estado contra catálogo si existe
+            estado_raw = data.get("estado")
+            estado = "Activo"
+            if estado_raw:
+                estado_str = str(estado_raw).strip()
+                if estados_validos_lower:
+                    if estado_str.lower() not in estados_validos_lower:
+                        errors.append({"fila": idx, "error": f"Estado '{estado_str}' no es válido (ver hoja 'Catálogos')"})
+                        continue
+                    for v in (estados_cat.get("valores") or []):
+                        if (v.get("valor") or "").strip().lower() == estado_str.lower():
+                            estado = v.get("valor")
+                            break
+                else:
+                    estado = estado_str
+
             # Separar base vs dinámico
             base = {k: data.get(k) for k in BASE_KEYS if data.get(k) is not None}
             datos_din = {}
@@ -522,7 +730,6 @@ async def import_jurados(convocatoria_id: str = Form(...), file: UploadFile = Fi
                 if k in BASE_KEYS or not k or v is None:
                     continue
                 if k in campos_by_nombre:
-                    # tipo conversion
                     tipo = campos_by_nombre[k]["tipo"]
                     if tipo == "si_no":
                         datos_din[k] = str(v).strip().lower() in ("true", "1", "sí", "si", "yes")
@@ -550,7 +757,7 @@ async def import_jurados(convocatoria_id: str = Form(...), file: UploadFile = Fi
                 "telefono": str(base.get("telefono") or "").strip(),
                 "perfil": str(base.get("perfil") or "").strip(),
                 "subregiones": base.get("subregiones") or [],
-                "estado": "Activo",
+                "estado": estado,
                 "disponibilidad": "Disponible",
                 "datos": datos_din,
                 "created_at": now_iso(),

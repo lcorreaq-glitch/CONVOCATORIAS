@@ -190,6 +190,7 @@ class CampoIn(BaseModel):
     uso_propuesta: bool = True   # Aparece en el formulario de propuesta
     uso_lista: bool = False      # Aparece como columna en /propuestas
     aplica_a: str = "propuesta"  # "propuesta" | "jurado" — dominio al que pertenece el campo
+    rol_especial: Optional[str] = None  # firma | hoja_vida | documento | foto | otro (solo aplica_a=jurado)
     depende_de: Optional[str] = None
     catalogo_id: Optional[str] = None
     orden: int = 0

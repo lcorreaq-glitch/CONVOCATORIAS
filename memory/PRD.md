@@ -395,18 +395,41 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - Lock_key de brute-force: identifier-only (no IP) para sobrevivir a k8s ingress.
 
 ### v22 — Plantilla de carga masiva alineada al formulario dinámico (Feb 2026)
-**Backend `routes_data.py` — `GET /api/propuestas-template`**:
-- ✅ Mapeo de tipos corregido: reconoce los tipos reales del sistema (`lista`, `seleccion_multiple`, `si_no`, `texto_corto`, `texto_largo`, `numero_entero`, `numero_decimal`, `fecha`, `hora`, `url`, `email`, `archivo`).
-- ✅ Nueva columna **"Estado (opcional)"** al final de la plantilla con valor por defecto sugerido del catálogo.
-- ✅ Nueva hoja **"Catálogos"** con todos los valores válidos de cada catálogo referenciado por algún campo del formulario (referencia rápida al usuario).
-- ✅ Hoja "Instrucciones" actualizada con descripciones precisas por tipo y referencia cruzada a la hoja Catálogos.
 
-**Backend `routes_data.py` — `POST /api/propuestas-import`**:
-- ✅ Lee la columna `estado` del Excel y la valida contra el catálogo "Estados de Propuesta" si existe. Si el valor no es válido, rechaza la fila con mensaje claro. Si está vacío, default `Registrada`.
-- ✅ Recupera la forma canónica (case-insensitive match) del valor del catálogo.
+**Plantilla Propuestas (`GET/POST /api/propuestas-template`+`-import`)**:
+- ✅ Mapeo de tipos corregido (`lista`, `seleccion_multiple`, `si_no`, `texto_corto`, `texto_largo`, `numero_*`, `fecha`, `hora`, `url`, `email`, `archivo`).
+- ✅ Columna **"Estado (opcional)"** al final, valor por defecto desde catálogo.
+- ✅ Hoja **"Catálogos"** con todos los valores válidos referenciados (Subregiones, Estados, etc.).
+- ✅ Hoja **"Instrucciones"** con tipo amigable + obligatorio + valores.
+- ✅ Import valida `estado` contra catálogo "Estados de Propuesta" (rechaza fila con mensaje claro).
+- ✅ Removido panel duplicado "Catálogo Estados de Propuesta" de Administración → Sistema (solo gestionable desde Configuración → Catálogos).
 
-**Frontend `Administracion.jsx`**:
-- ✅ Removido panel "Catálogo Estados de Propuesta" de Administración → Sistema. Ahora se gestiona exclusivamente desde **Configuración → Catálogos** como solicitó el usuario, sin botones duplicados/confusos.
+**Plantilla Jurados (`GET/POST /api/jurados-template`+`-import`)** — mismo formato que Propuestas:
+- ✅ 2 filas header (etiqueta + nombre interno) + fila ejemplo prellena con valores reales del catálogo.
+- ✅ Hojas Propuestas/Instrucciones/Catálogos.
+- ✅ Columna **"Estado (opcional)"** validada contra catálogo "Estados de Jurado" (Activo/Inactivo/Suspendido/Vacaciones/Retirado).
+- ✅ Excluye automáticamente columnas duplicadas con base (`nombre`, `email`, `telefono`, `subregiones`, `perfil`) y los campos con `rol_especial=firma/hoja_vida/foto` (esos se cargan desde Mi Perfil, no por Excel).
+- ✅ Nuevo endpoint `POST /api/admin/seed-estados-jurado` para crear el catálogo inicial.
 
-**Validación e2e**: descarga plantilla (3 hojas, 18 columnas) → llena fila con estado="Asignada" + fila inválida → import 200 → creados=1, rechazados=1, error "Estado 'EstadoQueNoExiste' no es válido (ver hoja 'Catálogos')".
+**Modelo Campo — `rol_especial`** (escalable a otras convocatorias):
+- ✅ Nuevo atributo en `CampoIn`: `rol_especial: firma | hoja_vida | documento | foto | None` (solo aplica_a=jurado).
+- ✅ UI `CamposPanel` (Configuración → Campos sub-tab Jurado): muestra un selector "Rol especial" cuando se edita un campo de jurado.
+- ✅ Tipo `archivo` agregado a la lista de tipos disponibles.
+
+**`JuradoDetalle` (Drawer "👁 Ver")** — sin duplicados:
+- ✅ Resuelve firma/cédula/hoja de vida/foto desde el campo parametrizable con `rol_especial` correspondiente; fallback a las claves legacy (`firma_url`, `cedula`, `hoja_vida`) si no se configuró.
+- ✅ La sección "Información adicional" excluye automáticamente los campos con `rol_especial`, evitando que aparezcan dos veces.
+
+**`MiPerfil` del jurado**:
+- ✅ Carga campos `aplica_a=jurado` y los resuelve dinámicamente.
+- ✅ Las secciones Firma / Hoja de Vida / Cédula / Foto usan el `nombre_interno` del campo configurado.
+- ✅ Nueva sección **"Información adicional solicitada"**: renderiza el resto de campos parametrizables (texto, archivo, fecha, si/no, etc.) como inputs editables con `ExtraCampoInput`. Permite cargar anexos extras sin que el admin tenga que tocar código.
+- ✅ Tipo `archivo` soportado con upload + previsualización + delete.
+
+**Validación e2e**:
+- Propuestas: descarga (3 hojas, 18 cols) → import → 1 creado, 1 rechazado por estado inválido.
+- Jurados: descarga (3 hojas, 8 cols sin duplicar) → import → 1 creado con estado="Activo", 1 rechazado por estado inválido "EstadoQueNoExiste".
+
+### v22.1 — Fix UX: input REINICIAR uppercase (Feb 2026)
+- ✅ El input de confirmación "REINICIAR" en Administración → Sistema usaba `className="uppercase"` (solo visual) pero comparaba con `=== "REINICIAR"` exacto. Si el usuario escribía minúsculas, veía mayúsculas pero el valor real no coincidía y el botón nunca se habilitaba. Corregido normalizando con `.toUpperCase()` en el `onChange`.
 

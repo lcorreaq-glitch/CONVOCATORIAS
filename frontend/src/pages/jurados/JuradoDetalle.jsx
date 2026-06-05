@@ -15,15 +15,34 @@ export default function JuradoDetalle({ open, onOpenChange, jurado, campos, onEd
   const [editingFirma, setEditingFirma] = useState(false);
   const [savingFirma, setSavingFirma] = useState(false);
   if (!jurado) return null;
+  // Resolver campos con rol especial (parametrizables desde Configuración → Campos).
+  // Si el admin definió un campo con rol_especial=firma|hoja_vida|documento|foto,
+  // ese campo es la fuente de verdad; los demás aparecen en "Información adicional".
+  const byRol = (rol) => campos.find((c) => c.rol_especial === rol);
+  const campoFirma = byRol("firma");
+  const campoHV = byRol("hoja_vida");
+  const campoCedula = byRol("documento");
+  const campoFoto = byRol("foto");
+  const ROLES_ESPECIALES = new Set(["firma", "hoja_vida", "documento", "foto"]);
   const BASE_KEYS = new Set(["nombre", "email", "telefono", "perfil", "subregiones"]);
-  const extras = campos.filter((c) => !BASE_KEYS.has(c.nombre_interno));
-  const cedula = jurado.datos?.cedula;
-  const firma = jurado.datos?.firma_url;
+  const extras = campos.filter(
+    (c) => !BASE_KEYS.has(c.nombre_interno) && !ROLES_ESPECIALES.has(c.rol_especial)
+  );
+  // Firma: usa el campo parametrizable con rol=firma si existe; fallback a datos.firma_url (legacy).
+  const firma = (campoFirma && jurado.datos?.[campoFirma.nombre_interno]) || jurado.datos?.firma_url;
+  // Cédula: lo mismo
+  const cedula = (campoCedula && jurado.datos?.[campoCedula.nombre_interno]) || jurado.datos?.cedula;
+  // Hoja de vida: campo parametrizable -> objeto archivo; fallback al legacy datos.hoja_vida
+  const hojaVidaRaw = campoHV ? jurado.datos?.[campoHV.nombre_interno] : jurado.datos?.hoja_vida;
+  const hojaVida = (hojaVidaRaw && typeof hojaVidaRaw === "object" && hojaVidaRaw.url) ? hojaVidaRaw : null;
+  // Foto: dynamic
+  const fotoUrl = (campoFoto && jurado.datos?.[campoFoto.nombre_interno]) || jurado.foto_url;
 
   const saveAdminFirma = async (dataUrl) => {
     setSavingFirma(true);
     try {
-      const newDatos = { ...(jurado.datos || {}), firma_url: dataUrl };
+      const key = campoFirma ? campoFirma.nombre_interno : "firma_url";
+      const newDatos = { ...(jurado.datos || {}), [key]: dataUrl };
       await api.patch(`/jurados/${jurado.id}`, { datos: newDatos });
       toast.success(dataUrl ? "Firma cargada" : "Firma eliminada");
       onUpdate && onUpdate({ ...jurado, datos: newDatos });
@@ -39,8 +58,8 @@ export default function JuradoDetalle({ open, onOpenChange, jurado, campos, onEd
         <DialogHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-full overflow-hidden bg-secondary border border-[#CDE7E1] shrink-0">
-              {jurado.foto_url
-                ? <img src={jurado.foto_url} alt="" className="w-full h-full object-cover" />
+              {fotoUrl
+                ? <img src={fotoUrl} alt="" className="w-full h-full object-cover" />
                 : <div className="w-full h-full grid place-items-center"><UserCog className="w-5 h-5 text-muted-foreground" /></div>}
             </div>
             <div className="flex-1 min-w-0">
@@ -123,23 +142,23 @@ export default function JuradoDetalle({ open, onOpenChange, jurado, campos, onEd
             <h3 className="text-[11px] uppercase tracking-[0.14em] font-display font-bold text-[#14776A] mb-2 flex items-center gap-1.5">
               <FileText className="w-3.5 h-3.5" />Hoja de vida
             </h3>
-            {jurado.datos?.hoja_vida?.url ? (
+            {hojaVida ? (
               <div className="border border-border rounded-lg p-3 bg-white flex items-center gap-3" data-testid="jur-detail-hv">
                 <div className="w-10 h-10 rounded-md bg-[#F0F7F5] grid place-items-center shrink-0">
                   <FileType className="w-5 h-5 text-[#14776A]" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-[13px] truncate" title={jurado.datos.hoja_vida.name}>
-                    {jurado.datos.hoja_vida.name || "Hoja de vida"}
+                  <div className="font-semibold text-[13px] truncate" title={hojaVida.name}>
+                    {hojaVida.name || "Hoja de vida"}
                   </div>
                   <div className="text-[10.5px] text-muted-foreground">
-                    {jurado.datos.hoja_vida.size
-                      ? `${(jurado.datos.hoja_vida.size / 1024).toFixed(1)} KB`
+                    {hojaVida.size
+                      ? `${(hojaVida.size / 1024).toFixed(1)} KB`
                       : "Archivo cargado"}
                   </div>
                 </div>
                 <a
-                  href={jurado.datos.hoja_vida.url}
+                  href={hojaVida.url}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-[#0F5E54] hover:underline px-2.5 py-1.5"
@@ -148,8 +167,8 @@ export default function JuradoDetalle({ open, onOpenChange, jurado, campos, onEd
                   <ExternalLink className="w-3.5 h-3.5" /> Ver
                 </a>
                 <a
-                  href={jurado.datos.hoja_vida.url}
-                  download={jurado.datos.hoja_vida.name || "hoja_de_vida"}
+                  href={hojaVida.url}
+                  download={hojaVida.name || "hoja_de_vida"}
                   className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold bg-[#14776A] hover:bg-[#0F5E54] text-white px-3 py-1.5 rounded-md"
                   data-testid="jur-detail-hv-download"
                 >

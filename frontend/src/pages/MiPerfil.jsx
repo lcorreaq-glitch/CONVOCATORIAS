@@ -194,6 +194,7 @@ function PerfilUsuarioGeneral() {
 // ===========================================================================
 function PerfilJurado() {
   const [jurado, setJurado] = useState(null);
+  const [campos, setCampos] = useState([]);
   const [form, setForm] = useState({ telefono: "", perfil: "", foto_url: "", datos: {} });
   const [busy, setBusy] = useState(false);
   const [improving, setImproving] = useState(false);
@@ -209,8 +210,31 @@ function PerfilJurado() {
         telefono: j.telefono || "", perfil: j.perfil || "",
         foto_url: j.foto_url || "", datos: j.datos || {},
       });
+      // Cargar campos parametrizables para esta convocatoria
+      if (j.convocatoria_id) {
+        try {
+          const rc = await api.get(`/campos?convocatoria_id=${j.convocatoria_id}&aplica_a=jurado`);
+          setCampos(rc.data || []);
+        } catch (_) { /* ignore */ }
+      }
     }).catch(() => toast.error("No se pudo cargar tu perfil"));
   }, []);
+
+  // Resolver claves dinámicas por rol_especial
+  const byRol = (rol) => campos.find((c) => c.rol_especial === rol);
+  const campoFirma = byRol("firma");
+  const campoHV = byRol("hoja_vida");
+  const campoCedula = byRol("documento");
+  const campoFoto = byRol("foto");
+  const keyFirma = campoFirma ? campoFirma.nombre_interno : "firma_url";
+  const keyCedula = campoCedula ? campoCedula.nombre_interno : "cedula";
+  const keyHV = campoHV ? campoHV.nombre_interno : "hoja_vida";
+  const ROLES_ESPECIALES = new Set(["firma", "hoja_vida", "documento", "foto"]);
+  const BASE_KEYS = new Set(["nombre", "email", "telefono", "perfil", "subregiones"]);
+  // Campos extras que el jurado puede llenar desde Mi Perfil (anexos comunes y datos parametrizables)
+  const camposExtras = campos.filter(
+    (c) => !BASE_KEYS.has(c.nombre_interno) && !ROLES_ESPECIALES.has(c.rol_especial)
+  );
 
   const submit = async () => {
     setBusy(true);
@@ -238,7 +262,11 @@ function PerfilJurado() {
     const fd = new FormData(); fd.append("file", file);
     try {
       const { data } = await api.post("/upload/image", fd, { headers: { "Content-Type": "multipart/form-data" } });
-      setForm((f) => ({ ...f, foto_url: data.data_url }));
+      if (campoFoto) {
+        setForm((f) => ({ ...f, datos: { ...(f.datos || {}), [campoFoto.nombre_interno]: data.data_url } }));
+      } else {
+        setForm((f) => ({ ...f, foto_url: data.data_url }));
+      }
       toast.success("Foto cargada");
     } catch (err) { toast.error(formatApiError(err.response?.data?.detail) || "Error al subir foto"); }
   };
@@ -249,8 +277,19 @@ function PerfilJurado() {
     const fd = new FormData(); fd.append("file", file);
     try {
       const { data } = await api.post("/upload/file", fd, { headers: { "Content-Type": "multipart/form-data" } });
-      setForm((f) => ({ ...f, datos: { ...f.datos, hoja_vida: { url: data.data_url, name: data.filename, size: data.size } } }));
+      setForm((f) => ({ ...f, datos: { ...(f.datos || {}), [keyHV]: { url: data.data_url, name: data.filename, size: data.size } } }));
       toast.success(`Hoja de vida "${data.filename}" cargada`);
+    } catch (err) { toast.error(formatApiError(err.response?.data?.detail) || "Error"); }
+  };
+
+  const onPickAnexo = async (e, campo) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const fd = new FormData(); fd.append("file", file);
+    try {
+      const { data } = await api.post("/upload/file", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      setForm((f) => ({ ...f, datos: { ...(f.datos || {}), [campo.nombre_interno]: { url: data.data_url, name: data.filename, size: data.size } } }));
+      toast.success(`${campo.nombre_visible} cargado`);
     } catch (err) { toast.error(formatApiError(err.response?.data?.detail) || "Error"); }
   };
 
@@ -282,7 +321,9 @@ function PerfilJurado() {
         <div className="lg:col-span-1 space-y-4">
           <div className="rounded-xl border border-border bg-white p-5 text-center">
             <div className="w-32 h-32 rounded-full overflow-hidden mx-auto bg-secondary border-2 border-[#CDE7E1] mb-3">
-              {form.foto_url ? <img src={form.foto_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full grid place-items-center"><UserCog className="w-12 h-12 text-muted-foreground" /></div>}
+              {(campoFoto ? form.datos?.[campoFoto.nombre_interno] : form.foto_url)
+                ? <img src={campoFoto ? form.datos[campoFoto.nombre_interno] : form.foto_url} alt="" className="w-full h-full object-cover" />
+                : <div className="w-full h-full grid place-items-center"><UserCog className="w-12 h-12 text-muted-foreground" /></div>}
             </div>
             <label className="inline-flex items-center gap-1.5 text-[12px] text-[#14776A] hover:underline cursor-pointer font-semibold" data-testid="mi-perfil-foto-upload">
               <ImageIcon className="w-3.5 h-3.5" /> Cambiar foto
@@ -316,10 +357,10 @@ function PerfilJurado() {
                 <Input value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} className="rounded-lg" data-testid="mi-perfil-telefono" />
               </div>
               <div>
-                <Label className="text-xs flex items-center gap-1.5"><IdCard className="w-3 h-3" />Documento de identidad (C.C.)</Label>
+                <Label className="text-xs flex items-center gap-1.5"><IdCard className="w-3 h-3" />{campoCedula?.nombre_visible || "Documento de identidad (C.C.)"}</Label>
                 <Input
-                  value={form.datos?.cedula || ""}
-                  onChange={(e) => setForm({ ...form, datos: { ...(form.datos || {}), cedula: e.target.value } })}
+                  value={form.datos?.[keyCedula] || ""}
+                  onChange={(e) => setForm({ ...form, datos: { ...(form.datos || {}), [keyCedula]: e.target.value } })}
                   className="rounded-lg font-mono"
                   placeholder="Sin puntos ni espacios"
                   data-testid="mi-perfil-cedula"
@@ -336,8 +377,8 @@ function PerfilJurado() {
               Esta firma se imprimirá automáticamente en tus actas (individual, colectiva, subregional). Dibújala con el dedo o ratón, o sube una imagen PNG/JPG transparente.
             </p>
             <SignaturePad
-              value={form.datos?.firma_url || null}
-              onChange={(v) => setForm({ ...form, datos: { ...(form.datos || {}), firma_url: v } })}
+              value={form.datos?.[keyFirma] || null}
+              onChange={(v) => setForm({ ...form, datos: { ...(form.datos || {}), [keyFirma]: v } })}
               testIdPrefix="mi-perfil-firma"
             />
           </div>
@@ -356,16 +397,16 @@ function PerfilJurado() {
           </div>
 
           <div className="rounded-xl border border-border bg-white p-5">
-            <h3 className="font-display font-bold text-[15px] mb-3 flex items-center gap-2"><FileText className="w-4 h-4" />Hoja de vida</h3>
-            {form.datos.hoja_vida?.url ? (
+            <h3 className="font-display font-bold text-[15px] mb-3 flex items-center gap-2"><FileText className="w-4 h-4" />{campoHV?.nombre_visible || "Hoja de vida"}</h3>
+            {form.datos?.[keyHV]?.url ? (
               <div className="flex items-center gap-2 border border-border rounded-lg p-2 bg-secondary/30">
                 <FileText className="w-4 h-4 text-[#14776A]" />
                 <div className="flex-1 min-w-0">
-                  <div className="text-[12.5px] font-semibold truncate">{form.datos.hoja_vida.name}</div>
-                  <div className="text-[10.5px] text-muted-foreground">{((form.datos.hoja_vida.size || 0) / 1024).toFixed(1)} KB</div>
+                  <div className="text-[12.5px] font-semibold truncate">{form.datos[keyHV].name}</div>
+                  <div className="text-[10.5px] text-muted-foreground">{((form.datos[keyHV].size || 0) / 1024).toFixed(1)} KB</div>
                 </div>
-                <a href={form.datos.hoja_vida.url} target="_blank" rel="noreferrer" download={form.datos.hoja_vida.name} className="text-[#14776A] hover:underline text-xs inline-flex items-center gap-1"><ExternalLink className="w-3 h-3" />ver</a>
-                <button onClick={() => setForm({ ...form, datos: { ...form.datos, hoja_vida: null } })} className="text-muted-foreground hover:text-red-500 p-1"><Trash2 className="w-3.5 h-3.5" /></button>
+                <a href={form.datos[keyHV].url} target="_blank" rel="noreferrer" download={form.datos[keyHV].name} className="text-[#14776A] hover:underline text-xs inline-flex items-center gap-1"><ExternalLink className="w-3 h-3" />ver</a>
+                <button onClick={() => setForm({ ...form, datos: { ...form.datos, [keyHV]: null } })} className="text-muted-foreground hover:text-red-500 p-1"><Trash2 className="w-3.5 h-3.5" /></button>
               </div>
             ) : (
               <label className="flex items-center justify-center gap-2 border-2 border-dashed border-border rounded-lg p-4 hover:border-[#14776A] cursor-pointer" data-testid="mi-perfil-hv-upload">
@@ -375,6 +416,27 @@ function PerfilJurado() {
               </label>
             )}
           </div>
+
+          {/* Anexos parametrizables (campos con aplica_a=jurado sin rol especial). */}
+          {camposExtras.length > 0 && (
+            <div className="rounded-xl border border-border bg-white p-5">
+              <h3 className="font-display font-bold text-[15px] mb-1">Información adicional solicitada</h3>
+              <p className="text-[11.5px] text-muted-foreground mb-3">
+                El administrador parametriza desde Configuración qué datos y anexos pedirte aquí.
+              </p>
+              <div className="grid sm:grid-cols-2 gap-3">
+                {camposExtras.map((c) => (
+                  <ExtraCampoInput
+                    key={c.id}
+                    campo={c}
+                    value={form.datos?.[c.nombre_interno]}
+                    onChange={(v) => setForm({ ...form, datos: { ...(form.datos || {}), [c.nombre_interno]: v } })}
+                    onPickFile={onPickAnexo}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
 
           {pwdOpen && (
             <div className="rounded-xl border border-border bg-white p-5">
@@ -401,6 +463,78 @@ function PerfilJurado() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+// ===========================================================================
+// Input dinámico para anexos/campos extras parametrizables del jurado
+// ===========================================================================
+function ExtraCampoInput({ campo, value, onChange, onPickFile }) {
+  const tipo = campo.tipo;
+  const label = (
+    <Label className="text-xs flex items-center gap-1.5">
+      {campo.nombre_visible}
+      {campo.obligatorio && <span className="text-red-500">*</span>}
+    </Label>
+  );
+  if (tipo === "archivo") {
+    const v = value && typeof value === "object" ? value : null;
+    return (
+      <div>
+        {label}
+        {v?.url ? (
+          <div className="flex items-center gap-2 border border-border rounded-lg p-2 bg-secondary/30 mt-1">
+            <FileText className="w-4 h-4 text-[#14776A]" />
+            <div className="flex-1 min-w-0">
+              <div className="text-[12.5px] font-semibold truncate">{v.name}</div>
+              <div className="text-[10.5px] text-muted-foreground">{((v.size || 0) / 1024).toFixed(1)} KB</div>
+            </div>
+            <a href={v.url} target="_blank" rel="noreferrer" download={v.name} className="text-[#14776A] hover:underline text-xs inline-flex items-center gap-1">
+              <ExternalLink className="w-3 h-3" />ver
+            </a>
+            <button onClick={() => onChange(null)} className="text-muted-foreground hover:text-red-500 p-1"><Trash2 className="w-3.5 h-3.5" /></button>
+          </div>
+        ) : (
+          <label className="flex items-center justify-center gap-2 border-2 border-dashed border-border rounded-lg p-3 hover:border-[#14776A] cursor-pointer mt-1" data-testid={`anexo-${campo.nombre_interno}`}>
+            <Upload className="w-4 h-4 text-muted-foreground" />
+            <span className="text-[12px] text-muted-foreground">Subir archivo</span>
+            <input type="file" className="hidden" onChange={(e) => onPickFile(e, campo)} />
+          </label>
+        )}
+      </div>
+    );
+  }
+  if (tipo === "texto_largo" || tipo === "textarea") {
+    return (
+      <div className="sm:col-span-2">
+        {label}
+        <Textarea rows={3} value={value || ""} onChange={(e) => onChange(e.target.value)} className="rounded-lg" />
+      </div>
+    );
+  }
+  if (tipo === "si_no") {
+    return (
+      <div>
+        {label}
+        <select value={value === true ? "si" : value === false ? "no" : ""} onChange={(e) => onChange(e.target.value === "si" ? true : e.target.value === "no" ? false : null)} className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-white">
+          <option value="">— Selecciona —</option>
+          <option value="si">Sí</option>
+          <option value="no">No</option>
+        </select>
+      </div>
+    );
+  }
+  return (
+    <div>
+      {label}
+      <Input
+        type={tipo === "numero" ? "number" : tipo === "fecha" ? "date" : tipo === "hora" ? "time" : tipo === "email" ? "email" : tipo === "url" ? "url" : "text"}
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded-lg"
+      />
     </div>
   );
 }

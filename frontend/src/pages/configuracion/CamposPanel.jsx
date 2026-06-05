@@ -16,9 +16,20 @@ import PropuestaForm from "../propuestas/PropuestaForm";
 const CAMPO_TIPOS = [
   "texto_corto", "texto_largo", "numero", "moneda", "porcentaje", "fecha",
   "hora", "email", "telefono", "url", "lista", "seleccion_multiple", "si_no",
+  "archivo",
 ];
 
 const TIPOS_QUE_USAN_CATALOGO = ["lista", "seleccion_multiple"];
+
+// Roles especiales SOLO para campos con aplica_a=jurado.
+// Determinan en qué sección se renderiza el campo en JuradoDetalle y MiPerfil.
+const ROL_ESPECIAL_OPCIONES = [
+  { value: "none", label: "— Sin rol especial (anexo común) —" },
+  { value: "firma", label: "Firma (canvas + upload)" },
+  { value: "hoja_vida", label: "Hoja de vida (archivo)" },
+  { value: "documento", label: "Documento de identidad / Cédula" },
+  { value: "foto", label: "Foto de perfil" },
+];
 
 const CAMPO_FLAGS = [
   { key: "uso_propuesta", label: "form propuesta", tone: "success", help: "Aparece en el formulario al crear/editar una propuesta. Si está apagado, el campo existe pero no se le pregunta al usuario." },
@@ -168,6 +179,22 @@ export default function CamposPanel({ campos, convId, reload, catalogos, aplicaA
                   {!catalogos?.length && (
                     <p className="text-[11px] text-[#B45309] mt-1">No hay catálogos. Crea uno en la pestaña "Catálogos" primero.</p>
                   )}
+                </div>
+              )}
+              {aplicaA === "jurado" && (
+                <div className="border border-[#CDE7E1] bg-[#F0F7F5] rounded-lg p-3">
+                  <Label className="text-[12px] font-semibold">Rol especial en el perfil del jurado</Label>
+                  <p className="text-[11px] text-muted-foreground mb-2">
+                    Si seleccionas un rol especial, este campo se mostrará en su sección dedicada del detalle del jurado
+                    (firma, hoja de vida, documento, foto) en lugar de aparecer en "Información adicional".
+                    Solo puede haber un campo por rol especial dentro de la convocatoria.
+                  </p>
+                  <Select value={f.rol_especial || "none"} onValueChange={(v) => setF({ ...f, rol_especial: v === "none" ? null : v })}>
+                    <SelectTrigger className="rounded-lg bg-white" data-testid="campo-rol-especial-select"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {ROL_ESPECIAL_OPCIONES.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                 </div>
               )}
               <div className="grid grid-cols-2 gap-3">

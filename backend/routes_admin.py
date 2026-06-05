@@ -300,6 +300,46 @@ async def seed_estados_propuesta(convocatoria_id: str,
 
 
 # ---------------------------------------------------------------------------
+# 4b. CATÁLOGO "Estados de Jurado" — seed para workflow del jurado
+# ---------------------------------------------------------------------------
+ESTADOS_JURADO_VALORES = [
+    "Activo",
+    "Inactivo",
+    "Suspendido",
+    "Vacaciones",
+    "Retirado",
+]
+
+
+@router.post("/seed-estados-jurado")
+async def seed_estados_jurado(convocatoria_id: str,
+                              user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    """Crea (idempotente) el catálogo 'Estados de Jurado' para una convocatoria.
+    Se usa en cargue masivo y administración de jurados; editable desde Configuración → Catálogos.
+    """
+    db = get_db()
+    cat = await db.catalogos.find_one({"convocatoria_id": convocatoria_id,
+                                       "nombre": "Estados de Jurado"})
+    if cat:
+        return {"ok": True, "ya_existia": True, "catalogo_id": cat["id"]}
+    cid = str(uuid.uuid4())
+    await db.catalogos.insert_one({
+        "id": cid, "convocatoria_id": convocatoria_id,
+        "nombre": "Estados de Jurado",
+        "descripcion": "Estado operativo del jurado dentro de la convocatoria (Activo, Inactivo, Suspendido…).",
+        "activo": True, "padre_id": None,
+        "valores": [{"id": str(uuid.uuid4()), "valor": v, "activo": True, "padre_valor_id": None}
+                    for v in ESTADOS_JURADO_VALORES],
+        "created_at": now_iso(),
+    })
+    await audit(user, "create", "catalogos", cid, detalle="Estados de Jurado (seed)")
+    return {"ok": True, "ya_existia": False, "catalogo_id": cid,
+            "valores": ESTADOS_JURADO_VALORES}
+
+
+
+
+# ---------------------------------------------------------------------------
 # 5. DELETE EXPLÍCITOS (hard-delete) para Propuestas, Jurados, Evaluaciones, Rankings, Actas
 # Reciben permisos solo de admin_general / admin_convocatoria.
 # ---------------------------------------------------------------------------
