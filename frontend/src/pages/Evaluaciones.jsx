@@ -84,8 +84,30 @@ export default function Evaluaciones() {
         return (p?.codigo || "").toLowerCase().includes(needle) || (p?.nombre || "").toLowerCase().includes(needle);
       });
     }
-    return f;
+    // Orden inteligente: pendientes primero, luego terminadas. Dentro de cada grupo, por código.
+    return f.slice().sort((a, b) => {
+      const ap = PENDIENTE_STATES.includes(a.estado) ? 0 : 1;
+      const bp = PENDIENTE_STATES.includes(b.estado) ? 0 : 1;
+      if (ap !== bp) return ap - bp;
+      const ac = propMap[a.propuesta_id]?.codigo || "";
+      const bc = propMap[b.propuesta_id]?.codigo || "";
+      return ac.localeCompare(bc, "es", { numeric: true });
+    });
   };
+
+  // Próxima pendiente individual del jurado (para CTA destacado)
+  const proximaPendiente = useMemo(() => {
+    if (!isJurado) return null;
+    const pend = individuales
+      .filter((e) => PENDIENTE_STATES.includes(e.estado))
+      .slice()
+      .sort((a, b) => {
+        const ac = propMap[a.propuesta_id]?.codigo || "";
+        const bc = propMap[b.propuesta_id]?.codigo || "";
+        return ac.localeCompare(bc, "es", { numeric: true });
+      });
+    return pend[0] || null;
+  }, [isJurado, individuales, propMap]);
 
   if (!activeConvocatoriaId) return <div className="p-10 text-muted-foreground">Selecciona una convocatoria.</div>;
 
@@ -97,6 +119,32 @@ export default function Evaluaciones() {
         subtitle={isJurado ? "Aquí encuentras todas las propuestas asignadas. Empieza por las pendientes."
                             : "Seguimiento de todas las evaluaciones individuales y colectivas."}
       />
+
+      {/* CTA "Continuar con tu próxima evaluación" */}
+      {isJurado && proximaPendiente && (
+        <Link
+          to={`/evaluaciones/individual/${proximaPendiente.id}`}
+          data-testid="cta-proxima-pendiente"
+          className="block mb-5 rounded-xl border-2 border-[#14776A] bg-gradient-to-r from-[#14776A] to-[#0F5E54] text-white p-4 hover:from-[#0F5E54] hover:to-[#0B4A42] transition-colors group"
+        >
+          <div className="flex items-center gap-4">
+            <div className="shrink-0 w-12 h-12 rounded-full bg-white/15 grid place-items-center">
+              <Target className="w-6 h-6" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] uppercase tracking-[0.18em] font-display font-bold opacity-80">Tu próxima evaluación pendiente</div>
+              <div className="text-[15px] font-display font-bold truncate mt-0.5">
+                <span className="font-mono opacity-75 mr-2">{propMap[proximaPendiente.propuesta_id]?.codigo}</span>
+                <span className="capitalize">{(propMap[proximaPendiente.propuesta_id]?.nombre || "").toLowerCase()}</span>
+              </div>
+              <div className="text-[12px] opacity-90 mt-0.5">
+                {counts.indPend > 1 ? `Te quedan ${counts.indPend} evaluaciones pendientes.` : "¡Es tu última pendiente!"} Click para abrirla.
+              </div>
+            </div>
+            <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform shrink-0" />
+          </div>
+        </Link>
+      )}
 
       {/* PANEL HEROICO PARA JURADO */}
       {isJurado && (

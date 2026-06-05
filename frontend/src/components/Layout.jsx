@@ -46,6 +46,18 @@ export default function Layout() {
   const activeConv = convs.find((c) => c.id === activeConvocatoriaId);
   const entidad = activeConv?.entidades?.[0]?.nombre;
 
+  // Contador de evaluaciones pendientes (solo para jurado, badge en sidebar)
+  const [pendCount, setPendCount] = React.useState(0);
+  React.useEffect(() => {
+    if (user?.role !== "jurado" || !activeConvocatoriaId) { setPendCount(0); return; }
+    api.get(`/evaluaciones-individuales?convocatoria_id=${activeConvocatoriaId}&mias=true`)
+      .then((r) => {
+        const pend = (r.data || []).filter((e) => ["Borrador", "Iniciada", "Reabierta", "En progreso", "Pendiente"].includes(e.estado)).length;
+        setPendCount(pend);
+      })
+      .catch(() => setPendCount(0));
+  }, [user, activeConvocatoriaId]);
+
   return (
     <div className="min-h-screen flex bg-background">
       {/* Sidebar */}
@@ -117,7 +129,17 @@ export default function Layout() {
               }
             >
               <n.icon className="w-[18px] h-[18px] stroke-[1.6]" />
-              <span>{n.label}</span>
+              <span className="flex-1">{n.label}</span>
+              {/* Badge contador pendientes en "Evaluaciones" para jurado */}
+              {n.to === "/evaluaciones" && pendCount > 0 && (
+                <span
+                  data-testid="sidebar-eval-pend-badge"
+                  className="inline-flex items-center justify-center min-w-[20px] h-[20px] px-1.5 rounded-full text-[10px] font-display font-bold bg-amber-500 text-white tabular-nums"
+                  title={`${pendCount} evaluación${pendCount > 1 ? "es" : ""} pendiente${pendCount > 1 ? "s" : ""}`}
+                >
+                  {pendCount}
+                </span>
+              )}
             </NavLink>
           ))}
           {can("administracion", "view") && (

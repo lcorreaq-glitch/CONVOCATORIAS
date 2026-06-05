@@ -433,6 +433,22 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 ### v22.1 — Fix UX: input REINICIAR uppercase (Feb 2026)
 - ✅ El input de confirmación "REINICIAR" en Administración → Sistema usaba `className="uppercase"` (solo visual) pero comparaba con `=== "REINICIAR"` exacto. Si el usuario escribía minúsculas, veía mayúsculas pero el valor real no coincidía y el botón nunca se habilitaba. Corregido normalizando con `.toUpperCase()` en el `onChange`.
 
+### v23.2 — "Mis evaluaciones" optimizada para Jurado (Feb 2026)
+
+**Mejoras UX en `/evaluaciones` (Evaluaciones.jsx)**:
+- ✅ **CTA destacado "Tu próxima evaluación pendiente"** — Banner gradiente verde con Target icon arriba de la lista (solo para jurado). Muestra código + nombre de la siguiente propuesta pendiente + contador "Te quedan N evaluaciones pendientes" + click directo a abrirla.
+- ✅ **Orden inteligente de la lista**: pendientes primero (Borrador/Iniciada/Reabierta/En progreso/Pendiente), terminadas al final. Dentro de cada grupo, ordenado por código de propuesta (numérico-natural).
+- ✅ Cuando solo queda 1 pendiente, el CTA muestra "¡Es tu última pendiente!".
+
+**Badge contador en sidebar (Layout.jsx)**:
+- ✅ Item "Evaluaciones" del sidebar muestra un badge ámbar circular con el número de pendientes para el jurado. Tooltip "N evaluaciones pendientes".
+- ✅ Se actualiza por convocatoria activa, se oculta al llegar a 0 (limpia visualmente cuando termina todo).
+- ✅ Solo visible para `role=jurado`.
+
+**Endpoint utilizado**: `GET /api/evaluaciones-individuales?convocatoria_id=...&mias=true` (ya existía, lo aprovecho).
+
+**Validación**: endpoint devuelve correctamente las evaluaciones del jurado autenticado; CTA y badge se calculan en el cliente sin viajes adicionales.
+
 ### v23.1 — Panel Resumen por jurado + Fix Trash2 en Ranking (Feb 2026)
 
 **Bug crítico corregido**:
