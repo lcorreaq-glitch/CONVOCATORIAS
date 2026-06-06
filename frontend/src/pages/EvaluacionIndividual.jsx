@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { api, formatApiError, openPdf } from "@/lib/api";
+import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { Badge, estadoTone } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/u
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import {
-  ArrowLeft, ExternalLink, Save, CheckCircle2, PenLine, FileText, Lock, Sparkles, RefreshCw,
+  ArrowLeft, ExternalLink, Save, CheckCircle2, PenLine, Lock, Sparkles, RefreshCw,
   Building2, MapPin, Calendar, Layers, Eye, ChevronDown, Eye as EyeIcon,
 } from "lucide-react";
 import { TID } from "@/constants/testIds";
@@ -132,17 +132,6 @@ export default function EvaluacionIndividual() {
     setSaving(false);
   };
 
-  const firmar = async () => {
-    try {
-      await api.post(`/evaluaciones-individuales/${id}/firmar`);
-      const r = await api.get(`/evaluaciones-individuales/${id}`);
-      setEv(r.data);
-      toast.success("Evaluación firmada");
-    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
-  };
-
-  const downloadActa = () => openPdf(`/actas/individual/${id}`);
-
   const sugerirObs = async (criterioId) => {
     try {
       const punt = puntajes[criterioId];
@@ -218,19 +207,9 @@ export default function EvaluacionIndividual() {
               <CheckCircle2 className="w-4 h-4" />Finalizar
             </Button>
           )}
-          {/* La FIRMA y el ACTA PDF individual no se hacen por propuesta: el jurado las
-             realiza UNA vez en /actas cuando termina todas sus evaluaciones individuales.
-             Solo el admin puede firmar/descargar desde aquí (para casos forzados). */}
-          {ev.estado === "Finalizada" && !isJurado && (
-            <Button onClick={firmar} className="bg-[#0F5E54] hover:bg-[#0B4A42] rounded-sm gap-2" data-testid={TID.firmarEvalBtn}>
-              <PenLine className="w-4 h-4" />Firmar
-            </Button>
-          )}
-          {(ev.estado === "Firmada" || ev.estado === "Finalizada") && !isJurado && (
-            <Button onClick={downloadActa} variant="outline" className="rounded-sm gap-2" data-testid="download-acta-btn">
-              <FileText className="w-4 h-4" />Acta PDF
-            </Button>
-          )}
+          {/* IMPORTANTE: la FIRMA y el ACTA PDF individual NO se manejan por propuesta.
+             Existe UN único acta consolidada por jurado al terminar TODAS sus evaluaciones
+             individuales, que se firma desde /actas. Por eso aquí no aparecen ni para admin. */}
           {/* Reabrir (solo admin, evaluación Finalizada — no Firmada) */}
           {ev.estado === "Finalizada" && !isJurado && (
             <Button
