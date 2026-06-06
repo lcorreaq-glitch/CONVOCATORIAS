@@ -237,16 +237,24 @@ def render_evals_completas(name: str, total_evals: int, actas_url: str, product_
 # ---------------------------------------------------------------------------
 def _smtp_gmail_send(user: str, app_password: str, to_email: str, subject: str,
                      html_body: str, text_body: str,
-                     from_name: str = "KRINOS") -> dict:
-    """Envío síncrono por Gmail SMTP (587, STARTTLS). Se ejecuta en thread vía asyncio.to_thread."""
+                     from_name: str = "KRINOS",
+                     attachments: Optional[list] = None) -> dict:
+    """Envío síncrono por Gmail SMTP (587, STARTTLS). Se ejecuta en thread vía asyncio.to_thread.
+
+    attachments: lista opcional de dicts `{filename: str, content: bytes, mime: str}`.
+    """
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = f"{from_name} <{user}>"
     msg["To"] = to_email
     msg.set_content(text_body or " ")
     msg.add_alternative(html_body, subtype="html")
+    for att in attachments or []:
+        maintype, _, subtype = (att.get("mime") or "application/octet-stream").partition("/")
+        msg.add_attachment(att["content"], maintype=maintype, subtype=subtype or "octet-stream",
+                           filename=att["filename"])
     context = ssl.create_default_context()
-    with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as smtp:
+    with smtplib.SMTP("smtp.gmail.com", 587, timeout=60) as smtp:
         smtp.starttls(context=context)
         smtp.login(user, app_password)
         smtp.send_message(msg)
@@ -284,8 +292,12 @@ def _sendgrid_send(api_key: str, from_email: str, from_name: str, to_email: str,
 
 async def send_email(to_email: str, subject: str, html_body: str,
                      text_body: Optional[str] = None,
-                     reply_to: Optional[str] = None) -> dict:
+                     reply_to: Optional[str] = None,
+                     attachments: Optional[list] = None) -> dict:
     """Envía un correo usando el proveedor configurado en system_settings.email.
+
+    attachments: lista opcional de dicts `{filename, content (bytes), mime}`. Solo
+    soportado por Gmail SMTP. SendGrid no acepta adjuntos con este wrapper.
 
     Devuelve `{ok, provider, to}` o levanta excepción con detalle.
     Si el proveedor está deshabilitado, devuelve `{ok: False, mocked: True, ...}` sin error.
@@ -312,9 +324,11 @@ async def send_email(to_email: str, subject: str, html_body: str,
                         "message": "Falta usuario Gmail o contraseña de aplicación."}
             return await asyncio.to_thread(
                 _smtp_gmail_send, user, app_password, to_email,
-                subject, html_body, text_body, from_name,
+                subject, html_body, text_body, from_name, attachments,
             )
         else:  # sendgrid
+            if attachments:
+                logger.warning("[EMAIL] Adjuntos no soportados en SendGrid en este wrapper; se enviará sin ellos.")
             sg = cfg.get("sendgrid", {})
             api_key = sg.get("api_key") or ""
             sender = sg.get("from_email") or from_email

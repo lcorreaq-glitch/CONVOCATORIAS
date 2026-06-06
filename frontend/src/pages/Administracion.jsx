@@ -15,7 +15,7 @@ import {
   Shield, Sparkles, Mail, Users as UsersIcon, Palette,
   CheckCircle2, AlertCircle, ExternalLink, Eye, EyeOff, Save, Send, Info,
   Wrench, Trash2, RefreshCw, KeyRound, Copy, AlertTriangle, ClipboardList,
-  Plus, Pencil,
+  Plus, Pencil, FileText,
 } from "lucide-react";
 
 const MODELS = {
@@ -1142,6 +1142,54 @@ function SistemaPanel() {
   const [resetResult, setResetResult] = useState(null);
   const [seedResult, setSeedResult] = useState(null);
 
+  // === Backup ===
+  const [bkCfg, setBkCfg] = useState(null);
+  const [bkBusy, setBkBusy] = useState(false);
+
+  useEffect(() => {
+    api.get("/admin/backup/config").then((r) => setBkCfg(r.data)).catch(() => setBkCfg({}));
+  }, []);
+
+  const saveBkConfig = async (patch) => {
+    const next = { ...bkCfg, ...patch };
+    setBkCfg(next);
+    try {
+      const r = await api.patch("/admin/backup/config", {
+        enabled: !!next.enabled,
+        recipient: next.recipient || null,
+        hour: Number(next.hour ?? 4),
+      });
+      setBkCfg(r.data);
+      toast.success("Configuración guardada");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const sendBackupNow = async (mode) => {
+    if (mode === "email" && !bkCfg?.recipient) {
+      toast.error("Configura primero el correo destinatario.");
+      return;
+    }
+    setBkBusy(true);
+    try {
+      if (mode === "download") {
+        const r = await api.post("/admin/backup/run-now", { download: true }, { responseType: "blob" });
+        const blob = new Blob([r.data], { type: "application/zip" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `krinos_backup_${new Date().toISOString().slice(0,16).replace(/[:T]/g,"-")}.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.success("Backup descargado");
+      } else {
+        const r = await api.post("/admin/backup/run-now", { download: false });
+        toast.success(`Backup enviado a ${r.data.recipient} (${r.data.size_kb} KB, ${r.data.documentos} documentos)`);
+        api.get("/admin/backup/config").then((r2) => setBkCfg(r2.data));
+      }
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail) || "Error al generar backup"); }
+    finally { setBkBusy(false); }
+  };
+
   const doReset = async () => {
     if (resetForm.confirmacion !== "REINICIAR") {
       toast.error('Debes escribir REINICIAR para confirmar.');
@@ -1176,6 +1224,93 @@ function SistemaPanel() {
 
   return (
     <div className="space-y-6 max-w-5xl">
+      {/* BACKUP */}
+      <div className="border-l-4 border-[#14776A] bg-[#F0F7F5] rounded-r-lg p-5">
+        <div className="flex gap-3 items-start mb-3">
+          <Shield className="w-6 h-6 text-[#14776A] mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <h3 className="font-display font-bold text-[16px] text-[#0F5E54]">Respaldo automático de la base de datos</h3>
+            <p className="text-[13px] text-[#1A1F2C]/80 mt-1">
+              KRINOS genera y envía automáticamente un ZIP con todas las colecciones (propuestas, jurados, evaluaciones, actas, etc.) al correo configurado. También puedes ejecutarlo manualmente cuando lo necesites.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid sm:grid-cols-[1fr_auto] gap-3 mt-4 bg-white rounded-md p-4 border border-[#CDE7E1]">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <Switch
+                checked={!!bkCfg?.enabled}
+                onCheckedChange={(v) => saveBkConfig({ enabled: !!v })}
+                data-testid="backup-enabled-switch"
+              />
+              <Label className="text-[13px]">
+                <strong>Activar respaldo diario automático</strong> al correo configurado.
+              </Label>
+            </div>
+
+            <div className="grid sm:grid-cols-[2fr_1fr] gap-2">
+              <div>
+                <Label className="text-xs">Correo destinatario</Label>
+                <Input
+                  type="email"
+                  value={bkCfg?.recipient || ""}
+                  onChange={(e) => setBkCfg({ ...bkCfg, recipient: e.target.value })}
+                  onBlur={() => saveBkConfig({})}
+                  placeholder="eleainnovacionsocial@gmail.com"
+                  className="rounded-lg mt-1"
+                  data-testid="backup-recipient-input"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Hora (UTC, 0–23)</Label>
+                <Input
+                  type="number"
+                  min="0" max="23"
+                  value={bkCfg?.hour ?? 4}
+                  onChange={(e) => setBkCfg({ ...bkCfg, hour: Number(e.target.value) })}
+                  onBlur={() => saveBkConfig({})}
+                  className="rounded-lg mt-1"
+                  data-testid="backup-hour-input"
+                />
+              </div>
+            </div>
+
+            {bkCfg?.last_run ? (
+              <div className="text-[11.5px] text-[#5E6878] mt-1 px-2 py-1.5 rounded bg-[#FAFBFC] border border-[#E2E7EC]">
+                Último envío: <strong className="text-[#0F5E54]">{new Date(bkCfg.last_run).toLocaleString("es-CO")}</strong>
+                {bkCfg.last_status === "ok" ? " · ✓ OK" : bkCfg.last_status ? ` · ⚠️ ${bkCfg.last_status}` : ""}
+                {bkCfg.last_size_kb ? ` · ${bkCfg.last_size_kb} KB` : ""}
+                {bkCfg.last_recipient ? ` · → ${bkCfg.last_recipient}` : ""}
+              </div>
+            ) : (
+              <div className="text-[11.5px] text-[#5E6878] mt-1 italic">Aún no se ha ejecutado ningún backup.</div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2 sm:items-end">
+            <Button
+              onClick={() => sendBackupNow("email")}
+              disabled={bkBusy || !bkCfg?.recipient}
+              className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg gap-2"
+              data-testid="backup-send-email-btn"
+            >
+              {bkBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+              Enviar ahora por correo
+            </Button>
+            <Button
+              onClick={() => sendBackupNow("download")}
+              disabled={bkBusy}
+              variant="outline"
+              className="rounded-lg gap-2"
+              data-testid="backup-download-btn"
+            >
+              <FileText className="w-4 h-4" /> Descargar ZIP
+            </Button>
+          </div>
+        </div>
+      </div>
+
       {/* RESET */}
       <div className="border-l-4 border-red-500 bg-red-50 rounded-r-lg p-5">
         <div className="flex gap-3 items-start mb-3">

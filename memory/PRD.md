@@ -862,3 +862,20 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - ℹ️ `telefono` solo existe en `jurados` (users no tiene ese campo); se persiste solo donde corresponde.
 - ✅ Validado e2e con curl: `User name: "Yicell González Pruebas" → Jurado.nombre sincronizado`; `Jurado.nombre: "Yicell González" → User.name sincronizado`.
 
+
+**Sistema de Respaldo de Datos (Backup automático + manual)** — Feb 2026:
+- ✅ Nuevo módulo `routes_backup.py`:
+  - `POST /api/admin/backup/run-now` con `{download:true}` → descarga ZIP directa; sin flag → envía por correo al recipient configurado.
+  - `GET/PATCH /api/admin/backup/config` con campos `{enabled, recipient, hour (UTC), last_run, last_status, last_size_kb}`.
+  - Scheduler de fondo `start_backup_scheduler()` iniciado en `lifespan` del server, chequea cada 5 min si pasó la hora objetivo y NO se ha corrido hoy → dispara backup auto.
+- ✅ ZIP contiene un JSON por colección (`json_util` para BSON) + `manifest.json` con versión, fecha, conteos.
+- ✅ `email_service.send_email` extendido con parámetro `attachments=[{filename, content, mime}]` (soportado en Gmail SMTP; SendGrid no en este wrapper, hace warning).
+- ✅ UI en `/administracion → Sistema → Respaldo automático`:
+  - Switch enabled, input email recipient (con auto-save on blur), input hour (0-23 UTC).
+  - Botones "Enviar ahora por correo" y "Descargar ZIP" (descarga directa al navegador).
+  - Indicador de último envío (fecha, status, tamaño, destinatario).
+- ✅ Validado e2e con curl:
+  - ZIP de 209KB con 27 archivos (incluye 251 propuestas, 39 jurados, 753 evaluaciones).
+  - Envío real a `eleainnovacionsocial@gmail.com` por Gmail SMTP → `last_status: ok`.
+  - Manifest con conteo por colección + total documentos: 2,170.
+

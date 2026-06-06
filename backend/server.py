@@ -25,6 +25,7 @@ from routes_upload import router as upload_router
 from routes_actas import router as actas_router
 from routes_dashboards import router as dashboards_router
 from routes_admin import router as admin_router
+from routes_backup import router as backup_router, start_backup_scheduler
 
 
 @asynccontextmanager
@@ -36,6 +37,7 @@ async def lifespan(app: FastAPI):
     await seed_roles()
     await seed_incentivos_2026()
     await seed_demo_data()
+    start_backup_scheduler()
     yield
 
 
@@ -75,6 +77,7 @@ app.include_router(upload_router)
 app.include_router(actas_router)
 app.include_router(dashboards_router)
 app.include_router(admin_router)
+app.include_router(backup_router)
 
 
 logging.basicConfig(level=logging.INFO,
