@@ -61,8 +61,11 @@ def _layout(body_html: str, product_name: str = "KRINOS") -> str:
           <div style="font-size:11px;text-transform:uppercase;letter-spacing:2px;opacity:0.85;margin-top:2px;">by ELEA</div>
         </td></tr>
         <tr><td style="padding:32px;font-size:14px;line-height:1.6;">{body_html}</td></tr>
-        <tr><td style="padding:18px 32px;background:#FAFBFC;border-top:1px solid #E2E7EC;font-size:11px;color:#5E6878;">
-          Este correo fue enviado por la plataforma {product_name}. Si no esperabas este mensaje, ignóralo.
+        <tr><td style="padding:16px 32px 18px;background:#FAFBFC;border-top:1px solid #E2E7EC;font-size:10.5px;color:#5E6878;line-height:1.55;">
+          Este correo fue enviado automáticamente por la plataforma <strong>{product_name}</strong>. Si no esperabas este mensaje, por favor ignóralo o notifícalo a
+          <a href="mailto:eleainnovacionsocial@gmail.com" style="color:#5E6878;text-decoration:underline;">eleainnovacionsocial@gmail.com</a>.
+          <br/><br/>
+          <strong>ELEA Innovación Social</strong> — Tratamiento de datos conforme a la Ley 1581 de 2012 y el Decreto 1377 de 2013 (Habeas Data, Colombia).
         </td></tr>
       </table>
     </td></tr>
@@ -143,7 +146,20 @@ def render_welcome(name: str, username: str, password: Optional[str], login_url:
       <p style="margin-top:14px;font-size:12.5px;color:#3F4856;">
         Gracias por sumarte a este proceso — tu participación es esencial para garantizar la transparencia y la calidad de los resultados.
       </p>
-      <p style="margin-top:18px;font-size:12.5px;color:#5E6878;">— Equipo {product_name} · ELEA Innovación Social</p>
+
+      <!-- Aviso de confidencialidad y tratamiento de datos personales -->
+      <div style="margin-top:24px;padding-top:14px;border-top:1px solid #E2E7EC;font-size:10.5px;color:#5E6878;line-height:1.55;">
+        <div style="text-transform:uppercase;letter-spacing:1.2px;font-weight:700;color:#3F4856;margin-bottom:4px;">Aviso de confidencialidad y tratamiento de datos</div>
+        <p style="margin:0;">
+          Este correo, sus credenciales y cualquier archivo adjunto son <strong>información confidencial</strong> dirigida exclusivamente al destinatario. Si lo ha recibido por error, por favor notifíquelo a <a href="mailto:{contact_email}" style="color:#5E6878;text-decoration:underline;">{contact_email}</a> y elimínelo de sus sistemas.
+        </p>
+        <p style="margin:8px 0 0;">
+          En cumplimiento de la <strong>Ley 1581 de 2012</strong> y el <strong>Decreto 1377 de 2013</strong> de la República de Colombia (Protección de Datos Personales — Habeas Data), sus datos serán tratados con fines exclusivamente vinculados a la gestión de esta convocatoria. Usted puede conocer, actualizar, rectificar o suprimir su información, así como revocar la autorización de tratamiento, escribiendo a
+          <a href="mailto:{contact_email}" style="color:#5E6878;text-decoration:underline;">{contact_email}</a>.
+        </p>
+      </div>
+
+      <p style="margin:18px 0 0;font-size:12.5px;color:#1A1F2C;font-weight:600;">— Equipo {product_name} · ELEA Innovación Social</p>
     """
 
     # Versión texto plano (fallback para clientes sin HTML)
@@ -160,9 +176,24 @@ def render_welcome(name: str, username: str, password: Optional[str], login_url:
     if password:
         text_lines += ["", f"Usuario: {username}", f"Contraseña temporal: {password}",
                        "Por seguridad, cambia esta contraseña en tu primer inicio de sesión."]
-    text_lines += ["", f"Ingresa en: {login_url}", "",
-                   f"¿Dudas o soporte? {contact_email}",
-                   f"— Equipo {product_name} · ELEA Innovación Social"]
+    text_lines += [
+        "", f"Ingresa en: {login_url}",
+        "", f"¿Dudas o soporte? {contact_email}",
+        "",
+        "Gracias por sumarte a este proceso — tu participación es esencial para garantizar la",
+        "transparencia y la calidad de los resultados.",
+        "",
+        "---",
+        "AVISO DE CONFIDENCIALIDAD Y TRATAMIENTO DE DATOS",
+        "Este correo y sus credenciales son información confidencial dirigida exclusivamente al",
+        "destinatario. Si lo recibió por error, notifíquelo a " + contact_email + " y elimínelo.",
+        "",
+        "En cumplimiento de la Ley 1581 de 2012 y el Decreto 1377 de 2013 (Protección de Datos",
+        "Personales — Habeas Data), sus datos son tratados con fines exclusivamente vinculados a",
+        "esta convocatoria. Puede ejercer sus derechos escribiendo a " + contact_email + ".",
+        "",
+        f"— Equipo {product_name} · ELEA Innovación Social",
+    ]
     text = "\n".join(text_lines)
     return _layout(body, product_name), text
 
