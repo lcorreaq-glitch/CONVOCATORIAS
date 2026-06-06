@@ -26,6 +26,8 @@ export default function Actas() {
   const [tab, setTab] = useState("individual");
   const [busy, setBusy] = useState(false);
   const [confirmForzar, setConfirmForzar] = useState(null);
+  // Preview-firma: {tipo: "individual"|"colectiva", id, pdfUrl, onConfirm}
+  const [previewFirma, setPreviewFirma] = useState(null);
 
   const isAdmin = ["admin_general", "admin_convocatoria", "supervisor"].includes(user?.role);
   // Forzar/anular/reabrir actas son acciones DESTRUCTIVAS reservadas a administradores
@@ -76,16 +78,9 @@ export default function Actas() {
     } finally { setBusy(false); }
   };
 
-  const firmarMiActaIndividual = async () => {
+  const firmarMiActaIndividual = () => {
     if (!user?.jurado_id) return;
-    setBusy(true);
-    try {
-      await api.post(`/actas/individual-jurado/${user.jurado_id}/firmar`);
-      toast.success("¡Tu acta individual ha sido firmada!");
-      await load();
-    } catch (e) {
-      toast.error(formatApiError(e.response?.data?.detail) || "Error");
-    } finally { setBusy(false); }
+    previewFirmaActa("individual", user.jurado_id, `/actas/individual/${user.jurado_id}`);
   };
 
   const firmarColectiva = async (ternaId) => {
@@ -97,6 +92,39 @@ export default function Actas() {
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail) || "Error");
     } finally { setBusy(false); }
+  };
+
+  // Abre preview del acta y, al confirmar, ejecuta la firma real
+  const previewFirmaActa = (tipo, id, pdfPath) => {
+    const apiBase = (process.env.REACT_APP_BACKEND_URL || "") + "/api";
+    const token = localStorage.getItem("token") || "";
+    // El endpoint del PDF requiere Bearer; usamos un fetch + blob para mostrarlo en iframe
+    setPreviewFirma({
+      tipo, id,
+      pdfUrl: null, // lo cargamos en useEffect del modal
+      apiPath: pdfPath,
+      onConfirm: async () => {
+        if (tipo === "individual") {
+          await api.post(`/actas/individual-jurado/${id}/firmar`);
+        } else if (tipo === "colectiva") {
+          await firmarColectiva(id);
+          return;
+        } else if (tipo === "subregional") {
+          await api.post(`/actas/subregional/firmar`, { convocatoria_id: activeConvocatoriaId, subregion: id });
+        }
+        toast.success("Firma registrada");
+        setPreviewFirma(null);
+        await load();
+      },
+    });
+    // Fetch del PDF con auth y convertir a blob URL
+    fetch(`${apiBase}${pdfPath}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => res.blob())
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        setPreviewFirma((prev) => prev ? { ...prev, pdfUrl: url } : null);
+      })
+      .catch((e) => toast.error("No se pudo cargar la vista previa: " + e.message));
   };
 
   const firmarSubregional = async (sub) => {
@@ -262,7 +290,7 @@ export default function Actas() {
                       <td><Badge tone={ESTADO_TONE[r.estado] || "default"}>{r.estado}</Badge></td>
                       <td className="text-right space-x-1.5">
                         {(r.estado === "Falta firma terna" || r.estado === "Emitible") && isJurado && (
-                          <Button size="sm" variant="outline" onClick={() => firmarColectiva(r.terna_id)} disabled={busy} className="gap-1 rounded-sm text-[11px] h-7" data-testid={`actas-col-firmar-${r.terna_id}`}>
+                          <Button size="sm" variant="outline" onClick={() => previewFirmaActa("colectiva", r.terna_id, `/actas/colectiva-terna/${r.terna_id}`)} disabled={busy} className="gap-1 rounded-sm text-[11px] h-7" data-testid={`actas-col-firmar-${r.terna_id}`}>
                             <PenLine className="w-3 h-3" /> Firmar
                           </Button>
                         )}
@@ -312,7 +340,7 @@ export default function Actas() {
                         <td><Badge tone={ESTADO_TONE[r.estado] || "default"}>{r.estado}</Badge></td>
                         <td className="text-right space-x-1.5">
                           {(r.estado === "Falta firmar" || r.estado === "Emitible") && isJurado && (
-                            <Button size="sm" variant="outline" onClick={() => firmarSubregional(r.subregion)} disabled={busy} className="gap-1 rounded-sm text-[11px] h-7" data-testid={`actas-sub-firmar-${r.subregion}`}>
+                            <Button size="sm" variant="outline" onClick={() => previewFirmaActa("subregional", r.subregion, `/actas/subregional/${activeConvocatoriaId}/${encodeURIComponent(r.subregion)}`)} disabled={busy} className="gap-1 rounded-sm text-[11px] h-7" data-testid={`actas-sub-firmar-${r.subregion}`}>
                               <PenLine className="w-3 h-3" /> Firmar
                             </Button>
                           )}
@@ -361,6 +389,44 @@ export default function Actas() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Vista previa antes de firmar */}
+      <Dialog open={!!previewFirma} onOpenChange={(open) => {
+        if (!open) {
+          if (previewFirma?.pdfUrl) URL.revokeObjectURL(previewFirma.pdfUrl);
+          setPreviewFirma(null);
+        }
+      }}>
+        <DialogContent className="rounded-xl max-w-5xl w-[95vw] h-[90vh] p-0 overflow-hidden flex flex-col" data-testid="preview-firma-modal">
+          <div className="bg-gradient-to-br from-[#14776A] to-[#0F5E54] text-white px-6 py-4 flex items-center justify-between gap-3">
+            <div>
+              <DialogTitle className="font-display text-lg font-bold flex items-center gap-2">
+                <PenLine className="w-5 h-5" /> Vista previa antes de firmar
+              </DialogTitle>
+              <p className="text-[12px] opacity-90 mt-0.5">Revisa el contenido del acta. Tu firma se registrará al confirmar; el acta NO se descargará hasta que firmen todos los integrantes.</p>
+            </div>
+          </div>
+          <div className="flex-1 bg-slate-100 overflow-hidden">
+            {previewFirma?.pdfUrl ? (
+              <iframe src={previewFirma.pdfUrl} className="w-full h-full" title="Vista previa del acta" />
+            ) : (
+              <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+                <Loader2 className="w-5 h-5 animate-spin mr-2" /> Cargando vista previa…
+              </div>
+            )}
+          </div>
+          <div className="bg-white border-t border-border px-6 py-3 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => {
+              if (previewFirma?.pdfUrl) URL.revokeObjectURL(previewFirma.pdfUrl);
+              setPreviewFirma(null);
+            }} className="rounded-md" data-testid="preview-firma-cancelar">Cancelar</Button>
+            <Button onClick={() => previewFirma?.onConfirm?.()} disabled={busy || !previewFirma?.pdfUrl}
+                    className="rounded-md bg-[#14776A] hover:bg-[#0F5E54] text-white gap-2" data-testid="preview-firma-confirmar">
+              <PenLine className="w-4 h-4" /> Confirmar y firmar
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

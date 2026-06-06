@@ -1092,16 +1092,21 @@ async def acta_individual_jurado(jurado_id: str, user: dict = Depends(get_curren
     rows = []
     for i, e in enumerate(evs, 1):
         p = pmap.get(e["propuesta_id"], {})
-        obs = (e.get("observacion_final") or "")[:280]
+        d = p.get("datos") or {}
+        nit = p.get("nit") or d.get("nit") or "—"
+        repr_legal = (p.get("representante_legal") or d.get("representante_legal")
+                      or d.get("nombre_representante_legal") or "—")
+        org_full = (p.get("organizacion") or d.get("nombre_organizacion") or "—")
         rows.append([
             str(i),
             p.get("codigo", "—"),
-            (p.get("datos") or {}).get("municipio", p.get("municipio", "—")),
-            (p.get("organizacion") or (p.get("datos") or {}).get("nombre_organizacion") or "—")[:35],
+            d.get("municipio", p.get("municipio", "—")),
+            org_full[:60],
+            str(nit)[:18],
+            (str(repr_legal) or "—")[:35],
             str(e.get("puntaje_total", 0)),
-            obs,
         ])
-    headers = ["Nº", "Número de Propuesta", "Municipio", "Nombre de la Organización", "Puntaje Asignado", "Observación Técnica Principal"]
+    headers = ["Nº", "Cód.", "Municipio", "Organización", "NIT", "Representante Legal", "Puntaje"]
     firmantes = [{
         "nombre": jur.get("nombre"),
         "documento": _doc_jurado(jur),
@@ -1158,15 +1163,20 @@ async def acta_colectiva_terna(terna_id: str, user: dict = Depends(get_current_u
     rows = []
     for i, e in enumerate(evs_col, 1):
         p = pmap.get(e["propuesta_id"], {})
-        obs_consol = (e.get("observacion_consolidada") or e.get("observacion_final") or e.get("observacion") or "")[:200]
+        d = p.get("datos") or {}
+        nit = p.get("nit") or d.get("nit") or "—"
+        repr_legal = (p.get("representante_legal") or d.get("representante_legal")
+                      or d.get("nombre_representante_legal") or "—")
+        org_full = (p.get("organizacion") or d.get("nombre_organizacion") or "—")
         rows.append([
             str(i), p.get("codigo", "—"),
-            (p.get("datos") or {}).get("municipio", "—"),
-            (p.get("organizacion") or (p.get("datos") or {}).get("nombre_organizacion") or "—")[:35],
+            d.get("municipio", "—"),
+            org_full[:60],
+            str(nit)[:18],
+            (str(repr_legal) or "—")[:35],
             str(e.get("puntaje_final", 0)),
-            obs_consol,
         ])
-    headers = ["Nº", "Número de Propuesta", "Municipio", "Nombre de la Organización", "Puntaje Total Definitivo", "Observación Consolidada de la Terna"]
+    headers = ["Nº", "Cód.", "Municipio", "Organización", "NIT", "Representante Legal", "Puntaje Total"]
     firmas = (terna.get("datos") or {}).get("firmas_acta_colectiva") or {}
     firmantes = []
     for integ in terna.get("integrantes") or []:
