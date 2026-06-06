@@ -461,7 +461,7 @@ class EvalColectivaIn(BaseModel):
 
 
 @router.post("/evaluaciones-colectivas")
-async def crear_eval_colectiva(payload: EvalColectivaIn, user: dict = Depends(require_roles("admin_general", "admin_convocatoria", "integrante_terna"))):
+async def crear_eval_colectiva(payload: EvalColectivaIn, user: dict = Depends(require_roles("admin_general", "admin_convocatoria", "jurado"))):
     db = get_db()
     existing = await db.evaluaciones_colectivas.find_one({
         "propuesta_id": payload.propuesta_id, "terna_id": payload.terna_id
@@ -510,7 +510,7 @@ async def crear_eval_colectiva(payload: EvalColectivaIn, user: dict = Depends(re
 
 
 @router.post("/evaluaciones-colectivas/{eid}/iniciar-modalidad-nueva")
-async def iniciar_modalidad_nueva(eid: str, user: dict = Depends(require_roles("admin_general", "admin_convocatoria", "integrante_terna"))):
+async def iniciar_modalidad_nueva(eid: str, user: dict = Depends(require_roles("admin_general", "admin_convocatoria", "jurado"))):
     """Modalidad 2: crea evaluaciones v2 (etapa='colectiva') precargadas con los puntajes de v1 para cada integrante de la terna.
     Los puntajes permanecen CIEGOS hasta que la colectiva se cierre."""
     db = get_db()
@@ -602,7 +602,7 @@ async def list_v2(eid: str, user: dict = Depends(get_current_user)):
 
 
 @router.post("/evaluaciones-colectivas/{eid}/cerrar-con-promedio-v2")
-async def cerrar_con_promedio_v2(eid: str, user: dict = Depends(require_roles("admin_general", "admin_convocatoria", "integrante_terna"))):
+async def cerrar_con_promedio_v2(eid: str, user: dict = Depends(require_roles("admin_general", "admin_convocatoria", "jurado"))):
     """Cierra la colectiva calculando el promedio de las v2 finalizadas como puntaje definitivo."""
     db = get_db()
     col = await db.evaluaciones_colectivas.find_one({"id": eid})

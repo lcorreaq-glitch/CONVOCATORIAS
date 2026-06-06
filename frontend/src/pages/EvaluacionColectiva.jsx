@@ -280,7 +280,7 @@ export default function EvaluacionColectiva() {
               </div>
             )}
 
-            {!v2List.length && (isAdmin || user?.role === "integrante_terna") && (
+            {!v2List.length && (isAdmin || isIntegrante) && (
               <div className="rounded-xl border border-[#CDE7E1] bg-gradient-to-br from-[#F0F7F5] to-white p-8 text-center">
                 <Sparkles className="w-10 h-10 text-[#14776A] mx-auto mb-3" />
                 <h3 className="font-display font-bold text-lg">Iniciar etapa colectiva</h3>

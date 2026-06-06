@@ -123,19 +123,6 @@ SYSTEM_ROLES = [
         },
     },
     {
-        "code": "integrante_terna", "name": "Integrante de Terna", "is_system": True,
-        "description": "Participa en deliberación colectiva.",
-        "permissions": {
-            "dashboard": ["view"],
-            "propuestas": ["view"], "criterios": ["view"],
-            "ternas": ["view"], "asignaciones": ["view"],
-            "evaluaciones": ["view", "evaluate", "sign"],
-            "actas": ["view", "sign"], "ranking": ["view"],
-            "mi_perfil": ["view", "edit"],
-            "ia": ["use"],
-        },
-    },
-    {
         "code": "invitado", "name": "Invitado de Consulta", "is_system": True,
         "description": "Solo lectura de resultados públicos.",
         "permissions": {
@@ -167,6 +154,12 @@ async def seed_roles():
     db = get_db()
     # Backfill: asegurar que cualquier rol existente sin flag 'active' quede activo por defecto.
     await db.roles.update_many({"active": {"$exists": False}}, {"$set": {"active": True}})
+    # Migración Feb 2026: unificar 'integrante_terna' → 'jurado' (mismo perfil operativo).
+    # Los integrantes de una terna ya son jurados; la separación era confusa.
+    mig = await db.users.update_many({"role": "integrante_terna"}, {"$set": {"role": "jurado"}})
+    if getattr(mig, "modified_count", 0):
+        print(f"[seed_roles] Migrados {mig.modified_count} usuarios de integrante_terna → jurado")
+    await db.roles.delete_one({"code": "integrante_terna"})
     for r in SYSTEM_ROLES:
         existing = await db.roles.find_one({"code": r["code"]})
         if existing:

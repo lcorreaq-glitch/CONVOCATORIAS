@@ -18,7 +18,6 @@ const ROLE_LABEL = {
   admin_convocatoria: "Administrador de Convocatoria",
   supervisor: "Supervisor",
   jurado: "Jurado",
-  integrante_terna: "Integrante de Terna",
   invitado: "Invitado de Consulta",
   auditor: "Auditor",
 };

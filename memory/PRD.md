@@ -754,3 +754,13 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 **Validado e2e por curl** (lcorreaq + carlos.velez de T1):
 1. Crear colectiva → Abierta · 2. Cerrar (puntajes + obs) → Cerrada · 3. Admin reabre con motivo → Reabierta, reaperturas=1 · 4. Re-cerrar · 5. Integrante solicita reapertura → 200 + solicitud_id Pendiente · 6. Duplicado → 409 · 7. Listar como admin → tipo=colectiva, terna="Terna Urabá" · 8. Admin aprueba → estado Reabierta, reaperturas=2 · 9. Jurado NO integrante → 403 "Solo los integrantes de la terna pueden solicitar la reapertura".
 
+
+**Unificación de roles `jurado` + `integrante_terna`** — Feb 2026:
+- ✅ Eliminado el rol `integrante_terna` del sistema. En la práctica un integrante de terna SIEMPRE es también jurado (es la misma persona). La separación generaba confusión sin valor operativo.
+- ✅ Migración idempotente en `seed_roles` ejecutada al startup: `UPDATE users SET role='jurado' WHERE role='integrante_terna'` + `DELETE FROM roles WHERE code='integrante_terna'`. Ejecutó 1 usuario migrado.
+- ✅ Backend: reemplazado `require_roles("...", "integrante_terna")` por `"jurado"` en 3 endpoints (`crear_eval_colectiva`, `iniciar_modalidad_nueva`, `cerrar_con_promedio_v2`).
+- ✅ La pertenencia a terna se sigue verificando por `jurado_id` (no por rol) en `_user_is_integrante_terna` — eso es independiente y correcto.
+- ✅ Removido del seed `TEST_USERS` (ya no se recrea `integrante@krinos.test`).
+- ✅ Frontend: removida la etiqueta de `ROLES_LABELS` en `MiPerfil.jsx` y `Administracion.jsx`. `EvaluacionColectiva.jsx` ahora usa `isIntegrante` (basado en `jurado_id`) en lugar de `user.role === "integrante_terna"`.
+- ✅ Resultado: 6 roles activos (admin_general, admin_convocatoria, supervisor, jurado, invitado, auditor).
+

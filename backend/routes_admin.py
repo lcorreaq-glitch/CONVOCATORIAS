@@ -86,7 +86,6 @@ TEST_USERS = [
     ("supervisor@krinos.test", "Supervisor Pruebas", "supervisor", "Pruebas2026!"),
     ("invitado@krinos.test", "Invitado Pruebas", "invitado", "Pruebas2026!"),
     ("auditor@krinos.test", "Auditor Pruebas", "auditor", "Pruebas2026!"),
-    ("integrante@krinos.test", "Integrante Terna Pruebas", "integrante_terna", "Pruebas2026!"),
     ("jurado1@krinos.test", "Jurado 1 Pruebas", "jurado", "Pruebas2026!"),
     ("jurado2@krinos.test", "Jurado 2 Pruebas", "jurado", "Pruebas2026!"),
     ("jurado3@krinos.test", "Jurado 3 Pruebas", "jurado", "Pruebas2026!"),
