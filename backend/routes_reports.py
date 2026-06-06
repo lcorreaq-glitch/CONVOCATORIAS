@@ -351,24 +351,89 @@ async def reporte_avance_terna(convocatoria_id: str, user: dict = Depends(get_cu
 
 @router.get("/reportes/consolidado-individual")
 async def reporte_consolidado_individual(convocatoria_id: str, user: dict = Depends(get_current_user)):
+    """Reporte completo de evaluación individual: criterios + puntajes + observaciones
+    + criterios de priorización + criterios de desempate + observación general (final).
+    Devuelve una fila por (propuesta, jurado) con columnas dinámicas por criterio.
+    """
     db = get_db()
-    evals = await db.evaluaciones_individuales.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(10000)
+    evals = await db.evaluaciones_individuales.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(20000)
     propuestas = {p["id"]: p async for p in db.propuestas.find({"convocatoria_id": convocatoria_id})}
     jurados = {j["id"]: j async for j in db.jurados.find({"convocatoria_id": convocatoria_id})}
+    criterios = await db.criterios.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).sort("orden", 1).to_list(200)
+    oficiales = [c for c in criterios if c.get("oficial") and not c.get("diferencial")]
+    desempate = [c for c in criterios if c.get("diferencial")]
     out = []
     for ev in evals:
         p = propuestas.get(ev["propuesta_id"], {})
         j = jurados.get(ev["jurado_id"], {})
-        out.append({
+        row = {
             "propuesta_codigo": p.get("codigo"),
             "propuesta_nombre": p.get("nombre"),
-            "organizacion": p.get("organizacion"),
+            "organizacion": p.get("organizacion") or (p.get("datos") or {}).get("nombre_organizacion"),
+            "subregion": (p.get("datos") or {}).get("subregion"),
             "jurado": j.get("nombre"),
-            "puntaje_total": ev.get("puntaje_total"),
-            "observacion_final": ev.get("observacion_final"),
+            "jurado_email": j.get("email"),
             "estado": ev.get("estado"),
-            "fecha_finalizacion": ev.get("fecha_finalizacion"),
-        })
+            "puntaje_total_oficial": ev.get("puntaje_total"),
+            "puntaje_total_priorizacion": ev.get("puntaje_diferencial_total"),
+        }
+        puntajes = ev.get("puntajes") or {}
+        observaciones = ev.get("observaciones") or {}
+        # Columnas dinámicas por criterio OFICIAL (puntaje + observación)
+        for c in oficiales:
+            base = f"OF · {c.get('nombre','')}"
+            row[f"{base} (puntaje)"] = puntajes.get(c["id"])
+            row[f"{base} (obs.)"] = observaciones.get(c["id"], "")
+        # Columnas dinámicas por criterio DIFERENCIAL/PRIORIZACIÓN/DESEMPATE
+        for c in desempate:
+            base = f"DIF · {c.get('nombre','')}"
+            row[f"{base} (puntaje)"] = puntajes.get(c["id"])
+            row[f"{base} (obs.)"] = observaciones.get(c["id"], "")
+        row["observacion_final"] = ev.get("observacion_final")
+        row["fecha_finalizacion"] = ev.get("fecha_finalizacion")
+        row["reaperturas"] = ev.get("reaperturas", 0)
+        out.append(row)
+    return out
+
+
+@router.get("/reportes/consolidado-colectiva")
+async def reporte_consolidado_colectiva(convocatoria_id: str, user: dict = Depends(get_current_user)):
+    """Reporte de evaluaciones colectivas (por terna) con todos sus criterios y observaciones."""
+    db = get_db()
+    evals = await db.evaluaciones_colectivas.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(20000)
+    propuestas = {p["id"]: p async for p in db.propuestas.find({"convocatoria_id": convocatoria_id})}
+    ternas = {t["id"]: t async for t in db.ternas.find({"convocatoria_id": convocatoria_id})}
+    criterios = await db.criterios.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).sort("orden", 1).to_list(200)
+    oficiales = [c for c in criterios if c.get("oficial") and not c.get("diferencial")]
+    desempate = [c for c in criterios if c.get("diferencial")]
+    out = []
+    for ev in evals:
+        p = propuestas.get(ev.get("propuesta_id"), {})
+        t = ternas.get(ev.get("terna_id"), {})
+        row = {
+            "propuesta_codigo": p.get("codigo"),
+            "propuesta_nombre": p.get("nombre"),
+            "organizacion": p.get("organizacion") or (p.get("datos") or {}).get("nombre_organizacion"),
+            "subregion": (p.get("datos") or {}).get("subregion"),
+            "terna_codigo": t.get("codigo"),
+            "terna_nombre": t.get("nombre"),
+            "estado": ev.get("estado"),
+            "puntaje_total_oficial": ev.get("puntaje_total") or ev.get("puntaje_consensuado"),
+            "puntaje_total_priorizacion": ev.get("puntaje_diferencial_total"),
+        }
+        puntajes = ev.get("puntajes") or ev.get("puntajes_consensuados") or {}
+        observaciones = ev.get("observaciones") or {}
+        for c in oficiales:
+            base = f"OF · {c.get('nombre','')}"
+            row[f"{base} (puntaje)"] = puntajes.get(c["id"])
+            row[f"{base} (obs.)"] = observaciones.get(c["id"], "")
+        for c in desempate:
+            base = f"DIF · {c.get('nombre','')}"
+            row[f"{base} (puntaje)"] = puntajes.get(c["id"])
+            row[f"{base} (obs.)"] = observaciones.get(c["id"], "")
+        row["observacion_final"] = ev.get("observacion_final") or ev.get("acta_resumen") or ""
+        row["fecha_finalizacion"] = ev.get("fecha_finalizacion") or ev.get("fecha_cierre")
+        out.append(row)
     return out
 
 
@@ -397,13 +462,40 @@ async def export_excel(reporte: str, convocatoria_id: str, user: dict = Depends(
                    "colectivas_abiertas", "colectivas_cerradas", "porcentaje_avance"]
     elif reporte == "consolidado-individual":
         data = await reporte_consolidado_individual(convocatoria_id, user)
-        headers = ["propuesta_codigo", "propuesta_nombre", "organizacion", "jurado",
-                   "puntaje_total", "observacion_final", "estado", "fecha_finalizacion"]
+        headers = list(data[0].keys()) if data else [
+            "propuesta_codigo", "propuesta_nombre", "organizacion", "jurado", "estado",
+            "puntaje_total_oficial", "puntaje_total_priorizacion", "observacion_final", "fecha_finalizacion",
+        ]
+    elif reporte == "consolidado-colectiva":
+        data = await reporte_consolidado_colectiva(convocatoria_id, user)
+        headers = list(data[0].keys()) if data else [
+            "propuesta_codigo", "propuesta_nombre", "organizacion", "terna_codigo", "terna_nombre", "estado",
+            "puntaje_total_oficial", "puntaje_total_priorizacion", "observacion_final", "fecha_finalizacion",
+        ]
     else:
         raise HTTPException(status_code=400, detail="Reporte no soportado")
     ws.append(headers)
+    # Estilo header
+    from openpyxl.styles import Font, PatternFill, Alignment
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF", size=10.5)
+        cell.fill = PatternFill("solid", fgColor="14776A")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws.row_dimensions[1].height = 32
     for row in data:
         ws.append([row.get(h, "") for h in headers])
+    # Anchos
+    for i, h in enumerate(headers, start=1):
+        letter = ws.cell(row=1, column=i).column_letter
+        if "obs" in h.lower() or "observac" in h.lower():
+            ws.column_dimensions[letter].width = 50
+        elif "nombre" in h.lower() or "organizacion" in h.lower():
+            ws.column_dimensions[letter].width = 32
+        elif "puntaje" in h.lower() or "fecha" in h.lower():
+            ws.column_dimensions[letter].width = 14
+        else:
+            ws.column_dimensions[letter].width = max(14, min(28, len(h) + 4))
+    ws.freeze_panes = "A2"
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                              headers={"Content-Disposition": f"attachment; filename={reporte}.xlsx"})

@@ -433,6 +433,27 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 ### v22.1 — Fix UX: input REINICIAR uppercase (Feb 2026)
 - ✅ El input de confirmación "REINICIAR" en Administración → Sistema usaba `className="uppercase"` (solo visual) pero comparaba con `=== "REINICIAR"` exacto. Si el usuario escribía minúsculas, veía mayúsculas pero el valor real no coincidía y el botón nunca se habilitaba. Corregido normalizando con `.toUpperCase()` en el `onChange`.
 
+### v23.3 — Reporte completo de evaluación individual y colectiva (Feb 2026)
+
+**Backend `routes_reports.py`**:
+- ✅ `GET /api/reportes/consolidado-individual` ampliado: una fila por (propuesta × jurado) con TODAS las columnas necesarias:
+  - Base: código + nombre propuesta, organización, subregión, jurado + email, estado, fecha, número de reaperturas.
+  - **Por criterio oficial**: 2 columnas `"OF · <nombre> (puntaje)"` y `"OF · <nombre> (obs.)"`.
+  - **Por criterio diferencial/priorización/desempate**: 2 columnas `"DIF · <nombre> (puntaje)"` y `"DIF · <nombre> (obs.)"`.
+  - Totales: `puntaje_total_oficial`, `puntaje_total_priorizacion`, `observacion_final` (observación general del jurado).
+- ✅ **NUEVO** `GET /api/reportes/consolidado-colectiva`: misma estructura pero para evaluaciones colectivas (terna × propuesta), con puntajes consensuados.
+- ✅ `GET /api/reportes/export-excel` adaptado: usa columnas dinámicas (las del primer registro), estilo header verde + freeze panes + anchos automáticos por tipo de columna (50 obs., 32 nombres, 14 fechas/puntajes).
+
+**Frontend `Reportes.jsx`** (reescrito):
+- ✅ Soporta reportes con columnas **fijas** (avance jurado/terna) y **dinámicas** (consolidados).
+- ✅ Nueva tab **"Consolidado evaluación colectiva"**.
+- ✅ Descripción contextual en cada tab dinámica.
+- ✅ Filtro libre por texto en cualquier columna + contador "X de Y filas · N columnas".
+- ✅ Render de observaciones largas con `max-w` y tooltip al hacer hover.
+- ✅ Botón "Exportar Excel" se deshabilita si no hay datos.
+
+**Validación e2e**: Individual = 44 filas × 30 columnas (12 base + 18 dinámicas: 9 criterios × 2 = puntaje + obs.). Excel 10KB con formato pro. Colectiva endpoint responde 200 (0 filas porque no hay evaluaciones colectivas finalizadas todavía).
+
 ### v23.2 — "Mis evaluaciones" optimizada para Jurado (Feb 2026)
 
 **Mejoras UX en `/evaluaciones` (Evaluaciones.jsx)**:
