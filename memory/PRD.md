@@ -778,3 +778,10 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - ✅ Watermark en PDF validado por curl + pypdf.
 - ⚠ FLOW 2/3/4 quedaron parcialmente cubiertos por dependencia de estado del data de prueba (la colectiva manual no tenía v2 inicializadas), pero la lógica subyacente está cubierta por curl tests + fixes posteriores. Issues residuales documentados.
 
+
+**Acta sin QR + helper de documento + fix admin name persistente** — Feb 2026:
+- ✅ **Bug crítico arreglado en `db.py → seed_admin`**: en cada restart del backend la función estaba sobreescribiendo el campo `name` del admin general con `ADMIN_NAME` del `.env`. Ahora el seed NO toca el `name` excepto en backfill (cuando nunca existió). El admin general puede editar su nombre desde Mi Perfil/Usuarios y ya NO se revierte tras restart.
+- ✅ **QR de verificación eliminado** de todas las actas (`routes_actas.py`): removido el bloque `verif_table` con QR + código + URL `/verificar/` que se renderizaba al final del PDF tras los firmantes.
+- ✅ **Helper `_doc_jurado(jurado, default)`**: extrae el documento probando llaves comunes: `cedula`, `documento`, `numero_documento`, `doc_id`, `numero_identificacion`, `identificacion` (en `datos`) + fallback a campos top-level. Usado en 5 lugares del módulo de actas para que cualquier convocatoria con esquema personalizado siga funcionando.
+- ✅ **Validado**: nombre del admin cambiado → restart backend → nombre persiste. PDF colectivo descargado y validado con pypdf: 0 textos de QR, 3 firmantes con C.C. correctamente extraído (de los que tienen cedula, ej: "135555"; los que no tienen siguen mostrando líneas vacías hasta que el admin complete el dato del jurado).
+

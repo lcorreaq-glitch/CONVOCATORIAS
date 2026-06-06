@@ -61,15 +61,18 @@ async def seed_admin():
             "created_at": now_iso(),
         })
     else:
-        # Mantener admin alineado con .env (idempotente)
+        # Mantener admin alineado con .env SOLO en campos críticos de acceso.
+        # NUNCA tocar 'name' aquí: el usuario es dueño de su nombre de display
+        # (lo edita desde Mi Perfil) y este seed solía sobreescribirlo en cada startup.
         updates = {}
         if existing.get("email") != email: updates["email"] = email
-        if existing.get("name") != name: updates["name"] = name
         if not verify_password(password, existing.get("password_hash", "")):
             updates["password_hash"] = hash_password(password)
         existing_role = existing.get("role")
         if existing_role != "admin_general": updates["role"] = "admin_general"
         if not existing.get("active", True): updates["active"] = True
+        # Backfill: si NUNCA tuvo name (insert previo a este campo), poner el del .env
+        if not existing.get("name"): updates["name"] = name
         if updates:
             await db.users.update_one({"username": username}, {"$set": updates})
 

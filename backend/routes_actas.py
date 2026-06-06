@@ -275,10 +275,26 @@ def _build_ctx(conv: dict, jurado: dict = None, subregion: str = None, terna: di
         "fecha_mes": MESES_ES[now.month-1],
         "fecha_anio": str(now.year),
         "jurado_nombre": (jurado or {}).get("nombre", ""),
-        "jurado_documento": ((jurado or {}).get("datos") or {}).get("cedula", ""),
+        "jurado_documento": _doc_jurado(jurado, default=""),
         "subregion": subregion or ", ".join((jurado or {}).get("subregiones") or []) or "",
         "terna_codigo": (terna or {}).get("codigo", "") if terna else "",
     }
+
+
+def _doc_jurado(jurado: dict, default: str = "___________") -> str:
+    """Extrae el número de documento del jurado probando llaves comunes y formatos."""
+    if not jurado:
+        return default
+    datos = jurado.get("datos") or {}
+    for key in ("cedula", "documento", "numero_documento", "doc_id", "numero_identificacion", "identificacion"):
+        v = datos.get(key)
+        if v not in (None, "", "—"):
+            return str(v).strip()
+    for key in ("documento", "cedula"):
+        v = jurado.get(key)
+        if v not in (None, "", "—"):
+            return str(v).strip()
+    return default
 
 
 def _is_inc2026(conv: dict) -> bool:
@@ -429,7 +445,7 @@ async def list_actas_pendientes(convocatoria_id: str, user: dict = Depends(get_c
         finalizadas = sum(1 for e in evs if e.get("estado") in ("Finalizada", "Firmada"))
         forzada = bool(((j.get("datos") or {}).get("acta_individual_forzada")))
         firma_url = ((j.get("datos") or {}).get("firma_url"))
-        cedula = ((j.get("datos") or {}).get("cedula"))
+        cedula = _doc_jurado(j, default=None)
         invalidada = bool(((j.get("datos") or {}).get("acta_invalidada_por_reapertura")))
         ya_firmada = bool(((j.get("datos") or {}).get("acta_individual_firma_at")))
         # Si una evaluación fue reabierta, el acta puede quedar en estado "Reabierta" o "Borrador"
@@ -910,34 +926,6 @@ def _build_pdf(tmpl: dict, ctx: dict, conv: dict, tabla_headers: list,
     el.append(Paragraph(tmpl.get("pie_firmantes_titulo", "FIRMANTES"), st["h2"]))
     el.append(_firmantes_table(firmantes, st))
 
-    # ====== QR de verificación pública del acta ======
-    if verificacion and verificacion.get("codigo"):
-        el.append(Spacer(1, 14))
-        qr_drawing = _build_qr_flowable(verificacion.get("url") or verificacion["codigo"], size_cm=2.6)
-        verif_style = ParagraphStyle("verif", parent=st["small"], alignment=TA_LEFT, fontSize=8.2, leading=10)
-        verif_text = (
-            f'<b>Código de verificación:</b> <font face="Courier-Bold">{verificacion["codigo"]}</font><br/>'
-            f'Cualquier persona puede escanear este QR o ingresar el código en la plataforma KRINOS '
-            f'para validar la autenticidad de esta acta, sus firmantes y la fecha de emisión.'
-        )
-        if verificacion.get("url"):
-            verif_text += f'<br/><font color="#0F5E54">{verificacion["url"]}</font>'
-        verif_table = Table(
-            [[qr_drawing, Paragraph(verif_text, verif_style)]],
-            colWidths=[3.0 * cm, 13.5 * cm],
-            hAlign="LEFT",
-        )
-        verif_table.setStyle(TableStyle([
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("BOX", (0, 0), (-1, -1), 0.5, rl_colors.HexColor("#CDE7E1")),
-            ("BACKGROUND", (0, 0), (-1, -1), rl_colors.HexColor("#F7FAF9")),
-            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 8),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-        ]))
-        el.append(verif_table)
-
     # Footer institucional fijo al pie de página (callback canvas)
     footer_drawer = _make_footer_drawer(branding or {})
     if footer_drawer:
@@ -1032,7 +1020,7 @@ async def acta_individual_jurado(jurado_id: str, user: dict = Depends(get_curren
     headers = ["Nº", "Número de Propuesta", "Municipio", "Nombre de la Organización", "Puntaje Asignado", "Observación Técnica Principal"]
     firmantes = [{
         "nombre": jur.get("nombre"),
-        "documento": (jur.get("datos") or {}).get("cedula", "___________"),
+        "documento": _doc_jurado(jur),
         "rol": "Jurado Evaluador",
         "firma_url": (jur.get("datos") or {}).get("firma_url"),
         "subregion": ", ".join(jur.get("subregiones") or []),
@@ -1091,7 +1079,7 @@ async def acta_colectiva_terna(terna_id: str, user: dict = Depends(get_current_u
         firma_data = firmas.get(jid) or {}
         firmantes.append({
             "nombre": (jur_obj or {}).get("nombre") or integ.get("nombre", "—"),
-            "documento": ((jur_obj or {}).get("datos") or {}).get("cedula", "___________"),
+            "documento": _doc_jurado(jur_obj),
             "rol": integ.get("rol", "Integrante"),
             "firma_url": firma_data.get("firma_url") or ((jur_obj or {}).get("datos") or {}).get("firma_url") if firma_data else None,
             "terna": terna.get("codigo"),
@@ -1167,7 +1155,7 @@ async def acta_subregional(convocatoria_id: str, subregion: str,
         fd = firmas_reg.get(j["id"]) or {}
         firmantes.append({
             "nombre": j.get("nombre"),
-            "documento": (j.get("datos") or {}).get("cedula", "___________"),
+            "documento": _doc_jurado(j),
             "rol": "Jurado evaluador",
             "firma_url": fd.get("firma_url"),
             "terna": terna_de_jurado.get(j["id"], ""),
