@@ -28,6 +28,9 @@ export default function Actas() {
   const [confirmForzar, setConfirmForzar] = useState(null);
 
   const isAdmin = ["admin_general", "admin_convocatoria", "supervisor"].includes(user?.role);
+  // Forzar/anular/reabrir actas son acciones DESTRUCTIVAS reservadas a administradores
+  // de convocatoria. Supervisor solo puede ver/descargar; no puede forzar.
+  const canForzar = ["admin_general", "admin_convocatoria"].includes(user?.role);
   const isJurado = user?.role === "jurado";
 
   const load = async () => {
@@ -192,8 +195,8 @@ export default function Actas() {
                         {r.forzada && <span className="ml-1 text-[10px] text-amber-700 font-semibold">· forzada</span>}
                       </td>
                       <td className="text-right space-x-1.5">
-                        {/* Admin: puede forzar acta tanto si está Pendiente como si Requiere firma */}
-                        {(r.estado === "Pendiente" || r.estado === "Requiere firma" || !r.tiene_firma) && isAdmin && (
+                        {/* Solo Admin de convocatoria puede forzar (supervisor NO) */}
+                        {(r.estado === "Pendiente" || r.estado === "Requiere firma" || !r.tiene_firma) && canForzar && (
                           <Button size="sm" variant="outline" onClick={() => setConfirmForzar(r)} className="gap-1 rounded-sm text-[11px] h-7 border-amber-300 text-amber-700 hover:bg-amber-50" data-testid={`actas-ind-forzar-${r.jurado_id}`}>
                             <Zap className="w-3 h-3" /> Forzar
                           </Button>

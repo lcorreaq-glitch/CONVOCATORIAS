@@ -785,3 +785,11 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - ✅ **Helper `_doc_jurado(jurado, default)`**: extrae el documento probando llaves comunes: `cedula`, `documento`, `numero_documento`, `doc_id`, `numero_identificacion`, `identificacion` (en `datos`) + fallback a campos top-level. Usado en 5 lugares del módulo de actas para que cualquier convocatoria con esquema personalizado siga funcionando.
 - ✅ **Validado**: nombre del admin cambiado → restart backend → nombre persiste. PDF colectivo descargado y validado con pypdf: 0 textos de QR, 3 firmantes con C.C. correctamente extraído (de los que tienen cedula, ej: "135555"; los que no tienen siguen mostrando líneas vacías hasta que el admin complete el dato del jurado).
 
+
+**Bug seguridad — Supervisor ya no puede forzar actas** — Feb 2026:
+- 🐛 **Causa raíz**: En `Actas.jsx` línea 30, la variable `isAdmin` incluía a `supervisor` junto con `admin_general` y `admin_convocatoria`. Esa misma variable se usaba para gatear el botón "Forzar" (línea 196). El backend ya rechazaba con 403 (`require_roles("admin_general", "admin_convocatoria")`), pero la UI exponía la acción.
+- ✅ **Fix**: Introducida variable separada `canForzar = ["admin_general", "admin_convocatoria"].includes(user?.role)` para acciones destructivas. `isAdmin` se mantiene para acciones de lectura/descarga donde el supervisor SÍ tiene acceso (descargar PDFs aunque estén en estado "Requiere firma").
+- ✅ **Validado**:
+  - Backend: `POST /api/actas/individual-jurado/{id}/forzar` con token de supervisor → HTTP 403 "Acceso restringido".
+  - Frontend: screenshot del supervisor en `/actas` muestra 0 botones "Forzar" (antes salían en cada fila Pendiente/Requiere firma).
+
