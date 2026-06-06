@@ -113,13 +113,13 @@ def _dashboards_for_role(role: str, is_inc2026: bool, campos: list) -> List[dict
             ],
         })
         base.append({
-            "id": "mi_etapa_colectiva", "titulo": "Etapa colectiva (tu terna)",
-            "subtitulo": "Deliberaciones consolidadas con tu terna", "icon": "Users",
+            "id": "mi_etapa_colectiva", "titulo": "Mi participación en colectivas",
+            "subtitulo": "Tu avance personal en las deliberaciones de tu terna", "icon": "Users",
             "widgets": [
                 {"id": "kpi_col_asignadas", "tipo": "kpi", "titulo": "Colectivas asignadas", "ds": "mias_colectivas_asignadas", "color": "morado"},
-                {"id": "kpi_col_abiertas", "tipo": "kpi", "titulo": "Abiertas", "ds": "mias_colectivas_abiertas", "color": "amber"},
-                {"id": "kpi_col_cerradas", "tipo": "kpi", "titulo": "Cerradas/Firmadas", "ds": "mias_colectivas_finalizadas", "color": "verde"},
-                {"id": "progress_col_avance", "tipo": "progress", "titulo": "Avance colectiva", "ds": "mi_avance_colectivas"},
+                {"id": "kpi_col_abiertas", "tipo": "kpi", "titulo": "Por calificar", "ds": "mias_colectivas_abiertas", "color": "amber"},
+                {"id": "kpi_col_cerradas", "tipo": "kpi", "titulo": "Calificadas por mí", "ds": "mias_colectivas_finalizadas", "color": "verde"},
+                {"id": "progress_col_avance", "tipo": "progress", "titulo": "Mi avance personal", "ds": "mi_avance_colectivas"},
             ],
         })
 
