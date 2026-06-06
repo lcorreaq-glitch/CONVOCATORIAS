@@ -1,4 +1,5 @@
 """KRINOS - User management (Admin General creates other users)."""
+import os
 import uuid
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Request
@@ -157,7 +158,7 @@ async def send_welcome_email(user_id: str, payload: WelcomePayload, request: Req
     if not u.get("email"):
         raise HTTPException(status_code=400, detail="El usuario no tiene email configurado")
 
-    base = payload.base_url or request.headers.get("origin") or "https://convocatoria-hub-2.emergent.host"
+    base = os.environ.get("PRODUCTION_URL") or "https://convocatoria-hub-2.emergent.host"
     login_url = f"{base.rstrip('/')}/login"
 
     branding_doc = await db.system_settings.find_one({"id": "global"}, {"_id": 0}) or {}

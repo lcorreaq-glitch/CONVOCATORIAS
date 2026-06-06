@@ -6,6 +6,7 @@ Endpoints centrales para:
 - Reseteo / consulta de credenciales de jurados para envío por email.
 - Seed del catálogo "Estados de Propuesta" para workflow de habilitación documental.
 """
+import os
 import uuid
 import secrets
 import string
@@ -221,7 +222,7 @@ async def reset_password_jurado(jurado_id: str, payload: ResetPasswordPayload,
     email_result = None
     if payload.enviar_correo:
         from email_service import send_email, render_welcome, log_email
-        base = payload.base_url or "https://convocatoria-hub-2.emergent.host"
+        base = os.environ.get("PRODUCTION_URL") or "https://convocatoria-hub-2.emergent.host"
         login_url = f"{base.rstrip('/')}/login"
         branding_doc = await db.system_settings.find_one({"id": "global"}, {"_id": 0}) or {}
         product_name = (branding_doc.get("branding") or {}).get("product_name", "KRINOS")
@@ -256,7 +257,7 @@ async def send_welcome_jurado(jurado_id: str, body: dict | None = None,
     jur = await db.jurados.find_one({"id": jurado_id}, {"_id": 0})
     if not jur:
         raise HTTPException(status_code=404, detail="Jurado no encontrado")
-    base = (body or {}).get("base_url") or "https://convocatoria-hub-2.emergent.host"
+    base = os.environ.get("PRODUCTION_URL") or "https://convocatoria-hub-2.emergent.host"
     login_url = f"{base.rstrip('/')}/login"
     branding_doc = await db.system_settings.find_one({"id": "global"}, {"_id": 0}) or {}
     product_name = (branding_doc.get("branding") or {}).get("product_name", "KRINOS")
@@ -515,7 +516,7 @@ async def bulk_send_welcome(payload: BulkWelcomePayload,
     db = get_db()
     from email_service import send_email, render_welcome, log_email
 
-    base = payload.base_url or "https://convocatoria-hub-2.emergent.host"
+    base = os.environ.get("PRODUCTION_URL") or "https://convocatoria-hub-2.emergent.host"
     login_url = f"{base.rstrip('/')}/login"
     branding_doc = await db.system_settings.find_one({"id": "global"}, {"_id": 0}) or {}
     product_name = (branding_doc.get("branding") or {}).get("product_name", "KRINOS")
