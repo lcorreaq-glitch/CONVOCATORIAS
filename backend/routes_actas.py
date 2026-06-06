@@ -663,6 +663,11 @@ async def firmar_colectiva_terna(terna_id: str, user: dict = Depends(get_current
     firmas = datos.get("firmas_acta_colectiva") or {}
     firmas[user["jurado_id"]] = {"fecha": now_iso(), "firma_url": firma_url, "nombre": jur["nombre"]}
     datos["firmas_acta_colectiva"] = firmas
+    # Si todos los integrantes re-firmaron tras una reapertura, limpiar el flag de invalidación.
+    integrantes_ids = {i.get("jurado_id") for i in integrantes if i.get("jurado_id")}
+    if datos.get("acta_colectiva_invalidada_por_reapertura") and integrantes_ids.issubset(set(firmas.keys())):
+        datos.pop("acta_colectiva_invalidada_por_reapertura", None)
+        datos["acta_colectiva_refirmada_at"] = now_iso()
     await db.ternas.update_one({"id": terna_id}, {"$set": {"datos": datos}})
     return {"ok": True, "firmas_totales": len(firmas)}
 
@@ -1103,7 +1108,8 @@ async def acta_colectiva_terna(terna_id: str, user: dict = Depends(get_current_u
         })
     pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes, _get_branding(conv),
                      verificacion=await _build_verificacion(db, "colectiva", terna["convocatoria_id"], terna_id,
-                                                            meta={"terna_codigo": terna.get("codigo"), "subregion": terna.get("subregion") or terna.get("territorio")}))
+                                                            meta={"terna_codigo": terna.get("codigo"), "subregion": terna.get("subregion") or terna.get("territorio")}),
+                     watermark="VERSIÓN DESACTUALIZADA — REQUIERE RE-FIRMA" if bool(((terna.get("datos") or {}).get("acta_colectiva_invalidada_por_reapertura"))) else None)
     await audit(user, "generate_acta", "actas", terna_id, detalle="colectiva_terna")
     return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
                              headers={"Content-Disposition": f'inline; filename="acta_colectiva_terna_{terna["codigo"]}.pdf"'})

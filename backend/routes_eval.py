@@ -772,6 +772,18 @@ async def reabrir_eval_colectiva(eid: str, body: dict = Body(default={}),
                   "ultima_reapertura_por": user.get("username")},
          "$unset": {"fecha_cierre": ""}}
     )
+    # ── Invalidar firmas previas del acta colectiva de la terna ──
+    # Si la terna ya había firmado, esa acta queda desactualizada y debe re-firmarse.
+    terna = await db.ternas.find_one({"id": ev["terna_id"]}, {"_id": 0, "datos": 1})
+    if terna:
+        datos = terna.get("datos") or {}
+        firmas_previas = datos.get("firmas_acta_colectiva") or {}
+        if firmas_previas:
+            datos["firmas_acta_colectiva_anterior"] = firmas_previas
+            datos["firmas_acta_colectiva"] = {}
+            datos["acta_colectiva_invalidada_por_reapertura"] = True
+            datos["acta_colectiva_invalidada_at"] = now_iso()
+            await db.ternas.update_one({"id": ev["terna_id"]}, {"$set": {"datos": datos}})
     # Aprobar solicitudes pendientes asociadas
     await db.reapertura_solicitudes.update_many(
         {"evaluacion_id": eid, "tipo": "colectiva", "estado": "Pendiente"},

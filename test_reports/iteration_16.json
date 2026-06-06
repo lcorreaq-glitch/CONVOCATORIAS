@@ -1,0 +1,59 @@
+{
+  "summary": "Validación UI del flujo de reapertura de evaluaciones COLECTIVAS y unificación de rol integrante_terna→jurado. FLOW 1 (admin reabre) PASA; FLOW 5 (6 roles, sin integrante_terna) PASA. FLOW 2 (jurado solicita reapertura) NO se pudo completar end-to-end por dependencia de estado (la colectiva quedó Reabierta tras Flow 1 y para volver a 'Cerrada' el jurado debe primero crear v2 con puntajes — el botón cerrar-col-btn NO aparece sin v2 inicializada). FLOW 3 (tab Reaperturas con badge 'Colectiva') no se pudo validar visualmente porque Flow 2 no generó solicitud. FLOW 4 (watermark PDF) no se ejecutó (testing frontend-only y dependía del Flow 2 generando re-firma).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/evaluaciones-colectivas/{id}/v2",
+        "issue": "Devuelve 404 cuando aún no se ha creado v2. El front maneja el 404 mostrando el CTA 'Iniciar etapa colectiva', pero queda registrado en consola como error. Considerar devolver 200 con cuerpo vacío {iniciada:false} para silenciar el ruido en consola."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "FLOW 2 — Jurado /evaluaciones list",
+        "issue": "Tras login como carlos.velez@krinos.gov.co (jurado de Terna Urabá T1), el contador 'Etapa colectiva: 0 de 1 listas' SÍ aparece, pero la pestaña 'Colectivas (0)' del listado pendiente NO muestra ninguna fila, por lo que el jurado no tiene un link directo a la colectiva reabierta desde el listado. El estado 'Reabierta' aparentemente no se categoriza como 'pendiente' en el filtro Solo pendientes. Cambiar filtro a 'todas' o ampliar el predicado pendiente para incluir Reabierta.",
+        "affected_selectors": ["tab 'Colectivas (0)'", "filtro 'Solo pendientes'"]
+      },
+      {
+        "flow": "FLOW 2 — Solicitar reapertura (jurado)",
+        "issue": "En estado 'Reabierta' (post-Flow 1), el detalle de colectiva NO muestra ni 'cerrar-col-btn' ni 'eval-col-solicitar-reapertura-btn' al jurado; solo se ve el CTA 'Iniciar etapa colectiva (crear v2)'. Para reproducir el caso 'jurado solicita reapertura' es necesario primero: iniciar v2 + capturar puntajes + cerrar con cerrar-col-btn. El testing spec asumió que cerrar-col-btn estaría disponible directamente, pero NO lo está cuando la colectiva fue reabierta y aún no se ha re-creado v2. Validar si esto es deseado o si debería mostrarse cerrar-col-btn como atajo de 're-cerrar sin cambios'.",
+        "affected_selectors": ["eval-col-solicitar-reapertura-btn", "cerrar-col-btn"]
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "Onboarding modal",
+        "issues": ["Modal Onboarding de DialogContent dispara warning 'Missing Description or aria-describedby' (a11y). Tapa Reabrir/Solicitar al primer login si no se cierra con Saltar — agregar auto-dismiss para usuarios power-user o respetar localStorage entre sesiones."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_16.json"
+  ],
+  "action_items": [
+    "FLOW 2 prerequisito: para que el jurado pueda usar eval-col-solicitar-reapertura-btn cuando la colectiva fue reabierta, debe primero iniciar v2 y cerrarla; documentar este flujo o exponer un botón directo 'cerrar sin cambios' tras una reapertura sin modificación.",
+    "Incluir 'Reabierta' en el predicado del filtro 'Solo pendientes' del listado /evaluaciones (pestaña Colectivas) para que el jurado vea la tarea pendiente tras una reapertura.",
+    "Agregar Description / aria-describedby al DialogContent del Onboarding para eliminar el warning de Radix.",
+    "Considerar que /api/evaluaciones-colectivas/{id}/v2 devuelva 200 con flag iniciada:false en lugar de 404 para evitar ruido en consola.",
+    "Nota al spec: la ruta correcta del detalle de colectiva en React Router es /evaluaciones/colectiva/:id (no /evaluaciones-colectivas/:id que se mencionaba en el review_request)."
+  ],
+  "critical_code_review_comments": [
+    "/app/frontend/src/pages/Evaluaciones.jsx — el filtro 'Solo pendientes' agrupa por estado; verificar inclusión de 'Reabierta' como pendiente para que aparezca en la pestaña Colectivas del jurado tras una reapertura admin.",
+    "/app/frontend/src/pages/EvaluacionColectiva.jsx — la lógica de renderizado de los 3 botones (reabrir / solicitar / cerrar) condiciona cerrar-col-btn a la existencia de v2 iniciada. Tras reabrir, v2 se invalida → ningún botón se muestra al jurado, bloqueando el ciclo solicitar→aprobar.",
+    "El review_request indica la URL /evaluaciones-colectivas/:id pero el router declara /evaluaciones/colectiva/:id en App.js:65; mantener un solo estilo de URL en frontend ↔ backend para reducir confusión."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "n/a (frontend-only test)",
+    "frontend": "FLOW 1: ✓, FLOW 2: ⚠ bloqueado por estado, FLOW 3: ⚠ no validable, FLOW 4: omitido, FLOW 5: ✓ → 2/5 confirmados"
+  },
+  "test_credentials": "Admin lcorreaq/Chocolate2026! OK; Jurado carlos.velez@krinos.gov.co/Jurado2026! OK (rol 'jurado' confirmado en perfil lateral 'Carlos Vélez Restrepo · Jurado').",
+  "seed_data_creation": "Ninguna creación nueva. Se reabrió la colectiva 4950e89b-5ce1-4f41-953f-12245467d194 dejándola en estado 'Reabierta' (motivo: 'Test e2e desde testing agent'). Las firmas previas (Carlos Vélez y Fernanda Salazar) quedarían invalidadas según la lógica del backend.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "La colectiva quedó en estado 'Reabierta'. Para testear el ciclo completo: (a) como jurado, hacer click 'Iniciar etapa colectiva (crear v2)' → registrar puntajes → cerrar con cerrar-col-btn; (b) entonces eval-col-solicitar-reapertura-btn aparecerá; (c) tras solicitarlo, validar la fila en /administracion → tab Reaperturas con badge 'Colectiva'; (d) descargar el PDF /api/actas/colectiva-terna/543335e8-ed19-4603-9eee-ec6bee6c5a25 y verificar watermark. Selectores ya verificados en código: eval-col-reabrir-btn, eval-col-solicitar-reapertura-btn, cerrar-col-btn, admin-tab-reaperturas, admin-tab-roles, reap-approve-{id}. Ruta detalle colectiva: /evaluaciones/colectiva/:id (no /evaluaciones-colectivas/:id).",
+  "rca of the issue": "El obstáculo para validar Flow 2 vía UI es la ausencia de cerrar-col-btn cuando la colectiva fue reabierta sin v2 re-iniciada. La lógica de reabrir (routes_eval.py 770-845) invalida v2 (consistente con el watermark) y elimina la posibilidad de re-cerrar sin pasar nuevamente por crear v2. Esto bloquea el camino más corto para que el jurado dispare solicitar-reapertura en UI; backend probablemente acepta la solicitud sólo cuando estado='Cerrada'. Sin un atajo 'cerrar inmediato post-reapertura', el flujo Flow 2→Flow 3 NO es ejecutable directamente desde el botón en cuestión salvo creando una nueva colectiva de test ya cerrada."
+}
