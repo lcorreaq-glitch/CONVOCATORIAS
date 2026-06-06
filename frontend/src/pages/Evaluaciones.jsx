@@ -11,9 +11,7 @@ import {
   Sparkles, AlertCircle, Target, TrendingUp, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
-
-const PENDIENTE_STATES = ["Pendiente", "En progreso", "Borrador", "Reabierta", "Abierta"];
-const TERMINADAS_STATES = ["Finalizada", "Firmada", "Bloqueada", "Cerrada"];
+import { PENDIENTE_STATES, TERMINADAS_STATES } from "@/constants/evalStates";
 
 export default function Evaluaciones() {
   const { activeConvocatoriaId, user } = useAuth();
@@ -29,19 +27,27 @@ export default function Evaluaciones() {
 
   useEffect(() => {
     if (!activeConvocatoriaId) return;
-    const url = isJurado
-      ? `/evaluaciones-individuales?convocatoria_id=${activeConvocatoriaId}&mias=true`
-      : `/evaluaciones-individuales?convocatoria_id=${activeConvocatoriaId}`;
-    api.get(url).then((r) => setIndividuales(r.data));
-    const urlCol = isJurado
-      ? `/evaluaciones-colectivas?convocatoria_id=${activeConvocatoriaId}&mias=true`
-      : `/evaluaciones-colectivas?convocatoria_id=${activeConvocatoriaId}`;
-    api.get(urlCol).then((r) => setColectivas(r.data)).catch(() => setColectivas([]));
-    api.get(`/propuestas?convocatoria_id=${activeConvocatoriaId}`).then((r) => setPropuestas(r.data));
+    let cancelled = false;
+    const loadAll = () => {
+      const url = isJurado
+        ? `/evaluaciones-individuales?convocatoria_id=${activeConvocatoriaId}&mias=true`
+        : `/evaluaciones-individuales?convocatoria_id=${activeConvocatoriaId}`;
+      api.get(url).then((r) => { if (!cancelled) setIndividuales(r.data); });
+      const urlCol = isJurado
+        ? `/evaluaciones-colectivas?convocatoria_id=${activeConvocatoriaId}&mias=true`
+        : `/evaluaciones-colectivas?convocatoria_id=${activeConvocatoriaId}`;
+      api.get(urlCol).then((r) => { if (!cancelled) setColectivas(r.data); }).catch(() => { if (!cancelled) setColectivas([]); });
+    };
+    loadAll();
+    api.get(`/propuestas?convocatoria_id=${activeConvocatoriaId}`).then((r) => { if (!cancelled) setPropuestas(r.data); });
     if (!isJurado) {
-      api.get(`/jurados?convocatoria_id=${activeConvocatoriaId}`).then((r) => setJurados(r.data));
+      api.get(`/jurados?convocatoria_id=${activeConvocatoriaId}`).then((r) => { if (!cancelled) setJurados(r.data); });
     }
-    api.get(`/ternas?convocatoria_id=${activeConvocatoriaId}`).then((r) => setTernas(r.data));
+    api.get(`/ternas?convocatoria_id=${activeConvocatoriaId}`).then((r) => { if (!cancelled) setTernas(r.data); });
+    // Refresca al volver el foco (p.ej. tras finalizar una eval y regresar).
+    const onFocus = () => loadAll();
+    window.addEventListener("focus", onFocus);
+    return () => { cancelled = true; window.removeEventListener("focus", onFocus); };
   }, [activeConvocatoriaId, user, isJurado]);
 
   const propMap = useMemo(() => Object.fromEntries(propuestas.map((p) => [p.id, p])), [propuestas]);

@@ -1,8 +1,9 @@
 import React from "react";
-import { Outlet, NavLink, useNavigate } from "react-router-dom";
+import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { TID } from "@/constants/testIds";
 import { api } from "@/lib/api";
+import { PENDIENTE_STATES } from "@/constants/evalStates";
 import {
   LayoutDashboard, FolderOpen, FileStack, Users, UsersRound, Workflow,
   ClipboardCheck, Trophy, FileText, BarChart3, Shield, Settings2, LogOut,
@@ -30,6 +31,7 @@ const NAV = [
 export default function Layout() {
   const { user, logout, activeConvocatoriaId, setConv, can } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [convs, setConvs] = React.useState([]);
 
   React.useEffect(() => {
@@ -51,13 +53,17 @@ export default function Layout() {
   const [pendCount, setPendCount] = React.useState(0);
   React.useEffect(() => {
     if (user?.role !== "jurado" || !activeConvocatoriaId) { setPendCount(0); return; }
-    api.get(`/evaluaciones-individuales?convocatoria_id=${activeConvocatoriaId}&mias=true`)
-      .then((r) => {
-        const pend = (r.data || []).filter((e) => ["Borrador", "Iniciada", "Reabierta", "En progreso", "Pendiente"].includes(e.estado)).length;
-        setPendCount(pend);
-      })
-      .catch(() => setPendCount(0));
-  }, [user, activeConvocatoriaId]);
+    const refresh = () => {
+      api.get(`/evaluaciones-individuales?convocatoria_id=${activeConvocatoriaId}&mias=true`)
+        .then((r) => setPendCount((r.data || []).filter((e) => PENDIENTE_STATES.includes(e.estado)).length))
+        .catch(() => setPendCount(0));
+    };
+    refresh();
+    const intv = setInterval(refresh, 30000);
+    const onFocus = () => refresh();
+    window.addEventListener("focus", onFocus);
+    return () => { clearInterval(intv); window.removeEventListener("focus", onFocus); };
+  }, [user, activeConvocatoriaId, location.pathname]);
 
   return (
     <div className="min-h-screen flex bg-background">
