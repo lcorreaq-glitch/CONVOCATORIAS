@@ -101,10 +101,43 @@ export default function Evaluaciones() {
     };
   }, [individuales, colectivas, misV2, isJurado]);
 
-  const filterEval = (list) => {
+  // Mapa propuesta_id → estado de MI V2 (para colectivas, sirve para badge y filtro personal)
+  const myV2ByProp = useMemo(() => {
+    const m = {};
+    misV2.forEach((v) => { m[v.propuesta_id] = v; });
+    return m;
+  }, [misV2]);
+
+  // Para JURADO: estado "personal" de una colectiva basado en su V2.
+  // - "Sin iniciar": no existe V2 o está Borrador/Pendiente.
+  // - "En edición" / "En proceso" / "Iniciada": V2 en progreso (pendiente).
+  // - "Finalizada" / "Firmada": V2 terminada (mi parte lista).
+  // Cuando la colectiva entera está Cerrada/Firmada, esa info se muestra como sub-texto.
+  const miEstadoColectiva = (col) => {
+    const v = myV2ByProp[col.propuesta_id];
+    if (!v) return "Sin iniciar";
+    return v.estado || "Sin iniciar";
+  };
+
+  const filterEval = (list, opts = {}) => {
+    const usarMiV2 = opts.usarMiV2 === true;
     let f = list;
-    if (filtroEstado === "pendientes") f = f.filter((e) => PENDIENTE_STATES.includes(e.estado));
-    else if (filtroEstado === "terminadas") f = f.filter((e) => TERMINADAS_STATES.includes(e.estado));
+    if (filtroEstado === "pendientes") {
+      if (usarMiV2) {
+        f = f.filter((e) => {
+          const me = miEstadoColectiva(e);
+          return me === "Sin iniciar" || PENDIENTE_STATES.includes(me);
+        });
+      } else {
+        f = f.filter((e) => PENDIENTE_STATES.includes(e.estado));
+      }
+    } else if (filtroEstado === "terminadas") {
+      if (usarMiV2) {
+        f = f.filter((e) => TERMINADAS_STATES.includes(miEstadoColectiva(e)));
+      } else {
+        f = f.filter((e) => TERMINADAS_STATES.includes(e.estado));
+      }
+    }
     if (q.trim()) {
       const needle = q.toLowerCase();
       f = f.filter((e) => {
@@ -112,10 +145,12 @@ export default function Evaluaciones() {
         return (p?.codigo || "").toLowerCase().includes(needle) || (p?.nombre || "").toLowerCase().includes(needle);
       });
     }
-    // Orden inteligente: pendientes primero, luego terminadas. Dentro de cada grupo, por código.
+    // Orden inteligente: pendientes primero, luego terminadas. Para JURADO en colectivas, usa estado personal.
     return f.slice().sort((a, b) => {
-      const ap = PENDIENTE_STATES.includes(a.estado) ? 0 : 1;
-      const bp = PENDIENTE_STATES.includes(b.estado) ? 0 : 1;
+      const stA = usarMiV2 ? miEstadoColectiva(a) : a.estado;
+      const stB = usarMiV2 ? miEstadoColectiva(b) : b.estado;
+      const ap = TERMINADAS_STATES.includes(stA) ? 1 : 0;
+      const bp = TERMINADAS_STATES.includes(stB) ? 1 : 0;
       if (ap !== bp) return ap - bp;
       const ac = propMap[a.propuesta_id]?.codigo || "";
       const bc = propMap[b.propuesta_id]?.codigo || "";
@@ -252,11 +287,12 @@ export default function Evaluaciones() {
 
         <TabsContent value="colectivas" className="mt-6">
           <EvalTableColectiva
-            evaluaciones={filterEval(colectivas)}
+            evaluaciones={filterEval(colectivas, { usarMiV2: isJurado })}
             propMap={propMap}
             ternaMap={ternaMap}
             isJurado={isJurado}
             isAdmin={isAdmin}
+            myV2ByProp={myV2ByProp}
             onDelete={(e) => deleteEval(e, "colectiva")}
             onToggleColectiva={async (ev) => {
               try {
@@ -391,7 +427,7 @@ function EvalTable({ evaluaciones, isJurado, isAdmin, propMap, jurMap, tipo, emp
   );
 }
 
-function EvalTableColectiva({ evaluaciones, propMap, ternaMap, isJurado, isAdmin, emptyHint, onDelete, onToggleColectiva }) {
+function EvalTableColectiva({ evaluaciones, propMap, ternaMap, isJurado, isAdmin, emptyHint, onDelete, onToggleColectiva, myV2ByProp = {} }) {
   if (!evaluaciones.length) {
     return <div className="border border-dashed border-border rounded-lg p-12">
       <EmptyState title="Sin resultados" hint={emptyHint} icon={Sparkles} />
@@ -417,7 +453,23 @@ function EvalTableColectiva({ evaluaciones, propMap, ternaMap, isJurado, isAdmin
                   <div className="font-mono text-xs text-muted-foreground">{t?.codigo || "—"}</div>
                   <div>{t?.nombre || "—"}</div>
                 </td>
-                <td><EstadoBadge estado={e.estado} /></td>
+                <td>
+                  {isJurado ? (() => {
+                    const v = myV2ByProp[e.propuesta_id];
+                    const miEstado = v?.estado || "Sin iniciar";
+                    const miTerminada = TERMINADAS_STATES.includes(miEstado);
+                    const tone = miTerminada ? "verde" : (miEstado === "Sin iniciar" ? "gris" : "amber");
+                    const ternaEstado = e.estado;
+                    return (
+                      <div className="space-y-0.5">
+                        <Badge tone={tone}>{miEstado === "Sin iniciar" ? "Sin iniciar" : (miTerminada ? "Mi parte lista" : miEstado)}</Badge>
+                        <div className="text-[10px] text-muted-foreground">Terna: {ternaEstado}</div>
+                      </div>
+                    );
+                  })() : (
+                    <EstadoBadge estado={e.estado} />
+                  )}
+                </td>
                 <td className="font-mono tabular-nums">{e.puntaje_final ?? 0} <span className="text-muted-foreground">/ 100</span></td>
                 <td className="text-right whitespace-nowrap">
                   {e.estado === "Pendiente" ? (
@@ -436,7 +488,16 @@ function EvalTableColectiva({ evaluaciones, propMap, ternaMap, isJurado, isAdmin
                   ) : (
                     <Link to={`/evaluaciones/colectiva/${e.id}`}
                           className="inline-flex items-center gap-1 px-2.5 py-1 rounded-sm text-[11px] font-semibold bg-[#14776A] text-white hover:bg-[#0F5E54] transition-colors">
-                      {PENDIENTE_STATES.includes(e.estado) ? "Continuar" : "Abrir"} <ArrowRight className="w-3 h-3" />
+                      {(() => {
+                        if (isJurado) {
+                          const v = myV2ByProp[e.propuesta_id];
+                          const me = v?.estado || "Sin iniciar";
+                          if (me === "Sin iniciar") return "Iniciar";
+                          if (TERMINADAS_STATES.includes(me)) return "Ver";
+                          return "Continuar";
+                        }
+                        return PENDIENTE_STATES.includes(e.estado) ? "Continuar" : "Abrir";
+                      })()} <ArrowRight className="w-3 h-3" />
                     </Link>
                   )}
                   {isAdmin && ["Abierta", "Reabierta"].includes(e.estado) && !(e.observacion_consolidada || "").trim() && (
