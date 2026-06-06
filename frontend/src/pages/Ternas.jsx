@@ -314,7 +314,7 @@ export default function Ternas() {
                 <strong className="text-emerald-700">{importResult.creadas} creadas</strong> · {importResult.rechazadas} rechazadas
                 {importResult.errores?.length > 0 && (
                   <div className="mt-2 max-h-32 overflow-y-auto text-red-700">
-                    {importResult.errores.map((e, i) => <div key={i} className="text-[11px]">Fila {e.fila}: {e.error}</div>)}
+                    {importResult.errores.map((e, i) => <div key={`err-${e.fila ?? i}-${i}`} className="text-[11px]">Fila {e.fila}: {e.error}</div>)}
                   </div>
                 )}
               </div>

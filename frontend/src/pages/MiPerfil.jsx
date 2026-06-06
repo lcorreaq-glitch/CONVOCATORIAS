@@ -214,7 +214,7 @@ function PerfilJurado() {
         try {
           const rc = await api.get(`/campos?convocatoria_id=${j.convocatoria_id}&aplica_a=jurado`);
           setCampos(rc.data || []);
-        } catch (_) { /* ignore */ }
+        } catch (err) { console.warn("[MiPerfil] No se pudieron cargar campos parametrizables:", err?.message); }
       }
     }).catch(() => toast.error("No se pudo cargar tu perfil"));
   }, []);

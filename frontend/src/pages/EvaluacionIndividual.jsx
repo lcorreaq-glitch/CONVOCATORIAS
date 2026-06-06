@@ -126,7 +126,7 @@ export default function EvaluacionIndividual() {
           if (todasFinalizadas) {
             setShowCelebracion(true);
           }
-        } catch (_) { /* silent */ }
+        } catch (err) { console.warn("[EvaluacionIndividual] No se pudo verificar progreso global:", err?.message); }
       }
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     setSaving(false);

@@ -198,7 +198,7 @@ function WidgetBody({ widget }) {
       <ResponsiveContainer width="100%" height={220}>
         <PieChart>
           <Pie data={items} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={(e) => `${e.value}`}>
-            {items.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+            {items.map((it, i) => <Cell key={`pie-${it.name || i}`} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
           </Pie>
           <Tooltip />
           <Legend iconSize={8} wrapperStyle={{ fontSize: "11px" }} />
@@ -272,7 +272,7 @@ function WidgetBody({ widget }) {
     return (
       <ol className="space-y-1.5">
         {items.map((it, i) => (
-          <li key={i} className="flex items-center justify-between gap-2 py-1 border-b border-border last:border-0 text-[12.5px]">
+          <li key={`rank-${it.id || it.codigo || it.nombre || i}`} className="flex items-center justify-between gap-2 py-1 border-b border-border last:border-0 text-[12.5px]">
             <div className="flex items-center gap-2 min-w-0">
               <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold ${i < 3 ? "bg-[#14776A] text-white" : "bg-secondary text-muted-foreground"}`}>{i + 1}</span>
               {isJurado ? <span className="truncate font-semibold">{it.nombre}</span> : (<>
@@ -291,7 +291,7 @@ function WidgetBody({ widget }) {
     return (
       <div className="space-y-2">
         {items.map((it, i) => (
-          <div key={i}>
+          <div key={`pm-${it.name || it.id || i}`}>
             <div className="flex items-center justify-between text-[12px] mb-0.5">
               <span className="font-mono font-semibold">{it.name}</span>
               <span className="text-muted-foreground font-mono">{it.done}/{it.total} · {it.pct}%</span>

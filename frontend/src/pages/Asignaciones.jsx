@@ -588,7 +588,7 @@ export default function Asignaciones() {
                       const prop = propMap[er.propuesta_id];
                       const tgtName = jurMap[er.target]?.nombre || ternaMap[er.target]?.nombre || er.target;
                       return (
-                        <li key={i} className="border-l-2 border-red-300 pl-2">
+                        <li key={`err-${er.propuesta_id || ""}-${er.target || ""}-${i}`} className="border-l-2 border-red-300 pl-2">
                           <span className="font-mono text-[11px] text-muted-foreground">{prop?.codigo || "—"}</span>{" "}
                           <span className="font-semibold capitalize">{(prop?.nombre || "").toLowerCase()}</span>{" "}
                           → <span className="text-foreground">{tgtName}</span>

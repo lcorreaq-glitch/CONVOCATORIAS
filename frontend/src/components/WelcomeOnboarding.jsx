@@ -248,8 +248,8 @@ export default function WelcomeOnboarding() {
               <Sparkles className="w-4 h-4" /> Onboarding KRINOS · {step + 1}/{steps.length}
             </DialogTitle>
             <div className="flex gap-1">
-              {steps.map((_, i) => (
-                <div key={i} className={`h-1.5 rounded-full transition-all ${i === step ? "w-8 bg-[#14776A]" : i < step ? "w-4 bg-[#14776A]" : "w-4 bg-[#E2E7EC]"}`} />
+              {steps.map((s, i) => (
+                <div key={`step-${s?.title || i}`} className={`h-1.5 rounded-full transition-all ${i === step ? "w-8 bg-[#14776A]" : i < step ? "w-4 bg-[#14776A]" : "w-4 bg-[#E2E7EC]"}`} />
               ))}
             </div>
           </div>

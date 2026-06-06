@@ -793,3 +793,19 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
   - Backend: `POST /api/actas/individual-jurado/{id}/forzar` con token de supervisor → HTTP 403 "Acceso restringido".
   - Frontend: screenshot del supervisor en `/actas` muestra 0 botones "Forzar" (antes salían en cada fila Pendiente/Requiere firma).
 
+
+**Code Quality Report — Triaje y fixes** — Feb 2026:
+- ✅ **Fixes aplicados (3 reales)**:
+  - 2× empty catch blocks ahora con `console.warn` (MiPerfil.jsx:217, EvaluacionIndividual.jsx:129).
+  - 6× array index as key reemplazados por IDs únicos (Ternas, Dashboard x3, Asignaciones, WelcomeOnboarding).
+- ❌ **No aplicados (falsos positivos del linter)**:
+  - `eval()` en routes_eval.py: NO existe ningún `eval()` real — el linter confundió funciones con "eval" en su nombre (`get_eval`, `save_eval`, etc.).
+  - Circular import db↔auth: ya es lazy import intencional dentro de las funciones (`db.py:43,264`).
+  - Hardcoded secrets en `testIds.js`, `WelcomeOnboarding.jsx:48`: son strings de data-testid y labels UI, no credenciales.
+  - Hardcoded secrets en `/tests/`: credenciales de testing documentadas — práctica correcta.
+  - localStorage para JWT: decisión arquitectónica; cambiar a httpOnly cookies requiere refactor mayor con cost/benefit a evaluar.
+- ⏸ **Diferidos (refactor sin tests sólidos = riesgo de regresión)**:
+  - Complejidad de `Actas.jsx` (347 líneas), `Asignaciones.jsx` (729), `EvaluacionColectiva.jsx` (447), `routes_actas.list_actas_pendientes` (129 líneas), `routes_data.py` (>2000 líneas). Refactor pendiente al backlog P3.
+  - 79 missing hook deps: la mayoría son omisiones intencionales para evitar loops. Aplicarlas masivamente es riesgo.
+  - Nested ternaries (33): estilo, no funcional.
+
