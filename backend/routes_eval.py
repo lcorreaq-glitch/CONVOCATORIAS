@@ -184,6 +184,12 @@ async def save_eval(eid: str, payload: EvalUpdate, user: dict = Depends(get_curr
             # No fallar la operación principal por un error de correo
             import logging
             logging.getLogger("krinos").warning(f"Email notif evaluaciones completas falló: {ex}")
+        # Auto-generar colectivas (en estado "Pendiente") cuando la terna completa todas las individuales de la propuesta
+        try:
+            await _auto_generate_colectivas_after_finalizar(db, ev)
+        except Exception as ex:
+            import logging
+            logging.getLogger("krinos").warning(f"Auto-gen colectivas falló: {ex}")
 
     out = await db.evaluaciones_individuales.find_one({"id": eid}, {"_id": 0})
     return out
@@ -446,10 +452,26 @@ async def get_eval_colectiva(eid: str, user: dict = Depends(get_current_user)):
 
 @router.get("/evaluaciones-colectivas")
 async def list_eval_colectivas(convocatoria_id: str, terna_id: Optional[str] = None,
+                               mias: bool = False,
                                user: dict = Depends(get_current_user)):
     db = get_db()
     q = {"convocatoria_id": convocatoria_id}
     if terna_id: q["terna_id"] = terna_id
+    # El jurado NO ve las colectivas en estado "Pendiente" (aún no habilitadas por el admin).
+    if user.get("role") == "jurado":
+        q["estado"] = {"$ne": "Pendiente"}
+        if mias:
+            # Filtrar solo las ternas a las que pertenece el jurado
+            j = await db.jurados.find_one({"$or": [
+                {"id": user.get("jurado_id")}, {"email": user.get("email")}
+            ]})
+            if j:
+                ternas_ids = [t["id"] for t in await db.ternas.find({
+                    "convocatoria_id": convocatoria_id, "integrantes.jurado_id": j["id"]
+                }, {"_id": 0, "id": 1}).to_list(500)]
+                q["terna_id"] = {"$in": ternas_ids}
+            else:
+                return []
     items = await db.evaluaciones_colectivas.find(q, {"_id": 0}).to_list(5000)
     return items
 
@@ -458,20 +480,26 @@ class EvalColectivaIn(BaseModel):
     convocatoria_id: str
     propuesta_id: str
     terna_id: str
+    estado_inicial: Optional[str] = "Abierta"  # "Pendiente" | "Abierta"
 
 
-@router.post("/evaluaciones-colectivas")
-async def crear_eval_colectiva(payload: EvalColectivaIn, user: dict = Depends(require_roles("admin_general", "admin_convocatoria", "jurado"))):
-    db = get_db()
+async def _materialize_colectiva(db, convocatoria_id: str, propuesta_id: str, terna_id: str,
+                                  estado_inicial: str = "Pendiente"):
+    """Helper: crea (o devuelve) una colectiva para (propuesta, terna).
+
+    Reglas:
+      - Si ya existe, la devuelve sin tocar.
+      - Si no, calcula el promedio de las individuales `Finalizada/Firmada` y crea el doc.
+      - El estado por defecto es "Pendiente" (deshabilitada). El admin la habilita a "Abierta".
+    """
     existing = await db.evaluaciones_colectivas.find_one({
-        "propuesta_id": payload.propuesta_id, "terna_id": payload.terna_id
+        "propuesta_id": propuesta_id, "terna_id": terna_id
     })
     if existing:
         existing.pop("_id", None)
         return existing
-    # Calcular promedio de las evaluaciones individuales finalizadas
     individuales = await db.evaluaciones_individuales.find({
-        "propuesta_id": payload.propuesta_id,
+        "propuesta_id": propuesta_id,
         "estado": {"$in": ["Finalizada", "Firmada"]},
     }).to_list(50)
     promedio = {}
@@ -483,17 +511,17 @@ async def crear_eval_colectiva(payload: EvalColectivaIn, user: dict = Depends(re
             vals = [float(ev["puntajes"].get(cid, 0)) for ev in individuales if ev.get("puntajes", {}).get(cid) is not None]
             if vals:
                 promedio[cid] = round(sum(vals) / len(vals), 2)
-    criterios = await db.criterios.find({"convocatoria_id": payload.convocatoria_id}, {"_id": 0}).to_list(100)
+    criterios = await db.criterios.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(100)
     total_of = sum(promedio.get(c["id"], 0) for c in criterios if c.get("oficial", True))
     total_dif = sum(promedio.get(c["id"], 0) for c in criterios if not c.get("oficial", True))
-    bono = await _compute_bono_priorizacion(db, payload.convocatoria_id, payload.propuesta_id)
+    bono = await _compute_bono_priorizacion(db, convocatoria_id, propuesta_id)
 
     doc = {
         "id": str(uuid.uuid4()),
-        "convocatoria_id": payload.convocatoria_id,
-        "propuesta_id": payload.propuesta_id,
-        "terna_id": payload.terna_id,
-        "estado": "Abierta",
+        "convocatoria_id": convocatoria_id,
+        "propuesta_id": propuesta_id,
+        "terna_id": terna_id,
+        "estado": estado_inicial,  # "Pendiente" o "Abierta"
         "puntajes": promedio,
         "puntaje_criterios": round(total_of, 2),
         "bono_priorizacion": bono,
@@ -502,11 +530,175 @@ async def crear_eval_colectiva(payload: EvalColectivaIn, user: dict = Depends(re
         "observacion_consolidada": "",
         "individuales_relacionadas": [ev["id"] for ev in individuales],
         "created_at": now_iso(),
+        "auto_generada": True,
     }
     await db.evaluaciones_colectivas.insert_one(doc)
     doc.pop("_id", None)
+    return doc
+
+
+async def _auto_generate_colectivas_after_finalizar(db, ev: dict):
+    """Auto-crea colectivas en estado 'Pendiente' cuando todos los integrantes de la(s)
+    terna(s) a la(s) que pertenece el jurado finalizan sus individuales de esa propuesta.
+    Idempotente (si ya existe la colectiva, no hace nada).
+    """
+    jurado_id = ev.get("jurado_id"); propuesta_id = ev.get("propuesta_id")
+    convocatoria_id = ev.get("convocatoria_id")
+    if not (jurado_id and propuesta_id and convocatoria_id):
+        return
+    # Buscar las ternas del jurado en esa convocatoria
+    ternas = await db.ternas.find({
+        "convocatoria_id": convocatoria_id,
+        "integrantes.jurado_id": jurado_id,
+    }, {"_id": 0}).to_list(20)
+    for terna in ternas:
+        miembros = [m.get("jurado_id") for m in (terna.get("integrantes") or []) if m.get("jurado_id")]
+        if not miembros:
+            continue
+        # ¿Tienen todos los miembros una individual Finalizada/Firmada para esa propuesta?
+        cnt = await db.evaluaciones_individuales.count_documents({
+            "convocatoria_id": convocatoria_id,
+            "propuesta_id": propuesta_id,
+            "jurado_id": {"$in": miembros},
+            "estado": {"$in": ["Finalizada", "Firmada"]},
+            "etapa": {"$ne": "colectiva"},
+        })
+        if cnt < len(miembros):
+            continue  # aún falta algún integrante
+        # Materializar (idempotente)
+        await _materialize_colectiva(db, convocatoria_id, propuesta_id, terna["id"], estado_inicial="Pendiente")
+
+
+@router.post("/evaluaciones-colectivas")
+async def crear_eval_colectiva(payload: EvalColectivaIn, user: dict = Depends(require_roles("admin_general", "admin_convocatoria", "jurado"))):
+    db = get_db()
+    estado = payload.estado_inicial if user.get("role") in ("admin_general", "admin_convocatoria") else "Abierta"
+    doc = await _materialize_colectiva(db, payload.convocatoria_id, payload.propuesta_id, payload.terna_id, estado_inicial=estado)
     await audit(user, "create", "evaluaciones_colectivas", doc["id"])
     return doc
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Habilitación / deshabilitación de colectivas (control del admin)
+# ─────────────────────────────────────────────────────────────────────────────
+@router.post("/evaluaciones-colectivas/{eid}/habilitar")
+async def habilitar_colectiva(eid: str, user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    """Admin habilita una colectiva pasándola de 'Pendiente' a 'Abierta' para que la terna la trabaje."""
+    db = get_db()
+    ev = await db.evaluaciones_colectivas.find_one({"id": eid})
+    if not ev:
+        raise HTTPException(status_code=404, detail="Colectiva no encontrada")
+    if ev.get("estado") != "Pendiente":
+        raise HTTPException(status_code=400, detail=f"Solo se habilita una colectiva en estado 'Pendiente' (actual: {ev.get('estado')})")
+    await db.evaluaciones_colectivas.update_one({"id": eid}, {"$set": {"estado": "Abierta", "habilitada_at": now_iso(), "habilitada_por": user.get("username") or user.get("email")}})
+    await audit(user, "habilitar", "evaluaciones_colectivas", eid)
+    return {"ok": True, "estado": "Abierta"}
+
+
+@router.post("/evaluaciones-colectivas/{eid}/deshabilitar")
+async def deshabilitar_colectiva(eid: str, user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    """Admin deshabilita una colectiva (Abierta → Pendiente). Solo si NO tiene avance guardado."""
+    db = get_db()
+    ev = await db.evaluaciones_colectivas.find_one({"id": eid})
+    if not ev:
+        raise HTTPException(status_code=404, detail="Colectiva no encontrada")
+    if ev.get("estado") not in ("Abierta", "En proceso", "Reabierta"):
+        raise HTTPException(status_code=400, detail=f"Solo se deshabilita una colectiva en estado 'Abierta' (actual: {ev.get('estado')})")
+    tiene_obs = bool((ev.get("observacion_consolidada") or "").strip())
+    # tiene "avance" si ya cambió puntajes manualmente (distinto al promedio inicial) o agregó observación
+    if tiene_obs:
+        raise HTTPException(status_code=400, detail="No se puede deshabilitar: la colectiva ya tiene observación consolidada. Reabra/anule primero o haga reset desde la vista del registro.")
+    await db.evaluaciones_colectivas.update_one({"id": eid}, {"$set": {"estado": "Pendiente", "deshabilitada_at": now_iso(), "deshabilitada_por": user.get("username") or user.get("email")}})
+    await audit(user, "deshabilitar", "evaluaciones_colectivas", eid)
+    return {"ok": True, "estado": "Pendiente"}
+
+
+class TernaColectivasBatchIn(BaseModel):
+    terna_id: str
+    convocatoria_id: str
+
+
+@router.post("/ternas/colectivas/habilitar")
+async def habilitar_colectivas_por_terna(payload: TernaColectivasBatchIn, user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    """Habilita TODAS las colectivas Pendientes de una terna (Pendiente → Abierta)."""
+    db = get_db()
+    result = await db.evaluaciones_colectivas.update_many(
+        {"terna_id": payload.terna_id, "convocatoria_id": payload.convocatoria_id, "estado": "Pendiente"},
+        {"$set": {"estado": "Abierta", "habilitada_at": now_iso(), "habilitada_por": user.get("username") or user.get("email")}}
+    )
+    await audit(user, "habilitar_batch", "evaluaciones_colectivas", payload.terna_id, detalle=f"habilitadas={result.modified_count}")
+    return {"ok": True, "habilitadas": result.modified_count}
+
+
+@router.post("/ternas/colectivas/deshabilitar")
+async def deshabilitar_colectivas_por_terna(payload: TernaColectivasBatchIn, user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    """Deshabilita TODAS las colectivas Abiertas SIN observación de una terna (Abierta → Pendiente)."""
+    db = get_db()
+    cur = db.evaluaciones_colectivas.find({
+        "terna_id": payload.terna_id, "convocatoria_id": payload.convocatoria_id,
+        "estado": {"$in": ["Abierta", "Reabierta"]}
+    })
+    ids_a_deshabilitar = []
+    skipped = 0
+    async for ev in cur:
+        if (ev.get("observacion_consolidada") or "").strip():
+            skipped += 1
+            continue
+        ids_a_deshabilitar.append(ev["id"])
+    if ids_a_deshabilitar:
+        await db.evaluaciones_colectivas.update_many(
+            {"id": {"$in": ids_a_deshabilitar}},
+            {"$set": {"estado": "Pendiente", "deshabilitada_at": now_iso(), "deshabilitada_por": user.get("username") or user.get("email")}}
+        )
+    await audit(user, "deshabilitar_batch", "evaluaciones_colectivas", payload.terna_id,
+                detalle=f"deshabilitadas={len(ids_a_deshabilitar)} skipped_con_avance={skipped}")
+    return {"ok": True, "deshabilitadas": len(ids_a_deshabilitar), "saltadas_con_avance": skipped}
+
+
+class GenerarPendientesIn(BaseModel):
+    convocatoria_id: str
+    terna_id: Optional[str] = None
+
+
+@router.post("/evaluaciones-colectivas/generar-pendientes")
+async def generar_colectivas_pendientes(payload: GenerarPendientesIn, user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    """Reconcilia: para cada (propuesta, terna) cuyas individuales estén todas
+    Finalizada/Firmada y no exista colectiva, crea una en estado 'Pendiente'."""
+    db = get_db()
+    q_t = {"convocatoria_id": payload.convocatoria_id}
+    if payload.terna_id:
+        q_t["id"] = payload.terna_id
+    ternas = await db.ternas.find(q_t, {"_id": 0}).to_list(2000)
+    creadas = 0
+    revisadas = 0
+    for terna in ternas:
+        miembros = [m.get("jurado_id") for m in (terna.get("integrantes") or []) if m.get("jurado_id")]
+        if not miembros:
+            continue
+        # Propuestas evaluadas por algún miembro de la terna
+        prop_ids = await db.evaluaciones_individuales.distinct("propuesta_id", {
+            "convocatoria_id": payload.convocatoria_id,
+            "jurado_id": {"$in": miembros},
+            "etapa": {"$ne": "colectiva"},
+        })
+        for pid in prop_ids:
+            revisadas += 1
+            cnt = await db.evaluaciones_individuales.count_documents({
+                "convocatoria_id": payload.convocatoria_id, "propuesta_id": pid,
+                "jurado_id": {"$in": miembros},
+                "estado": {"$in": ["Finalizada", "Firmada"]},
+                "etapa": {"$ne": "colectiva"},
+            })
+            if cnt < len(miembros):
+                continue
+            existing = await db.evaluaciones_colectivas.find_one({"propuesta_id": pid, "terna_id": terna["id"]}, {"_id": 0, "id": 1})
+            if existing:
+                continue
+            await _materialize_colectiva(db, payload.convocatoria_id, pid, terna["id"], estado_inicial="Pendiente")
+            creadas += 1
+    await audit(user, "generar_pendientes", "evaluaciones_colectivas",
+                payload.terna_id or payload.convocatoria_id, detalle=f"creadas={creadas} revisadas={revisadas}")
+    return {"ok": True, "creadas": creadas, "revisadas": revisadas}
 
 
 @router.post("/evaluaciones-colectivas/{eid}/iniciar-modalidad-nueva")

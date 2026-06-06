@@ -9,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, UsersRound, Pencil, Trash2, Download, Upload, Search, Loader2 } from "lucide-react";
+import { Plus, UsersRound, Pencil, Trash2, Download, Upload, Search, Loader2, Sparkles, Lock, Unlock } from "lucide-react";
 import { TID } from "@/constants/testIds";
 
 const EMPTY_FORM = { nombre: "", tipo: "Terna", integrantes: [] };
@@ -28,7 +28,57 @@ export default function Ternas() {
   const [f, setF] = useState(EMPTY_FORM);
   const [juradoSearch, setJuradoSearch] = useState("");
 
+  const [colectivasByTerna, setColectivasByTerna] = useState({}); // {terna_id: {pendientes, abiertas, cerradas, total}}
+  const [busyTernaCol, setBusyTernaCol] = useState(null);
+
   const canEdit = user?.role === "admin_general" || user?.role === "admin_convocatoria";
+
+  const loadColectivasStats = async () => {
+    if (!activeConvocatoriaId) return;
+    try {
+      const r = await api.get(`/evaluaciones-colectivas?convocatoria_id=${activeConvocatoriaId}`);
+      const stats = {};
+      (r.data || []).forEach((c) => {
+        const t = c.terna_id;
+        if (!stats[t]) stats[t] = { pendientes: 0, abiertas: 0, cerradas: 0, total: 0 };
+        stats[t].total += 1;
+        if (c.estado === "Pendiente") stats[t].pendientes += 1;
+        else if (["Abierta", "Reabierta", "En proceso"].includes(c.estado)) stats[t].abiertas += 1;
+        else if (["Cerrada", "Firmada"].includes(c.estado)) stats[t].cerradas += 1;
+      });
+      setColectivasByTerna(stats);
+    } catch (_) { /* noop */ }
+  };
+
+  const generarPendientesGlobal = async () => {
+    if (!activeConvocatoriaId || !window.confirm("¿Generar todas las colectivas pendientes para las ternas que ya completaron sus individuales?")) return;
+    try {
+      const r = await api.post("/evaluaciones-colectivas/generar-pendientes", { convocatoria_id: activeConvocatoriaId });
+      toast.success(`${r.data.creadas} colectivas generadas (revisadas: ${r.data.revisadas})`);
+      await loadColectivasStats();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const habilitarColectivasTerna = async (terna) => {
+    setBusyTernaCol(terna.id);
+    try {
+      const r = await api.post("/ternas/colectivas/habilitar", { convocatoria_id: activeConvocatoriaId, terna_id: terna.id });
+      toast.success(`${r.data.habilitadas} colectivas habilitadas para ${terna.codigo}`);
+      await loadColectivasStats();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setBusyTernaCol(null); }
+  };
+
+  const deshabilitarColectivasTerna = async (terna) => {
+    if (!window.confirm(`¿Deshabilitar todas las colectivas Abiertas SIN avance de la terna ${terna.codigo}? Las que ya tengan observación NO se tocan.`)) return;
+    setBusyTernaCol(terna.id);
+    try {
+      const r = await api.post("/ternas/colectivas/deshabilitar", { convocatoria_id: activeConvocatoriaId, terna_id: terna.id });
+      toast.success(`${r.data.deshabilitadas} deshabilitadas · ${r.data.saltadas_con_avance} saltadas (con avance)`);
+      await loadColectivasStats();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setBusyTernaCol(null); }
+  };
 
   const load = async () => {
     if (!activeConvocatoriaId) return;
@@ -46,6 +96,7 @@ export default function Ternas() {
       } catch (_) { cov[terna.id] = { subregiones: [], propuestas_count: 0 }; }
     }));
     setCoberturas(cov);
+    await loadColectivasStats();
   };
   useEffect(() => { load(); }, [activeConvocatoriaId]);
 
@@ -140,6 +191,9 @@ export default function Ternas() {
           <div className="flex items-center gap-2">
             {canEdit && (
               <>
+                <Button variant="outline" className="rounded-sm gap-2 text-[#5B21B6] border-[#DDD6FE] hover:bg-[#F5F3FF]" onClick={generarPendientesGlobal} data-testid="generar-colectivas-pendientes-btn" title="Crea colectivas en estado 'Pendiente' para ternas que ya finalizaron sus individuales">
+                  <Sparkles className="w-4 h-4" /> Generar colectivas pendientes
+                </Button>
                 <Button variant="outline" className="rounded-sm gap-2" onClick={() => downloadFile(`/ternas-template?convocatoria_id=${activeConvocatoriaId}`, "plantilla_ternas.xlsx").catch((e) => toast.error(e.message))} data-testid="terna-template-btn">
                   <Download className="w-4 h-4" /> Plantilla
                 </Button>
@@ -193,6 +247,48 @@ export default function Ternas() {
               })}
             </div>
             <div className="mt-4 pt-3 border-t border-border space-y-2">
+              {(() => {
+                const cstats = colectivasByTerna[t.id];
+                if (!cstats || !cstats.total) return null;
+                return (
+                  <div className="flex flex-wrap items-center gap-1.5 text-[10.5px]" data-testid={`terna-col-stats-${t.codigo}`}>
+                    <span className="text-muted-foreground uppercase tracking-wider">Colectivas:</span>
+                    {cstats.pendientes > 0 && (
+                      <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 font-semibold">{cstats.pendientes} pendientes</span>
+                    )}
+                    {cstats.abiertas > 0 && (
+                      <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 font-semibold">{cstats.abiertas} abiertas</span>
+                    )}
+                    {cstats.cerradas > 0 && (
+                      <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-800 font-semibold">{cstats.cerradas} cerradas</span>
+                    )}
+                  </div>
+                );
+              })()}
+              {canEdit && colectivasByTerna[t.id]?.total > 0 && (
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    size="sm" variant="outline"
+                    className="rounded-sm gap-1.5 text-[12px] text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+                    onClick={() => habilitarColectivasTerna(t)}
+                    disabled={busyTernaCol === t.id || !(colectivasByTerna[t.id]?.pendientes > 0)}
+                    data-testid={`terna-col-habilitar-${t.codigo}`}
+                    title="Pasa todas las colectivas pendientes a 'Abierta'"
+                  >
+                    <Unlock className="w-3.5 h-3.5" /> Habilitar ({colectivasByTerna[t.id]?.pendientes || 0})
+                  </Button>
+                  <Button
+                    size="sm" variant="outline"
+                    className="rounded-sm gap-1.5 text-[12px] text-amber-700 border-amber-200 hover:bg-amber-50"
+                    onClick={() => deshabilitarColectivasTerna(t)}
+                    disabled={busyTernaCol === t.id || !(colectivasByTerna[t.id]?.abiertas > 0)}
+                    data-testid={`terna-col-deshabilitar-${t.codigo}`}
+                    title="Vuelve a 'Pendiente' las que aún no tengan observación consolidada"
+                  >
+                    <Lock className="w-3.5 h-3.5" /> Deshabilitar ({colectivasByTerna[t.id]?.abiertas || 0})
+                  </Button>
+                </div>
+              )}
               {canEdit && (
                 <div className="grid grid-cols-2 gap-2">
                   <Button size="sm" variant="outline" className="rounded-sm gap-1.5 text-[12px]" onClick={() => openEdit(t)} data-testid={`terna-edit-${t.codigo}`}>

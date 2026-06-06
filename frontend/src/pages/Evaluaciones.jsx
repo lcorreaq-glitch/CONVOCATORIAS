@@ -1,13 +1,13 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { api } from "@/lib/api";
+import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader, { Badge, estadoTone, EmptyState } from "@/components/PageHeader";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  ClipboardCheck, ArrowRight, Clock, CheckCircle2, Lock, Hourglass, Search,
+  ClipboardCheck, ArrowRight, Clock, CheckCircle2, Lock, Unlock, Hourglass, Search,
   Sparkles, AlertCircle, Target, TrendingUp, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -236,6 +236,18 @@ export default function Evaluaciones() {
             isJurado={isJurado}
             isAdmin={isAdmin}
             onDelete={(e) => deleteEval(e, "colectiva")}
+            onToggleColectiva={async (ev) => {
+              try {
+                const action = ev.estado === "Pendiente" ? "habilitar" : "deshabilitar";
+                await api.post(`/evaluaciones-colectivas/${ev.id}/${action}`);
+                toast.success(action === "habilitar" ? "Colectiva habilitada" : "Colectiva deshabilitada");
+                // refrescar
+                const urlCol = isJurado
+                  ? `/evaluaciones-colectivas?convocatoria_id=${activeConvocatoriaId}&mias=true`
+                  : `/evaluaciones-colectivas?convocatoria_id=${activeConvocatoriaId}`;
+                api.get(urlCol).then((r) => setColectivas(r.data));
+              } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+            }}
             emptyHint={isJurado ? "Aún no tienes deliberaciones colectivas asignadas." : "Asigna propuestas a ternas para iniciar la deliberación colectiva."}
           />
         </TabsContent>
@@ -357,7 +369,7 @@ function EvalTable({ evaluaciones, isJurado, isAdmin, propMap, jurMap, tipo, emp
   );
 }
 
-function EvalTableColectiva({ evaluaciones, propMap, ternaMap, isJurado, isAdmin, emptyHint, onDelete }) {
+function EvalTableColectiva({ evaluaciones, propMap, ternaMap, isJurado, isAdmin, emptyHint, onDelete, onToggleColectiva }) {
   if (!evaluaciones.length) {
     return <div className="border border-dashed border-border rounded-lg p-12">
       <EmptyState title="Sin resultados" hint={emptyHint} icon={Sparkles} />
@@ -386,10 +398,35 @@ function EvalTableColectiva({ evaluaciones, propMap, ternaMap, isJurado, isAdmin
                 <td><EstadoBadge estado={e.estado} /></td>
                 <td className="font-mono tabular-nums">{e.puntaje_final ?? 0} <span className="text-muted-foreground">/ 100</span></td>
                 <td className="text-right whitespace-nowrap">
-                  <Link to={`/evaluaciones/colectiva/${e.id}`}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-sm text-[11px] font-semibold bg-[#14776A] text-white hover:bg-[#0F5E54] transition-colors">
-                    {PENDIENTE_STATES.includes(e.estado) ? "Continuar" : "Abrir"} <ArrowRight className="w-3 h-3" />
-                  </Link>
+                  {e.estado === "Pendiente" ? (
+                    isAdmin ? (
+                      <button
+                        onClick={() => onToggleColectiva && onToggleColectiva(e)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-sm text-[11px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                        data-testid={`eval-col-habilitar-${e.id}`}
+                        title="Habilita esta colectiva para que la terna la abra"
+                      >
+                        <Unlock className="w-3 h-3" /> Habilitar
+                      </button>
+                    ) : (
+                      <span className="text-[11px] text-muted-foreground italic">Pendiente de habilitación</span>
+                    )
+                  ) : (
+                    <Link to={`/evaluaciones/colectiva/${e.id}`}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-sm text-[11px] font-semibold bg-[#14776A] text-white hover:bg-[#0F5E54] transition-colors">
+                      {PENDIENTE_STATES.includes(e.estado) ? "Continuar" : "Abrir"} <ArrowRight className="w-3 h-3" />
+                    </Link>
+                  )}
+                  {isAdmin && ["Abierta", "Reabierta"].includes(e.estado) && !(e.observacion_consolidada || "").trim() && (
+                    <button
+                      onClick={() => onToggleColectiva && onToggleColectiva(e)}
+                      className="ml-1 inline-flex items-center gap-1 px-2 py-1 rounded-sm text-[11px] font-semibold text-amber-700 border border-amber-200 hover:bg-amber-50"
+                      data-testid={`eval-col-deshabilitar-${e.id}`}
+                      title="Volver a estado Pendiente (solo si no tiene observación)"
+                    >
+                      <Lock className="w-3 h-3" />
+                    </button>
+                  )}
                   {isAdmin && (
                     <button onClick={() => onDelete(e)} className="ml-1 text-muted-foreground hover:text-red-600 p-1" data-testid={`eval-col-delete-${e.id}`} title="Eliminar evaluación colectiva"><Trash2 className="w-3.5 h-3.5 inline" /></button>
                   )}
