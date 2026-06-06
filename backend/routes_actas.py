@@ -518,9 +518,23 @@ async def list_actas_pendientes(convocatoria_id: str, user: dict = Depends(get_c
             estado = "Falta firma terna"
         else:
             estado = "Pendiente"
+        # Subregiones derivadas: unión única de las subregiones de las propuestas
+        # que esta terna realmente evaluó (no la principal cargada en la terna).
+        subs_derivadas = sorted({
+            (props_map.get(e.get("propuesta_id")) or {}).get("subregion") or
+            (props_map.get(e.get("propuesta_id")) or {}).get("territorio")
+            for e in evs_col
+            if (props_map.get(e.get("propuesta_id")) or {}).get("subregion")
+            or (props_map.get(e.get("propuesta_id")) or {}).get("territorio")
+        })
+        if not subs_derivadas:
+            primaria = t.get("subregion") or t.get("territorio")
+            subs_derivadas = [primaria] if primaria else []
         colectivas.append({
             "terna_id": t["id"], "terna_codigo": t["codigo"], "terna_nombre": t.get("nombre"),
-            "subregion": t.get("subregion"), "integrantes": len(integrantes),
+            "subregion": ", ".join(subs_derivadas) if subs_derivadas else (t.get("subregion") or t.get("territorio")),
+            "subregiones": subs_derivadas,
+            "integrantes": len(integrantes),
             "integrantes_ids": [i.get("jurado_id") for i in integrantes if i.get("jurado_id")],
             "total": total, "cerradas": cerradas, "firmas": firmas_completas,
             "estado": estado, "porcentaje": round((cerradas / total) * 100) if total else 0,
@@ -1092,6 +1106,17 @@ async def acta_colectiva_terna(terna_id: str, user: dict = Depends(get_current_u
     propuestas_ids = list({e["propuesta_id"] for e in evs_col})
     propuestas = await db.propuestas.find({"id": {"$in": propuestas_ids}}, {"_id": 0}).to_list(2000)
     pmap = {p["id"]: p for p in propuestas}
+
+    # Sobrescribir subregión del contexto con las DERIVADAS de las propuestas que evaluó la terna
+    # (puede cubrir múltiples subregiones; coincide con lo que ve el admin en /actas).
+    subs_derivadas = sorted({
+        (p.get("subregion") or p.get("territorio") or "").strip()
+        for p in propuestas
+        if (p.get("subregion") or p.get("territorio"))
+    })
+    if subs_derivadas:
+        ctx["subregion"] = ", ".join(subs_derivadas)
+        ctx["terna_subregion"] = ctx["subregion"]
 
     rows = []
     for i, e in enumerate(evs_col, 1):
