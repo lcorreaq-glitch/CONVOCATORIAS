@@ -259,7 +259,9 @@ async def get_ranking(rid: str, user: dict = Depends(get_current_user)):
 
 @router.get("/rankings/{rid}/excel")
 async def export_ranking_excel(rid: str, user: dict = Depends(get_current_user)):
-    """Descarga el ranking como Excel con una hoja por grupo (línea/subregión/etc)."""
+    """Descarga el ranking como Excel con una hoja por grupo (línea/subregión/etc).
+    Incluye al final una columna por cada criterio de desempate activo, con su valor real
+    (fecha+hora de radicación, puntajes diferenciales, etc.)."""
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment
     from io import BytesIO
@@ -268,14 +270,66 @@ async def export_ranking_excel(rid: str, user: dict = Depends(get_current_user))
     rk = await db.rankings.find_one({"id": rid}, {"_id": 0})
     if not rk:
         raise HTTPException(status_code=404, detail="Ranking no encontrado")
+    cid = rk.get("convocatoria_id")
+    # Cargar desempates ordenados + criterios para mostrar diferenciales reales
+    desempates = await db.desempates.find({"convocatoria_id": cid, "activo": True}, {"_id": 0}).sort("orden", 1).to_list(50)
+    criterios = await db.criterios.find({"convocatoria_id": cid}, {"_id": 0}).to_list(200)
+    crit_by_id = {c["id"]: c for c in criterios}
+    crit_by_nombre = {(c.get("nombre") or "").strip().lower(): c for c in criterios}
+    # Mapa propuesta_id -> (propuesta, puntajes_diferenciales_promedio)
+    propuestas = {p["id"]: p async for p in db.propuestas.find({"convocatoria_id": cid})}
+    # Pre-calcular promedio de diferenciales por propuesta (de las evaluaciones individuales finalizadas)
+    diff_avg = {}  # propuesta_id -> {crit_id: avg}
+    async for ev in db.evaluaciones_individuales.find({
+        "convocatoria_id": cid, "estado": {"$in": ["Finalizada", "Firmada"]}, "etapa": {"$ne": "colectiva"},
+    }, {"_id": 0, "propuesta_id": 1, "puntajes": 1}):
+        d = diff_avg.setdefault(ev["propuesta_id"], {"_sum": {}, "_n": {}})
+        for c in criterios:
+            if c.get("diferencial"):
+                v = (ev.get("puntajes") or {}).get(c["id"])
+                try: v = float(v)
+                except Exception: continue
+                d["_sum"][c["id"]] = d["_sum"].get(c["id"], 0) + v
+                d["_n"][c["id"]] = d["_n"].get(c["id"], 0) + 1
+
+    def _desempate_value(propuesta_id: str, desempate: dict):
+        p = propuestas.get(propuesta_id) or {}
+        d = p.get("datos") or {}
+        campo = desempate.get("campo") or ""
+        if campo == "fecha_radicacion":
+            f = (d.get("fecha_radicacion") or "").split("T")[0]
+            h = d.get("hora_radicacion") or ""
+            return f"{f} {h}".strip() if (f or h) else "—"
+        if campo == "hora_radicacion":
+            return d.get("hora_radicacion") or "—"
+        if campo == "sorteo":
+            return "(sorteo)"
+        if campo == "criterio":
+            nombre = (desempate.get("criterio_nombre") or "").strip().lower()
+            c = crit_by_nombre.get(nombre)
+            if c:
+                stats = diff_avg.get(propuesta_id, {})
+                s = stats.get("_sum", {}).get(c["id"], 0)
+                n = stats.get("_n", {}).get(c["id"], 0)
+                return round(s / n, 2) if n else 0
+            return "—"
+        # Fallback a leer del campo plano en datos
+        return d.get(campo) or "—"
+
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
     header_fill = PatternFill("solid", fgColor="14776A")
     header_font = Font(bold=True, color="FFFFFF")
-    headers = ["#", "Código", "Nombre propuesta", "Organización", "Municipio",
-               "Subregión", "Puntaje total", "Bono priorización", "Puntaje final",
-               "Puntaje diferencial", "Fuente", "Estado", "Cupos", "Desempate aplicado"]
-    # Hoja Resumen
+    base_headers = ["#", "Código", "Nombre propuesta", "Organización", "Municipio",
+                    "Subregión", "Puntaje total", "Bono priorización", "Puntaje final",
+                    "Puntaje diferencial", "Fuente", "Estado", "Cupos", "Desempate aplicado"]
+    # Columnas de desempate (dinámicas)
+    desempate_headers = []
+    for de in desempates:
+        nombre = de.get("nombre") or de.get("campo") or f"Desempate {de.get('orden','')}"
+        desempate_headers.append(f"#{de.get('orden','')} · {nombre[:40]}")
+    headers = base_headers + desempate_headers
+
     wsr = wb.create_sheet("Resumen")
     wsr.append(["Convocatoria", rk.get("convocatoria_id", "")])
     wsr.append(["Modo", rk.get("modo", "")])
@@ -286,9 +340,15 @@ async def export_ranking_excel(rid: str, user: dict = Depends(get_current_user))
         wsr.append([])
         wsr.append(["Cobertura: con puntaje", cob.get("con_puntaje", 0), "/", cob.get("total_propuestas", 0)])
         wsr.append(["Sin puntaje", cob.get("sin_puntaje", 0)])
+    # Listar criterios de desempate en hoja Resumen
+    if desempates:
+        wsr.append([])
+        wsr.append(["CRITERIOS DE DESEMPATE ACTIVOS (en orden)"])
+        for de in desempates:
+            wsr.append([f"#{de.get('orden','')}", de.get("nombre", "—"),
+                        f"campo: {de.get('campo','—')}", f"tipo: {de.get('tipo_comparacion','—')}"])
     for c in wsr["A"]:
         c.font = Font(bold=True)
-    # Hoja por grupo
     for g in rk.get("grupos", []):
         title = (g.get("grupo") or "Sin grupo")[:31] or "Grupo"
         ws = wb.create_sheet(title)
@@ -297,7 +357,7 @@ async def export_ranking_excel(rid: str, user: dict = Depends(get_current_user))
             cell.fill = header_fill; cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center")
         for idx, p in enumerate(g.get("items", []), 1):
-            ws.append([
+            base_row = [
                 idx, p.get("codigo"), p.get("nombre"), p.get("organizacion"),
                 p.get("municipio"), p.get("subregion") or g.get("grupo"),
                 p.get("puntaje_total"), p.get("bono_priorizacion") or 0,
@@ -305,10 +365,16 @@ async def export_ranking_excel(rid: str, user: dict = Depends(get_current_user))
                 p.get("puntaje_diferencial") or 0,
                 p.get("fuente") or "—", p.get("estado") or "—",
                 p.get("cupo") or "", p.get("regla_desempate") or "",
-            ])
-        # ancho
-        for col_idx, h in enumerate(headers, 1):
-            ws.column_dimensions[chr(64 + col_idx) if col_idx <= 26 else "AA"].width = max(12, len(h) + 2)
+            ]
+            # Añadir valores de desempate
+            pid = p.get("propuesta_id") or p.get("id")
+            for de in desempates:
+                base_row.append(_desempate_value(pid, de))
+            ws.append(base_row)
+        # ancho razonable
+        for col_idx in range(1, len(headers) + 1):
+            letter = openpyxl.utils.get_column_letter(col_idx)
+            ws.column_dimensions[letter].width = max(14, len(headers[col_idx - 1]) + 2)
     buf = BytesIO()
     wb.save(buf); buf.seek(0)
     return StreamingResponse(
