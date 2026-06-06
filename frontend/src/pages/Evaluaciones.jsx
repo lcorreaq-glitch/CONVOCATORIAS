@@ -20,6 +20,7 @@ export default function Evaluaciones() {
   const isAdmin = user?.role === "admin_general" || user?.role === "admin_convocatoria";
   const [individuales, setIndividuales] = useState([]);
   const [colectivas, setColectivas] = useState([]);
+  const [misV2, setMisV2] = useState([]); // V2 colectiva propias (para conteo de avance personal)
   const [propuestas, setPropuestas] = useState([]);
   const [jurados, setJurados] = useState([]);
   const [ternas, setTernas] = useState([]);
@@ -38,6 +39,16 @@ export default function Evaluaciones() {
         ? `/evaluaciones-colectivas?convocatoria_id=${activeConvocatoriaId}&mias=true`
         : `/evaluaciones-colectivas?convocatoria_id=${activeConvocatoriaId}`;
       api.get(urlCol).then((r) => { if (!cancelled) setColectivas(r.data); }).catch(() => { if (!cancelled) setColectivas([]); });
+      // Para el jurado: traer también sus V2 (etapa colectiva) para calcular el avance personal
+      if (isJurado) {
+        api.get(`/evaluaciones-individuales?convocatoria_id=${activeConvocatoriaId}&mias=true&incluir_v2_colectiva=true`)
+          .then((r) => {
+            if (cancelled) return;
+            const v2 = (r.data || []).filter((e) => e.etapa === "colectiva");
+            setMisV2(v2);
+          })
+          .catch(() => { if (!cancelled) setMisV2([]); });
+      }
     };
     loadAll();
     api.get(`/propuestas?convocatoria_id=${activeConvocatoriaId}`).then((r) => { if (!cancelled) setPropuestas(r.data); });
@@ -70,15 +81,25 @@ export default function Evaluaciones() {
   const counts = useMemo(() => {
     const indPend = individuales.filter((e) => PENDIENTE_STATES.includes(e.estado)).length;
     const indDone = individuales.filter((e) => TERMINADAS_STATES.includes(e.estado)).length;
-    const colPend = colectivas.filter((e) => PENDIENTE_STATES.includes(e.estado)).length;
-    const colDone = colectivas.filter((e) => TERMINADAS_STATES.includes(e.estado)).length;
+    // Conteo de COLECTIVAS para JURADO: el avance es PERSONAL (basado en su V2).
+    // - "Lista" = mi V2 está Finalizada/Firmada para la (propuesta, terna) de esa colectiva.
+    // - Para ADMIN: contamos por estado de la colectiva en sí (Cerrada/Firmada).
+    let colPend, colDone;
+    if (isJurado) {
+      const v2DoneSet = new Set(misV2.filter((v) => TERMINADAS_STATES.includes(v.estado)).map((v) => v.propuesta_id));
+      colDone = colectivas.filter((c) => v2DoneSet.has(c.propuesta_id)).length;
+      colPend = colectivas.length - colDone;
+    } else {
+      colPend = colectivas.filter((e) => PENDIENTE_STATES.includes(e.estado)).length;
+      colDone = colectivas.filter((e) => TERMINADAS_STATES.includes(e.estado)).length;
+    }
     return {
       indPend, indDone, indTotal: individuales.length,
       colPend, colDone, colTotal: colectivas.length,
       indPct: individuales.length ? Math.round((indDone / individuales.length) * 100) : 0,
       colPct: colectivas.length ? Math.round((colDone / colectivas.length) * 100) : 0,
     };
-  }, [individuales, colectivas]);
+  }, [individuales, colectivas, misV2, isJurado]);
 
   const filterEval = (list) => {
     let f = list;

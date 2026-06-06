@@ -395,10 +395,16 @@ async def _resolve_ds(db, ds: str, cid: str, user: dict) -> Any:
         cols = await db.evaluaciones_colectivas.find({
             "convocatoria_id": cid, "terna_id": {"$in": ternas_ids},
             "estado": {"$ne": "Pendiente"},  # Pendientes están ocultas para el jurado
-        }, {"_id": 0, "estado": 1}).to_list(2000)
+        }, {"_id": 0, "propuesta_id": 1, "estado": 1}).to_list(2000)
         total = len(cols)
-        cerradas = sum(1 for c in cols if c.get("estado") in ("Cerrada", "Firmada"))
-        abiertas = sum(1 for c in cols if c.get("estado") in ("Abierta", "Reabierta", "En proceso"))
+        # CONTEO PERSONAL: una colectiva está "lista" para este jurado si su V2 está Finalizada/Firmada.
+        my_v2 = await db.evaluaciones_individuales.find({
+            "convocatoria_id": cid, "jurado_id": my_jurado_id, "etapa": "colectiva",
+            "estado": {"$in": ["Finalizada", "Firmada"]},
+        }, {"_id": 0, "propuesta_id": 1}).to_list(500)
+        v2_done_props = {v["propuesta_id"] for v in my_v2}
+        cerradas = sum(1 for c in cols if c.get("propuesta_id") in v2_done_props)
+        abiertas = total - cerradas
         if ds == "mias_colectivas_asignadas": return {"value": total}
         if ds == "mias_colectivas_abiertas": return {"value": abiertas}
         if ds == "mias_colectivas_finalizadas": return {"value": cerradas}
@@ -638,6 +644,7 @@ async def mi_timeline(convocatoria_id: str, user: dict = Depends(get_current_use
     tiene_firma = bool((jur.get("datos") or {}).get("firma_url"))
 
     # Colectivas: contar las que pertenecen a las ternas del jurado (excluyendo Pendiente, que está oculta)
+    # AVANCE PERSONAL: una colectiva está "lista" cuando MI V2 (etapa=colectiva) está Finalizada/Firmada.
     ternas_del_jurado = [t["id"] for t in await db.ternas.find({
         "convocatoria_id": convocatoria_id, "integrantes.jurado_id": jurado_id
     }, {"_id": 0, "id": 1}).to_list(50)]
@@ -647,11 +654,17 @@ async def mi_timeline(convocatoria_id: str, user: dict = Depends(get_current_use
     if ternas_del_jurado:
         all_cols = await db.evaluaciones_colectivas.find({
             "convocatoria_id": convocatoria_id, "terna_id": {"$in": ternas_del_jurado}
-        }, {"_id": 0, "estado": 1}).to_list(2000)
+        }, {"_id": 0, "estado": 1, "propuesta_id": 1}).to_list(2000)
         col_pendientes_admin = sum(1 for c in all_cols if c.get("estado") == "Pendiente")
         visibles = [c for c in all_cols if c.get("estado") != "Pendiente"]
         col_total = len(visibles)
-        col_finalizadas = sum(1 for c in visibles if c.get("estado") in ("Cerrada", "Firmada"))
+        # Mis V2 finalizadas
+        my_v2_done = await db.evaluaciones_individuales.find({
+            "convocatoria_id": convocatoria_id, "jurado_id": jurado_id, "etapa": "colectiva",
+            "estado": {"$in": ["Finalizada", "Firmada"]},
+        }, {"_id": 0, "propuesta_id": 1}).to_list(500)
+        v2_done_props = {v["propuesta_id"] for v in my_v2_done}
+        col_finalizadas = sum(1 for c in visibles if c.get("propuesta_id") in v2_done_props)
 
     def phase(key, label, desc, status, counter=None, extra=None):
         return {"key": key, "label": label, "description": desc, "status": status,
