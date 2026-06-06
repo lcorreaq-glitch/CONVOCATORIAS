@@ -44,14 +44,18 @@ async def list_eval_individuales(convocatoria_id: Optional[str] = None,
                                  jurado_id: Optional[str] = None,
                                  propuesta_id: Optional[str] = None,
                                  mias: bool = False,
+                                 incluir_v2_colectiva: bool = False,
                                  user: dict = Depends(get_current_user)):
     db = get_db()
     q = {}
     if convocatoria_id: q["convocatoria_id"] = convocatoria_id
     if jurado_id: q["jurado_id"] = jurado_id
     if propuesta_id: q["propuesta_id"] = propuesta_id
+    # Por defecto excluir V2 de la etapa colectiva (esas se gestionan desde la vista de Colectivas).
+    # Ranking, actas, panel del jurado y conteos deben SOLO ver las V1 individuales reales.
+    if not incluir_v2_colectiva:
+        q["etapa"] = {"$ne": "colectiva"}
     if mias:
-        # Filtrar por jurado_id del usuario
         jurado = await db.jurados.find_one({"email": user["email"]})
         if not jurado:
             return []

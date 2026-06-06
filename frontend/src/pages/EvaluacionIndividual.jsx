@@ -121,15 +121,34 @@ export default function EvaluacionIndividual() {
       setEv(r.data);
       toast.success(finalize ? "Evaluación finalizada" : "Cambios guardados");
       // Si finalizó y es jurado, verificar si completó TODAS sus evaluaciones para celebrar + ir a firmar
-      if (finalize && isJurado) {
+      // IMPORTANTE: no celebrar si lo que acaba de finalizar es una V2 (etapa="colectiva"),
+      // porque eso es parte de la etapa colectiva, NO del ciclo individual.
+      if (finalize && isJurado && ev.etapa !== "colectiva") {
         try {
+          // No incluir V2 (etapa=colectiva) en este conteo — son parte del flujo colectivo.
           const myEvs = await api.get(`/evaluaciones-individuales?convocatoria_id=${ev.convocatoria_id}&jurado_id=${ev.jurado_id}`);
           const items = myEvs.data || [];
           const todasFinalizadas = items.length > 0 && items.every((e) => ["Finalizada", "Firmada"].includes(e.estado));
           if (todasFinalizadas) {
+            // Detectar si el jurado tiene colectivas pendientes/abiertas en su terna.
+            // Si las tiene, en lugar de invitarlo a firmar el acta, sugerirle continuar con la etapa colectiva.
+            try {
+              const cols = await api.get(`/evaluaciones-colectivas?convocatoria_id=${ev.convocatoria_id}&mias=true`);
+              const colPend = (cols.data || []).filter((c) => !["Cerrada", "Firmada"].includes(c.estado)).length;
+              if (colPend > 0) {
+                toast.success(`Etapa individual completa. Tienes ${colPend} colectivas pendientes con tu terna.`, { duration: 6000 });
+                navigate("/evaluaciones?tab=colectivas");
+                return;
+              }
+            } catch (_) { /* fallback: mostrar modal de firma */ }
             setShowCelebracion(true);
           }
         } catch (err) { console.warn("[EvaluacionIndividual] No se pudo verificar progreso global:", err?.message); }
+      }
+      // Si lo que finalizó es una V2 (etapa=colectiva), informar avance colectivo y volver a /evaluaciones?tab=colectivas
+      if (finalize && isJurado && ev.etapa === "colectiva") {
+        toast.success("V2 finalizada. Continúa con tus otras colectivas pendientes.", { duration: 5000 });
+        setTimeout(() => navigate("/evaluaciones?tab=colectivas"), 1200);
       }
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     setSaving(false);

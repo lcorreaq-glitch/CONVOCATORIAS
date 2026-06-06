@@ -60,6 +60,7 @@ async def _compute_propuesta_score(db, convocatoria_id: str, propuesta_id: str, 
     individuales = await db.evaluaciones_individuales.find({
         "propuesta_id": propuesta_id,
         "estado": {"$in": ["Finalizada", "Firmada"]},
+        "etapa": {"$ne": "colectiva"},  # Excluir V2 de la etapa colectiva (no son individuales reales)
     }).to_list(50)
     if not individuales:
         return {"puntaje_total": 0, "puntaje_diferencial": 0, "criterios": {}, "fuente": "ninguna"}
