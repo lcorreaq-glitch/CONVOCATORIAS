@@ -855,3 +855,10 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
   3. Auto-vincula `users.jurado_id` si faltaba.
 - ✅ **Validado e2e con curl**: PATCH /users → cambia los 3 campos (`users.username`, `users.email`, `jurados.email`). PATCH /jurados → cambia los 3. Auto-linking de `jurado_id` confirmado.
 
+
+**Extensión sync users↔jurados — nombre y teléfono** — Feb 2026:
+- ✅ `routes_users.py → update_user`: cuando cambia `name` y el user tiene `jurado_id`, propaga a `jurados.nombre`.
+- ✅ `routes_data.py → update_jurado`: cuando cambia `nombre`, propaga a `users.name` del user vinculado.
+- ℹ️ `telefono` solo existe en `jurados` (users no tiene ese campo); se persiste solo donde corresponde.
+- ✅ Validado e2e con curl: `User name: "Yicell González Pruebas" → Jurado.nombre sincronizado`; `Jurado.nombre: "Yicell González" → User.name sincronizado`.
+

@@ -468,24 +468,32 @@ async def create_jurado(payload: JuradoIn, user: dict = Depends(require_roles("a
 async def update_jurado(jid: str, payload: dict, user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
     db = get_db()
     payload.pop("id", None)
-    # Si cambia el email del jurado, sincronizar el user asociado (login)
-    existing = await db.jurados.find_one({"id": jid}, {"_id": 0, "email": 1})
+    existing = await db.jurados.find_one({"id": jid}, {"_id": 0, "email": 1, "nombre": 1, "telefono": 1})
+    # Buscar el user vinculado (por jurado_id o por email viejo)
+    old_email = (existing.get("email") or "").lower() if existing else ""
+    u = await db.users.find_one({"jurado_id": jid}) or (
+        await db.users.find_one({"email": old_email}) if old_email else None
+    )
+
+    # ── Sync de EMAIL ──
     new_email = (payload.get("email") or "").strip().lower()
-    if new_email and existing and new_email != (existing.get("email") or "").lower():
+    if new_email and existing and new_email != old_email:
         payload["email"] = new_email
-        old_email = (existing.get("email") or "").lower()
-        # Buscar el user vinculado primero por jurado_id, después por email viejo
-        u = await db.users.find_one({"jurado_id": jid}) or (
-            await db.users.find_one({"email": old_email}) if old_email else None
-        )
         if u:
             u_updates = {"email": new_email}
-            # Si el username era el email viejo, también se sincroniza
             if (u.get("username") or "").lower() == old_email:
                 u_updates["username"] = new_email
             if not u.get("jurado_id"):
                 u_updates["jurado_id"] = jid
             await db.users.update_one({"id": u["id"]}, {"$set": u_updates})
+
+    # ── Sync de NOMBRE ──
+    if "nombre" in payload and existing and payload["nombre"] != existing.get("nombre"):
+        if u:
+            await db.users.update_one({"id": u["id"]}, {"$set": {"name": payload["nombre"]}})
+
+    # (Telefono solo vive en jurados, no se replica a users — users no tiene ese campo.)
+
     await db.jurados.update_one({"id": jid}, {"$set": payload})
     await audit(user, "update", "jurados", jid, valor_nuevo=payload)
     return await db.jurados.find_one({"id": jid}, {"_id": 0})
