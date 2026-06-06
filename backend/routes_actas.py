@@ -281,6 +281,21 @@ def _build_ctx(conv: dict, jurado: dict = None, subregion: str = None, terna: di
     }
 
 
+def _sub_de_propuesta(p: dict):
+    """Devuelve la subregión real de la propuesta, normalizada a Title Case.
+    Las propuestas guardan la subregión en `datos.subregion` (a veces top-level)."""
+    if not p:
+        return None
+    d = p.get("datos") or {}
+    v = p.get("subregion") or d.get("subregion") or d.get("subregión") \
+        or p.get("territorio") or d.get("territorio")
+    if not v:
+        return None
+    s = str(v).strip()
+    # Normalización: "ORIENTE" → "Oriente". Mantiene la forma original si ya viene en case mixto.
+    return s.title() if s.isupper() else s
+
+
 def _doc_jurado(jurado: dict, default: str = "___________") -> str:
     """Extrae el número de documento del jurado probando llaves comunes y formatos."""
     if not jurado:
@@ -442,7 +457,7 @@ async def list_actas_pendientes(convocatoria_id: str, user: dict = Depends(get_c
     props_map = {
         p["id"]: p for p in await db.propuestas.find(
             {"convocatoria_id": convocatoria_id},
-            {"_id": 0, "id": 1, "subregion": 1, "territorio": 1}
+            {"_id": 0, "id": 1, "subregion": 1, "territorio": 1, "datos": 1}
         ).to_list(20000)
     }
 
@@ -457,11 +472,9 @@ async def list_actas_pendientes(convocatoria_id: str, user: dict = Depends(get_c
         # Subregiones derivadas: unión única de las subregiones de las propuestas
         # que este jurado evalúa. Fallback al campo personal solo si no hay propuestas.
         subregiones_derivadas = sorted({
-            (props_map.get(e.get("propuesta_id")) or {}).get("subregion") or
-            (props_map.get(e.get("propuesta_id")) or {}).get("territorio")
-            for e in evs
-            if (props_map.get(e.get("propuesta_id")) or {}).get("subregion")
-            or (props_map.get(e.get("propuesta_id")) or {}).get("territorio")
+            s for e in evs
+            for s in [_sub_de_propuesta(props_map.get(e.get("propuesta_id")))]
+            if s
         })
         if not subregiones_derivadas:
             # Fallback 1: subregiones de las ternas a las que pertenece el jurado
@@ -534,11 +547,9 @@ async def list_actas_pendientes(convocatoria_id: str, user: dict = Depends(get_c
         # Subregiones derivadas: unión única de las subregiones de las propuestas
         # que esta terna realmente evaluó (no la principal cargada en la terna).
         subs_derivadas = sorted({
-            (props_map.get(e.get("propuesta_id")) or {}).get("subregion") or
-            (props_map.get(e.get("propuesta_id")) or {}).get("territorio")
-            for e in evs_col
-            if (props_map.get(e.get("propuesta_id")) or {}).get("subregion")
-            or (props_map.get(e.get("propuesta_id")) or {}).get("territorio")
+            s for e in evs_col
+            for s in [_sub_de_propuesta(props_map.get(e.get("propuesta_id")))]
+            if s
         })
         if not subs_derivadas:
             primaria = t.get("subregion") or t.get("territorio")
@@ -1058,10 +1069,22 @@ async def acta_individual_jurado(jurado_id: str, user: dict = Depends(get_curren
     # Sobrescribir el contexto con las subregiones DERIVADAS de las propuestas evaluadas
     # (no usar el campo personal del jurado, que puede no reflejar lo que realmente evalúa).
     subregiones_derivadas = sorted({
-        (p.get("subregion") or p.get("territorio") or "").strip()
-        for p in propuestas
-        if (p.get("subregion") or p.get("territorio"))
+        s for p in propuestas
+        for s in [_sub_de_propuesta(p)]
+        if s
     })
+    if not subregiones_derivadas:
+        # Fallback: subregiones de las ternas a las que pertenece el jurado
+        subs_t = set()
+        for t in await db.ternas.find({
+            "convocatoria_id": jur["convocatoria_id"],
+            "integrantes.jurado_id": jurado_id
+        }, {"_id": 0, "subregion": 1, "territorio": 1, "subregiones": 1}).to_list(50):
+            if t.get("subregion"): subs_t.add(t["subregion"])
+            if t.get("territorio"): subs_t.add(t["territorio"])
+            for s in (t.get("subregiones") or []): subs_t.add(s)
+        if subs_t:
+            subregiones_derivadas = sorted(s for s in subs_t if s)
     if subregiones_derivadas:
         ctx["subregion"] = ", ".join(subregiones_derivadas)
         ctx["jurado_subregiones"] = ctx["subregion"]
@@ -1084,13 +1107,14 @@ async def acta_individual_jurado(jurado_id: str, user: dict = Depends(get_curren
         "documento": _doc_jurado(jur),
         "rol": "Jurado Evaluador",
         "firma_url": (jur.get("datos") or {}).get("firma_url"),
-        "subregion": ", ".join(jur.get("subregiones") or []),
+        "subregion": ", ".join(subregiones_derivadas) if subregiones_derivadas else ", ".join(jur.get("subregiones") or []),
     }]
     # Detectar si el acta tiene firma desactualizada por reaperturas posteriores
     invalidada = bool(((jur.get("datos") or {}).get("acta_invalidada_por_reapertura")))
     pdf = _build_pdf(tmpl, ctx, conv, headers, rows, firmantes, _get_branding(conv),
                      verificacion=await _build_verificacion(db, "individual", jur["convocatoria_id"], jurado_id,
-                                                            meta={"jurado_nombre": jur.get("nombre"), "subregiones": jur.get("subregiones"),
+                                                            meta={"jurado_nombre": jur.get("nombre"),
+                                                                  "subregiones": subregiones_derivadas or jur.get("subregiones"),
                                                                   "version_desactualizada": invalidada}),
                      watermark="VERSIÓN DESACTUALIZADA — REQUIERE RE-FIRMA" if invalidada else None)
     await audit(user, "generate_acta", "actas", jurado_id, detalle="individual_jurado")
