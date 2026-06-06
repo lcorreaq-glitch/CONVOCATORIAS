@@ -135,10 +135,29 @@ async def send_welcome_email(user_id: str, payload: WelcomePayload, request: Req
 
     branding_doc = await db.system_settings.find_one({"id": "global"}, {"_id": 0}) or {}
     product_name = (branding_doc.get("branding") or {}).get("product_name", "KRINOS")
+    entidad = (branding_doc.get("branding") or {}).get("entidad_nombre")
 
     # Si se provee password temporal, también actualizamos el hash
     if payload.password_temporal:
         await db.users.update_one({"id": user_id}, {"$set": {"password_hash": hash_password(payload.password_temporal)}})
+
+    # Rol legible para el cuerpo del correo
+    ROLE_LABELS = {
+        "admin_general": "Administrador General",
+        "admin_convocatoria": "Administrador de Convocatoria",
+        "supervisor": "Supervisor",
+        "jurado": "Jurado evaluador",
+        "invitado": "Invitado de Consulta",
+        "auditor": "Auditor",
+    }
+    rol_legible = ROLE_LABELS.get(u.get("role"), u.get("role"))
+
+    # Si tiene una sola convocatoria asignada (caso típico), la mostramos
+    conv = None
+    convs = u.get("convocatoria_roles") or []
+    if len(convs) == 1 and convs[0].get("convocatoria_id"):
+        conv = await db.convocatorias.find_one({"id": convs[0]["convocatoria_id"]},
+                                                {"_id": 0, "nombre": 1, "codigo": 1})
 
     html, text = render_welcome(
         u.get("name") or u["username"],
@@ -146,8 +165,13 @@ async def send_welcome_email(user_id: str, payload: WelcomePayload, request: Req
         payload.password_temporal,
         login_url,
         product_name,
+        convocatoria_nombre=(conv or {}).get("nombre"),
+        convocatoria_codigo=(conv or {}).get("codigo"),
+        rol_legible=rol_legible,
+        entidad=entidad,
     )
-    result = await send_email(u["email"], f"Bienvenido(a) a {product_name}", html, text_body=text)
+    subject_suffix = f" · {(conv or {}).get('codigo','')}".rstrip(" ·") if conv else ""
+    result = await send_email(u["email"], f"Bienvenido(a) a {product_name}{subject_suffix}", html, text_body=text)
     await log_email(u["email"], "Bienvenida", "welcome", result, user_id=u["id"])
     await audit(actor, "send_welcome", "users", u["id"],
                 detalle=f"provider={result.get('provider','?')} ok={result.get('ok')}")

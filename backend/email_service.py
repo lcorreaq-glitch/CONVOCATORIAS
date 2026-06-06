@@ -70,27 +70,100 @@ def _layout(body_html: str, product_name: str = "KRINOS") -> str:
 </body></html>"""
 
 
-def render_welcome(name: str, username: str, password: Optional[str], login_url: str, product_name: str = "KRINOS") -> tuple[str, str]:
+def render_welcome(name: str, username: str, password: Optional[str], login_url: str,
+                   product_name: str = "KRINOS",
+                   convocatoria_nombre: Optional[str] = None,
+                   convocatoria_codigo: Optional[str] = None,
+                   rol_legible: Optional[str] = None,
+                   entidad: Optional[str] = None,
+                   contact_email: str = "eleainnovacionsocial@gmail.com") -> tuple[str, str]:
+    """Email de bienvenida cálido + contextualizado a la convocatoria.
+
+    Si se provee `convocatoria_nombre/codigo`, se muestra un bloque destacado
+    indicando en qué proceso fue acreditado el usuario. Si no, cae al genérico.
+    """
+    # Saludo amable — solo primer nombre si name viene con varios
+    first_name = (name or "").strip().split(" ")[0] if name else ""
+    saludo = f"¡Hola {first_name}!" if first_name else "¡Hola!"
+
+    # Bloque institucional de la convocatoria
+    conv_block = ""
+    if convocatoria_nombre:
+        codigo_chip = (
+            f'<span style="display:inline-block;background:#0F5E54;color:#FFFFFF;'
+            f'font-family:Consolas,Menlo,monospace;font-size:11.5px;padding:2px 8px;'
+            f'border-radius:4px;margin-right:8px;letter-spacing:0.5px;font-weight:700;">'
+            f'{convocatoria_codigo}</span>' if convocatoria_codigo else ""
+        )
+        entidad_line = (
+            f'<div style="margin-top:6px;font-size:12.5px;color:#5E6878;">'
+            f'<strong>Entidad organizadora:</strong> {entidad}</div>' if entidad else ""
+        )
+        rol_line = (
+            f'<div style="margin-top:6px;font-size:12.5px;color:#5E6878;">'
+            f'<strong>Tu rol:</strong> {rol_legible}</div>' if rol_legible else ""
+        )
+        conv_block = f"""
+        <div style="margin:18px 0;background:#FFFFFF;border:1px solid #CDE7E1;border-left:4px solid #14776A;padding:16px 18px;border-radius:8px;">
+          <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:1.4px;color:#0F5E54;font-weight:700;margin-bottom:8px;">Convocatoria activa</div>
+          <div style="font-size:15px;font-weight:700;color:#1A1F2C;line-height:1.35;">{codigo_chip}{convocatoria_nombre}</div>
+          {entidad_line}
+          {rol_line}
+        </div>
+        """
+
     creds_block = ""
     if password:
         creds_block = f"""
-        <table style="margin:18px 0;background:#F0F7F5;border-left:4px solid #14776A;padding:16px 18px;border-radius:6px;font-family:'Courier New',monospace;font-size:13px;">
-          <tr><td><strong>Usuario:</strong> {username}</td></tr>
-          <tr><td><strong>Contraseña temporal:</strong> {password}</td></tr>
+        <div style="margin:16px 0 8px;font-size:12.5px;color:#3F4856;">
+          A continuación tus credenciales de acceso. <strong>Guárdalas en un lugar seguro</strong>:
+        </div>
+        <table style="margin:8px 0 6px;background:#F0F7F5;border-left:4px solid #14776A;padding:14px 18px;border-radius:6px;font-family:Consolas,Menlo,monospace;font-size:13px;">
+          <tr><td style="padding:2px 0;"><strong>Usuario:</strong> {username}</td></tr>
+          <tr><td style="padding:2px 0;"><strong>Contraseña temporal:</strong> {password}</td></tr>
         </table>
-        <p style="font-size:12.5px;color:#5E6878;">Por seguridad, cambia esta contraseña en tu primer inicio de sesión.</p>
+        <p style="font-size:12px;color:#92400E;background:#FFFBEB;border:1px solid #FDE68A;padding:8px 12px;border-radius:6px;margin:10px 0 4px;">
+          🔒 Por seguridad, <strong>cambia esta contraseña</strong> la primera vez que inicies sesión (Mi Perfil → Cambiar contraseña).
+        </p>
         """
+
     body = f"""
-      <h1 style="font-size:22px;font-weight:800;margin:0 0 14px;letter-spacing:-0.4px;">¡Bienvenido(a), {name}!</h1>
-      <p>Se ha creado tu cuenta en <strong>{product_name}</strong>. Desde ahí podrás participar en los procesos de evaluación y consulta de la plataforma.</p>
+      <h1 style="font-size:23px;font-weight:800;margin:0 0 6px;letter-spacing:-0.4px;color:#1A1F2C;">{saludo}</h1>
+      <p style="margin:0 0 14px;font-size:14.5px;color:#3F4856;">
+        Te damos la bienvenida a <strong>{product_name}</strong>, la plataforma con la que gestionamos el ciclo completo de esta convocatoria — desde la inscripción de propuestas hasta la generación de actas oficiales.
+      </p>
+      {conv_block}
       {creds_block}
-      <a href="{login_url}" style="display:inline-block;background:#14776A;color:#FFFFFF;text-decoration:none;padding:11px 22px;border-radius:8px;font-weight:600;font-size:13.5px;margin-top:12px;">Ingresar a la plataforma</a>
-      <p style="margin-top:20px;font-size:12.5px;color:#5E6878;">Si tienes problemas para acceder, contacta al administrador de tu convocatoria.</p>
+      <a href="{login_url}" style="display:inline-block;background:#14776A;color:#FFFFFF;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:700;font-size:14px;margin-top:14px;">Ingresar a la plataforma →</a>
+      <p style="margin-top:22px;font-size:12.5px;color:#5E6878;line-height:1.55;">
+        Si tienes preguntas sobre el proceso o necesitas apoyo técnico, escríbenos a
+        <a href="mailto:{contact_email}" style="color:#14776A;font-weight:600;text-decoration:none;">{contact_email}</a>
+        o contacta al administrador de tu convocatoria. Estamos para acompañarte.
+      </p>
+      <p style="margin-top:14px;font-size:12.5px;color:#3F4856;">
+        Gracias por sumarte a este proceso — tu participación es esencial para garantizar la transparencia y la calidad de los resultados.
+      </p>
+      <p style="margin-top:18px;font-size:12.5px;color:#5E6878;">— Equipo {product_name} · ELEA Innovación Social</p>
     """
-    text = f"¡Bienvenido(a), {name}!\n\nSe ha creado tu cuenta en {product_name}.\n"
+
+    # Versión texto plano (fallback para clientes sin HTML)
+    text_lines = [
+        saludo,
+        "",
+        f"Te damos la bienvenida a {product_name}.",
+    ]
+    if convocatoria_nombre:
+        text_lines.append("")
+        text_lines.append(f"Convocatoria: {convocatoria_codigo + ' · ' if convocatoria_codigo else ''}{convocatoria_nombre}")
+        if entidad: text_lines.append(f"Entidad: {entidad}")
+        if rol_legible: text_lines.append(f"Tu rol: {rol_legible}")
     if password:
-        text += f"Usuario: {username}\nContraseña temporal: {password}\n\n"
-    text += f"Ingresa en: {login_url}\n"
+        text_lines += ["", f"Usuario: {username}", f"Contraseña temporal: {password}",
+                       "Por seguridad, cambia esta contraseña en tu primer inicio de sesión."]
+    text_lines += ["", f"Ingresa en: {login_url}", "",
+                   f"¿Dudas o soporte? {contact_email}",
+                   f"— Equipo {product_name} · ELEA Innovación Social"]
+    text = "\n".join(text_lines)
     return _layout(body, product_name), text
 
 

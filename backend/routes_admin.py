@@ -225,8 +225,16 @@ async def reset_password_jurado(jurado_id: str, payload: ResetPasswordPayload,
         login_url = f"{base.rstrip('/')}/login"
         branding_doc = await db.system_settings.find_one({"id": "global"}, {"_id": 0}) or {}
         product_name = (branding_doc.get("branding") or {}).get("product_name", "KRINOS")
-        html, text = render_welcome(jur["nombre"], username, nueva, login_url, product_name)
-        email_result = await send_email(username, f"Bienvenido(a) a {product_name}", html, text_body=text)
+        entidad = (branding_doc.get("branding") or {}).get("entidad_nombre") or "—"
+        conv = await db.convocatorias.find_one({"id": jur["convocatoria_id"]}, {"_id": 0, "nombre": 1, "codigo": 1})
+        html, text = render_welcome(
+            jur["nombre"], username, nueva, login_url, product_name,
+            convocatoria_nombre=(conv or {}).get("nombre"),
+            convocatoria_codigo=(conv or {}).get("codigo"),
+            rol_legible="Jurado evaluador",
+            entidad=entidad if entidad and entidad != "—" else None,
+        )
+        email_result = await send_email(username, f"Bienvenido(a) a {product_name} · {(conv or {}).get('codigo','')}".strip(" ·"), html, text_body=text)
         await log_email(username, "Bienvenida (jurado)", "welcome", email_result, user_id=target_id)
         await audit(user, "send_welcome", "jurados", jurado_id,
                     detalle=f"provider={email_result.get('provider','?')} ok={email_result.get('ok')}")
@@ -252,8 +260,16 @@ async def send_welcome_jurado(jurado_id: str, body: dict | None = None,
     login_url = f"{base.rstrip('/')}/login"
     branding_doc = await db.system_settings.find_one({"id": "global"}, {"_id": 0}) or {}
     product_name = (branding_doc.get("branding") or {}).get("product_name", "KRINOS")
-    html, text = render_welcome(jur["nombre"], jur["email"].lower(), None, login_url, product_name)
-    result = await send_email(jur["email"], f"Bienvenido(a) a {product_name}", html, text_body=text)
+    entidad = (branding_doc.get("branding") or {}).get("entidad_nombre")
+    conv = await db.convocatorias.find_one({"id": jur["convocatoria_id"]}, {"_id": 0, "nombre": 1, "codigo": 1})
+    html, text = render_welcome(
+        jur["nombre"], jur["email"].lower(), None, login_url, product_name,
+        convocatoria_nombre=(conv or {}).get("nombre"),
+        convocatoria_codigo=(conv or {}).get("codigo"),
+        rol_legible="Jurado evaluador",
+        entidad=entidad,
+    )
+    result = await send_email(jur["email"], f"Bienvenido(a) a {product_name} · {(conv or {}).get('codigo','')}".strip(" ·"), html, text_body=text)
     await log_email(jur["email"], "Bienvenida (jurado)", "welcome", result, user_id=None)
     await audit(user, "send_welcome", "jurados", jurado_id,
                 detalle=f"provider={result.get('provider','?')} ok={result.get('ok')}")
