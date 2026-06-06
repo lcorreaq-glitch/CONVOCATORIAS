@@ -731,3 +731,13 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 
 **EvaluacionIndividual.jsx — confirmado**:
 - ✅ Verificado que NO existe botón "Firmar acta" por propuesta (eliminado en fork previo). El único botón "Firmar mi acta" sobreviviente está dentro del modal de celebración que solo aparece cuando el jurado termina TODAS sus evaluaciones, y redirige a `/actas` (lugar correcto para firmar el acta consolidada única). Comportamiento correcto.
+
+**Activar/Desactivar Roles** (`routes_permissions.py` + `Administracion.jsx`):
+- ✅ Nuevo campo `active: bool` (default `True`) en colección `roles`. Backfill idempotente en `seed_roles`.
+- ✅ Endpoint `PATCH /api/permissions/roles/{code}/active` (body `{active: bool}`) con respuesta `{ok, active, usuarios_afectados}`.
+- ✅ Bloqueo: `admin_general` no puede desactivarse (HTTP 400).
+- ✅ Bloqueo en login: si el rol del usuario está desactivado, `POST /api/auth/login` devuelve 403 con mensaje "El rol 'X' está desactivado. Contacta al administrador." (admin_general exento).
+- ✅ UI: panel lateral muestra badge "Inactivo" rojo + opacity 60%. Header del rol seleccionado tiene `Switch` toggle Activo/Inactivo (oculto para admin_general).
+- ✅ Dropdown de creación de usuario filtra roles inactivos (solo muestra el rol actual si se edita).
+- ✅ Validado e2e con curl: desactivar supervisor → 1 usuario afectado → su login devuelve 403 → reactivar → login funciona.
+

@@ -155,7 +155,11 @@ function UsersPanel() {
               <Select value={f.role} onValueChange={(v) => setF({ ...f, role: v })}>
                 <SelectTrigger className="rounded-lg" data-testid="admin-user-role"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {roles.map((r) => <SelectItem key={r.code} value={r.code}>{r.name}</SelectItem>)}
+                  {roles.filter((r) => r.active !== false || r.code === f.role).map((r) => (
+                    <SelectItem key={r.code} value={r.code}>
+                      {r.name}{r.active === false ? " (inactivo)" : ""}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -282,6 +286,22 @@ function RolesPanel() {
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
+  const toggleRoleActive = async (role) => {
+    if (role.code === "admin_general") {
+      toast.error("El rol Administrador General no puede desactivarse.");
+      return;
+    }
+    const willActivate = role.active === false;
+    const verbo = willActivate ? "activar" : "desactivar";
+    if (!confirm(`¿Seguro que quieres ${verbo} el rol "${role.name}"?\n\n${willActivate ? "Los usuarios con este rol podrán iniciar sesión de nuevo." : "Los usuarios con este rol no podrán iniciar sesión hasta que se reactive."}`)) return;
+    try {
+      const { data } = await api.patch(`/permissions/roles/${role.code}/active`, { active: willActivate });
+      const afectados = data?.usuarios_afectados ?? 0;
+      toast.success(`Rol ${willActivate ? "activado" : "desactivado"}${afectados ? ` · ${afectados} usuario(s) afectado(s)` : ""}`);
+      load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
   if (!matrix) return <div className="p-8 text-sm text-[#5E6878]">Cargando matriz de permisos…</div>;
   const role = matrix.roles.find((r) => r.code === selectedRole);
 
@@ -324,22 +344,28 @@ function RolesPanel() {
           <div className="text-[10.5px] uppercase tracking-wider font-display font-bold text-[#5E6878] px-2 py-2">
             Roles del sistema
           </div>
-          {matrix.roles.map((r) => (
-            <button
-              key={r.code}
-              onClick={() => setSelectedRole(r.code)}
-              data-testid={`role-select-${r.code}`}
-              className={`w-full text-left px-3 py-2 rounded-lg transition-colors mb-0.5 flex items-center justify-between gap-2 ${
-                selectedRole === r.code ? "bg-[#E8F3F0]" : "hover:bg-[#F1F4F7]"
-              }`}
-            >
-              <div className="min-w-0 flex-1">
-                <div className="font-semibold text-[13px] text-[#1A1F2C] truncate">{r.name}</div>
-                <div className="text-[10.5px] text-[#5E6878] font-mono truncate">{r.code}</div>
-              </div>
-              {r.is_system && <Shield className="w-3.5 h-3.5 text-[#14776A] shrink-0" title="Rol del sistema" />}
-            </button>
-          ))}
+          {matrix.roles.map((r) => {
+            const isInactive = r.active === false;
+            return (
+              <button
+                key={r.code}
+                onClick={() => setSelectedRole(r.code)}
+                data-testid={`role-select-${r.code}`}
+                className={`w-full text-left px-3 py-2 rounded-lg transition-colors mb-0.5 flex items-center justify-between gap-2 ${
+                  selectedRole === r.code ? "bg-[#E8F3F0]" : "hover:bg-[#F1F4F7]"
+                } ${isInactive ? "opacity-60" : ""}`}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-[13px] text-[#1A1F2C] truncate flex items-center gap-1.5">
+                    {r.name}
+                    {isInactive && <span className="px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider font-bold bg-red-100 text-red-700 border border-red-200">Inactivo</span>}
+                  </div>
+                  <div className="text-[10.5px] text-[#5E6878] font-mono truncate">{r.code}</div>
+                </div>
+                {r.is_system && <Shield className="w-3.5 h-3.5 text-[#14776A] shrink-0" title="Rol del sistema" />}
+              </button>
+            );
+          })}
         </div>
 
         {/* Matriz del rol seleccionado */}
@@ -358,13 +384,30 @@ function RolesPanel() {
                   </div>
                 ) : (
                   <>
-                    <h3 className="font-display font-extrabold text-[20px] tracking-tight">{role.name}</h3>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-display font-extrabold text-[20px] tracking-tight">{role.name}</h3>
+                      {role.active === false ? (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] uppercase tracking-wider font-bold bg-red-100 text-red-700 border border-red-200" data-testid={`role-status-${role.code}`}>Inactivo</span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] uppercase tracking-wider font-bold bg-[#E8F3F0] text-[#0F5E54] border border-[#CDE7E1]" data-testid={`role-status-${role.code}`}>Activo</span>
+                      )}
+                    </div>
                     <code className="text-[11px] text-[#5E6878] font-mono">{role.code}</code>
                     <p className="text-[12.5px] text-[#5E6878] mt-1">{role.description || "Sin descripción."}</p>
                   </>
                 )}
               </div>
-              <div className="flex gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0">
+                {!editingRole && role.code !== "admin_general" && (
+                  <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg border border-[#E2E7EC] bg-[#FAFBFC]" title="Activa o desactiva este rol. Los usuarios con un rol inactivo no podrán iniciar sesión.">
+                    <Switch
+                      checked={role.active !== false}
+                      onCheckedChange={() => toggleRoleActive(role)}
+                      data-testid={`role-toggle-active-${role.code}`}
+                    />
+                    <span className="text-[11.5px] font-semibold text-[#1A1F2C]">{role.active === false ? "Inactivo" : "Activo"}</span>
+                  </div>
+                )}
                 {!editingRole && (
                   <Button size="sm" variant="outline" className="rounded-lg gap-1.5" onClick={() => setEditingRole({ code: role.code, name: role.name, description: role.description || "" })} data-testid={`role-edit-${role.code}`}>
                     <Pencil className="w-3.5 h-3.5" /> Editar

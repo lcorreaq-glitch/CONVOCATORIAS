@@ -196,6 +196,11 @@ async def login(payload: LoginRequest, request: Request, response: Response):
         raise HTTPException(status_code=401, detail="Credenciales inválidas")
     if not user.get("active", True):
         raise HTTPException(status_code=403, detail="Usuario inactivo")
+    # Bloquear si el ROL al que pertenece está desactivado (excepto admin_general)
+    if user.get("role") and user["role"] != "admin_general":
+        rdoc = await db.roles.find_one({"code": user["role"]}, {"active": 1, "name": 1})
+        if rdoc and rdoc.get("active") is False:
+            raise HTTPException(status_code=403, detail=f"El rol '{rdoc.get('name') or user['role']}' está desactivado. Contacta al administrador.")
 
     await clear_attempts(lock_key)
     access = create_access_token(user["id"], user["username"], user["role"])

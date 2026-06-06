@@ -165,6 +165,8 @@ SYSTEM_ROLES = [
 async def seed_roles():
     """Crea (idempotente) los roles del sistema. Se llama al startup."""
     db = get_db()
+    # Backfill: asegurar que cualquier rol existente sin flag 'active' quede activo por defecto.
+    await db.roles.update_many({"active": {"$exists": False}}, {"$set": {"active": True}})
     for r in SYSTEM_ROLES:
         existing = await db.roles.find_one({"code": r["code"]})
         if existing:
@@ -183,6 +185,7 @@ async def seed_roles():
                 "code": r["code"], "name": r["name"],
                 "description": r["description"],
                 "is_system": True,
+                "active": True,
                 "permissions": r["permissions"],
                 "created_at": now_iso(), "updated_at": now_iso(),
             }
@@ -233,6 +236,7 @@ class RoleUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     permissions: Optional[dict] = None
+    active: Optional[bool] = None
 
 
 @router.post("/roles")
@@ -255,6 +259,7 @@ async def create_role(payload: RoleCreate, user: dict = Depends(require_roles("a
         "code": code, "name": payload.name.strip(),
         "description": (payload.description or "").strip(),
         "is_system": False,
+        "active": True,
         "permissions": perms_clean,
         "created_at": now_iso(), "updated_at": now_iso(),
     }
@@ -288,6 +293,10 @@ async def update_role(code: str, payload: RoleUpdate, user: dict = Depends(requi
                 if must not in perms_clean or not perms_clean[must]:
                     perms_clean[must] = list(valid_modules[must])
         updates["permissions"] = perms_clean
+    if payload.active is not None:
+        if code == "admin_general" and payload.active is False:
+            raise HTTPException(status_code=400, detail="El rol Administrador General no puede desactivarse.")
+        updates["active"] = bool(payload.active)
     if updates:
         updates["updated_at"] = now_iso()
         await db.roles.update_one({"code": code}, {"$set": updates})
@@ -311,6 +320,34 @@ async def delete_role(code: str, user: dict = Depends(require_roles("admin_gener
     await db.roles.delete_one({"code": code})
     await audit(user, "delete", "roles", role["id"], detalle=f"code={code}, name={role.get('name')}")
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# PATCH activar / desactivar rol (toggle dedicado)
+# ---------------------------------------------------------------------------
+class RoleActiveToggle(BaseModel):
+    active: bool
+
+
+@router.patch("/roles/{code}/active")
+async def set_role_active(code: str, payload: RoleActiveToggle,
+                          user: dict = Depends(require_roles("admin_general"))):
+    """Activa o desactiva un rol. Un rol inactivo bloquea el login de cualquier
+    usuario que lo tenga asignado. El rol Administrador General no puede desactivarse."""
+    db = get_db()
+    role = await db.roles.find_one({"code": code})
+    if not role:
+        raise HTTPException(status_code=404, detail="Rol no encontrado")
+    if code == "admin_general" and payload.active is False:
+        raise HTTPException(status_code=400, detail="El rol Administrador General no puede desactivarse.")
+    affected = await db.users.count_documents({"role": code, "active": True})
+    await db.roles.update_one(
+        {"code": code},
+        {"$set": {"active": bool(payload.active), "updated_at": now_iso()}},
+    )
+    await audit(user, "toggle_active", "roles", role["id"],
+                detalle=f"code={code}, active={payload.active}, usuarios_afectados={affected}")
+    return {"ok": True, "active": bool(payload.active), "usuarios_afectados": affected}
 
 
 # ---------------------------------------------------------------------------
