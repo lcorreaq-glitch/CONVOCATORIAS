@@ -20,7 +20,9 @@ const REPORTES_DINAMICOS = [
   { key: "consolidado-individual", label: "Consolidado evaluación individual",
     descripcion: "Una fila por (propuesta × jurado) con todos los criterios oficiales, sus puntajes y observaciones, criterios de priorización/desempate, y la observación general." },
   { key: "consolidado-colectiva", label: "Consolidado evaluación colectiva",
-    descripcion: "Una fila por (propuesta × terna) con los puntajes y observaciones consensuadas, criterios de priorización/desempate, y el acta resumen." },
+    descripcion: "Una fila por (propuesta × terna) con puntajes individuales de cada jurado, promedio validado y trazabilidad institucional. SIN observaciones por criterio (no aplica en la consolidada)." },
+  { key: "consolidado-colectiva-detallado", label: "Detalle por jurado de evaluación colectiva (sábana)",
+    descripcion: "Sábana completa: una fila por (propuesta × jurado) con TODOS los criterios oficiales (puntaje y observación), criterios de priorización/desempate y observación final. Equivalente al consolidado individual pero usando las V2 de la etapa colectiva." },
 ];
 
 const REPORTES = [...REPORTES_FIJOS, ...REPORTES_DINAMICOS];

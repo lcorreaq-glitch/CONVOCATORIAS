@@ -380,12 +380,13 @@ async def reporte_avance_terna(convocatoria_id: str, user: dict = Depends(get_cu
 
 @router.get("/reportes/consolidado-individual")
 async def reporte_consolidado_individual(convocatoria_id: str, user: dict = Depends(get_current_user)):
-    """Reporte completo de evaluación individual: criterios + puntajes + observaciones
-    + criterios de priorización + criterios de desempate + observación general (final).
-    Devuelve una fila por (propuesta, jurado) con columnas dinámicas por criterio.
+    """Sábana completa de evaluación individual: una fila por (propuesta, jurado)
+    con criterios, puntajes y observaciones. Excluye V2 colectivas.
     """
     db = get_db()
-    evals = await db.evaluaciones_individuales.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(20000)
+    evals = await db.evaluaciones_individuales.find({
+        "convocatoria_id": convocatoria_id, "etapa": {"$ne": "colectiva"},
+    }, {"_id": 0}).to_list(20000)
     propuestas = {p["id"]: p async for p in db.propuestas.find({"convocatoria_id": convocatoria_id})}
     jurados = {j["id"]: j async for j in db.jurados.find({"convocatoria_id": convocatoria_id})}
     criterios = await db.criterios.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).sort("orden", 1).to_list(200)
@@ -505,6 +506,62 @@ async def reporte_consolidado_colectiva(convocatoria_id: str, user: dict = Depen
     return out
 
 
+@router.get("/reportes/consolidado-colectiva-detallado")
+async def reporte_consolidado_colectiva_detallado(convocatoria_id: str, user: dict = Depends(get_current_user)):
+    """Sábana completa de la EVALUACIÓN COLECTIVA: una fila por (propuesta, jurado de la terna)
+    con TODOS los criterios desglosados (oficiales con observación + diferenciales/priorización/desempate).
+    Es el equivalente del consolidado-individual pero usando las V2 de la etapa colectiva.
+    """
+    db = get_db()
+    v2s = await db.evaluaciones_individuales.find({
+        "convocatoria_id": convocatoria_id, "etapa": "colectiva",
+    }, {"_id": 0}).to_list(20000)
+    propuestas = {p["id"]: p async for p in db.propuestas.find({"convocatoria_id": convocatoria_id})}
+    jurados = {j["id"]: j async for j in db.jurados.find({"convocatoria_id": convocatoria_id})}
+    ternas_list = await db.ternas.find({"convocatoria_id": convocatoria_id}).to_list(500)
+    jurado_terna = {}
+    for t in ternas_list:
+        for i in (t.get("integrantes") or []):
+            if i.get("jurado_id"):
+                jurado_terna.setdefault(i["jurado_id"], []).append(t.get("codigo"))
+    criterios = await db.criterios.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).sort("orden", 1).to_list(200)
+    oficiales = [c for c in criterios if c.get("oficial") and not c.get("diferencial")]
+    desempate = [c for c in criterios if c.get("diferencial")]
+    out = []
+    for ev in v2s:
+        p = propuestas.get(ev["propuesta_id"], {})
+        j = jurados.get(ev["jurado_id"], {})
+        d = p.get("datos") or {}
+        row = {
+            "propuesta_codigo": p.get("codigo"),
+            "propuesta_nombre": p.get("nombre"),
+            "organizacion": p.get("organizacion") or d.get("nombre_organizacion"),
+            "nit": p.get("nit") or d.get("nit") or d.get("NIT") or d.get("numero_documento"),
+            "municipio": d.get("municipio"),
+            "subregion": d.get("subregion") or p.get("subregion"),
+            "terna": ", ".join(jurado_terna.get(ev["jurado_id"], [])),
+            "jurado": j.get("nombre"),
+            "jurado_email": j.get("email"),
+            "estado": ev.get("estado"),
+            "puntaje_total_oficial": ev.get("puntaje_total"),
+            "puntaje_total_priorizacion": ev.get("puntaje_diferencial_total"),
+        }
+        puntajes = ev.get("puntajes") or {}
+        observaciones = ev.get("observaciones") or {}
+        for c in oficiales:
+            base = f"OF · {c.get('nombre','')}"
+            row[f"{base} (puntaje)"] = puntajes.get(c["id"])
+            row[f"{base} (obs.)"] = observaciones.get(c["id"], "")
+        for c in desempate:
+            base = f"DIF · {c.get('nombre','')}"
+            row[f"{base} (puntaje)"] = puntajes.get(c["id"])
+            row[f"{base} (obs.)"] = observaciones.get(c["id"], "")
+        row["observacion_final"] = ev.get("observacion_final")
+        row["fecha_finalizacion"] = ev.get("fecha_finalizacion")
+        out.append(row)
+    return out
+
+
 @router.get("/reportes/auditoria")
 async def reporte_auditoria(limit: int = 500, entidad: Optional[str] = None,
                             user: dict = Depends(require_roles("admin_general", "auditor"))):
@@ -540,6 +597,9 @@ async def export_excel(reporte: str, convocatoria_id: str, user: dict = Depends(
             "propuesta_codigo", "propuesta_nombre", "organizacion", "terna_codigo", "terna_nombre", "estado",
             "puntaje_total_oficial", "puntaje_total_priorizacion", "observacion_final", "fecha_finalizacion",
         ]
+    elif reporte == "consolidado-colectiva-detallado":
+        data = await reporte_consolidado_colectiva_detallado(convocatoria_id, user)
+        headers = list(data[0].keys()) if data else ["propuesta_codigo", "jurado"]
     else:
         raise HTTPException(status_code=400, detail="Reporte no soportado")
     ws.append(headers)
