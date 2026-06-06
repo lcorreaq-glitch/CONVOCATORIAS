@@ -434,6 +434,18 @@ async def list_actas_pendientes(convocatoria_id: str, user: dict = Depends(get_c
 
     # --- INDIVIDUAL POR JURADO ---
     jurados = await db.jurados.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(2000)
+    # ────────────────────────────────────────────────────────────────
+    # Pre-cargar todas las propuestas de la convocatoria para resolver
+    # las subregiones de cobertura de cada jurado a partir de sus evaluaciones.
+    # (Más confiable que `jurado.subregiones` que es el campo personal de carga.)
+    # ────────────────────────────────────────────────────────────────
+    props_map = {
+        p["id"]: p for p in await db.propuestas.find(
+            {"convocatoria_id": convocatoria_id},
+            {"_id": 0, "id": 1, "subregion": 1, "territorio": 1}
+        ).to_list(20000)
+    }
+
     individuales = []
     for j in jurados:
         evs = await db.evaluaciones_individuales.find({
@@ -442,6 +454,17 @@ async def list_actas_pendientes(convocatoria_id: str, user: dict = Depends(get_c
         total = len(evs)
         if total == 0:
             continue
+        # Subregiones derivadas: unión única de las subregiones de las propuestas
+        # que este jurado evalúa. Fallback al campo personal solo si no hay propuestas.
+        subregiones_derivadas = sorted({
+            (props_map.get(e.get("propuesta_id")) or {}).get("subregion") or
+            (props_map.get(e.get("propuesta_id")) or {}).get("territorio")
+            for e in evs
+            if (props_map.get(e.get("propuesta_id")) or {}).get("subregion")
+            or (props_map.get(e.get("propuesta_id")) or {}).get("territorio")
+        })
+        if not subregiones_derivadas:
+            subregiones_derivadas = j.get("subregiones") or []
         finalizadas = sum(1 for e in evs if e.get("estado") in ("Finalizada", "Firmada"))
         forzada = bool(((j.get("datos") or {}).get("acta_individual_forzada")))
         firma_url = ((j.get("datos") or {}).get("firma_url"))
@@ -467,7 +490,7 @@ async def list_actas_pendientes(convocatoria_id: str, user: dict = Depends(get_c
             estado = "Pendiente"
         individuales.append({
             "jurado_id": j["id"], "jurado_nombre": j["nombre"], "jurado_email": j.get("email"),
-            "subregiones": j.get("subregiones") or [], "documento": cedula,
+            "subregiones": subregiones_derivadas, "documento": cedula,
             "total": total, "finalizadas": finalizadas, "reabiertas": reabiertas, "estado": estado,
             "forzada": forzada, "tiene_firma": bool(firma_url),
             "firma_acta_at": ((j.get("datos") or {}).get("acta_individual_firma_at")),
@@ -1004,6 +1027,17 @@ async def acta_individual_jurado(jurado_id: str, user: dict = Depends(get_curren
     propuestas_ids = list({e["propuesta_id"] for e in evs})
     propuestas = await db.propuestas.find({"id": {"$in": propuestas_ids}}, {"_id": 0}).to_list(2000)
     pmap = {p["id"]: p for p in propuestas}
+
+    # Sobrescribir el contexto con las subregiones DERIVADAS de las propuestas evaluadas
+    # (no usar el campo personal del jurado, que puede no reflejar lo que realmente evalúa).
+    subregiones_derivadas = sorted({
+        (p.get("subregion") or p.get("territorio") or "").strip()
+        for p in propuestas
+        if (p.get("subregion") or p.get("territorio"))
+    })
+    if subregiones_derivadas:
+        ctx["subregion"] = ", ".join(subregiones_derivadas)
+        ctx["jurado_subregiones"] = ctx["subregion"]
 
     rows = []
     for i, e in enumerate(evs, 1):
