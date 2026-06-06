@@ -32,15 +32,23 @@ async def _compute_propuesta_score(db, convocatoria_id: str, propuesta_id: str, 
     """Returns dict with puntaje_total and criterios_detalle.
 
     Modo ESTRICTO: la fuente del puntaje debe coincidir exactamente con el modo seleccionado.
-    - 'colectivo'  -> SOLO evaluaciones_colectivas. Si no existe, fuente='ninguna' (sin fallback).
-    - 'individual' -> SOLO promedio de evaluaciones_individuales finalizadas. Sin fallback a colectiva.
+    - 'colectivo'  -> SOLO evaluaciones_colectivas en estado Cerrada/Firmada (NO Abierta ni Reabierta).
+                      Si hay varias (caso raro de reasignación de terna), toma la más reciente cerrada.
+    - 'individual' -> SOLO promedio de evaluaciones_individuales en estado Finalizada/Firmada
+                      (excluye Borrador y Reabierta para no contar puntajes en revisión).
     """
     if modo == "colectivo":
-        ev = await db.evaluaciones_colectivas.find_one({
-            "propuesta_id": propuesta_id, "estado": {"$in": ["Cerrada", "Firmada", "Abierta"]}
-        })
-        if not ev:
+        # Solo evaluaciones efectivamente cerradas: no contamos las abiertas/reabiertas (puntajes en revisión)
+        evs = await db.evaluaciones_colectivas.find({
+            "propuesta_id": propuesta_id,
+            "estado": {"$in": ["Cerrada", "Firmada"]},
+        }).to_list(20)
+        if not evs:
             return {"puntaje_total": 0, "puntaje_diferencial": 0, "criterios": {}, "fuente": "ninguna"}
+        # Si hay varias (caso raro: terna reasignada), priorizar Firmada y la más reciente.
+        evs.sort(key=lambda e: (e.get("firmada_at") or e.get("cerrada_at") or e.get("updated_at") or ""), reverse=True)
+        firmadas = [e for e in evs if e.get("estado") == "Firmada"]
+        ev = firmadas[0] if firmadas else evs[0]
         return {
             "puntaje_total": ev.get("puntaje_final", 0),
             "puntaje_diferencial": ev.get("puntaje_diferencial_total", 0),
@@ -48,7 +56,7 @@ async def _compute_propuesta_score(db, convocatoria_id: str, propuesta_id: str, 
             "fuente": "colectiva",
         }
 
-    # modo == "individual" (o cualquier otro distinto a colectivo) -> usa SOLO individuales
+    # modo == "individual" (o cualquier otro distinto a colectivo) -> usa SOLO individuales activas
     individuales = await db.evaluaciones_individuales.find({
         "propuesta_id": propuesta_id,
         "estado": {"$in": ["Finalizada", "Firmada"]},
@@ -210,6 +218,15 @@ async def generar_ranking(convocatoria_id: str, agrupar_por: str = "subregion",
     resultado["total_cupos_configurados"] = total_cupos_configurados or None
     resultado["total_ganadores_asignados"] = total_ganadores_asignados if total_cupos_configurados else None
     resultado["total_incentivos_sobrantes"] = sum(x["incentivos_sobrantes"] for x in incentivos_no_asignados) or 0
+
+    # Resumen de cobertura: cuántas propuestas no tienen fuente de puntaje válida en el modo seleccionado.
+    sin_fuente = [e for e in enriched if e.get("fuente") == "ninguna"]
+    resultado["cobertura"] = {
+        "total_propuestas": len(enriched),
+        "con_puntaje": len(enriched) - len(sin_fuente),
+        "sin_puntaje": len(sin_fuente),
+        "propuestas_sin_puntaje": [{"codigo": p.get("codigo"), "nombre": p.get("nombre"), "propuesta_id": p.get("propuesta_id")} for p in sin_fuente[:50]],
+    }
 
     await db.rankings.insert_one(resultado)
     resultado.pop("_id", None)

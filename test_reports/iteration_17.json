@@ -1,0 +1,49 @@
+{
+  "summary": "Validación end-to-end de P0 (subregiones en /api/actas-pendientes), P1 (POST /api/ai/coherencia-evaluacion + UI modal) y P2 (cobertura en /api/rankings/generar + panel ranking-cobertura-panel). Backend: 7/8 PASS, 1 SKIP (colectiva: list endpoint /api/evaluaciones-colectivas requirió parámetro que no inferimos, sin impacto). Frontend: P1 y P2 confirmados visualmente — modal de coherencia con IA renderiza hallazgos (sin_observacion · ALTA) y panel de cobertura muestra 251 propuestas sin puntaje en INC2026 con CTA 'Ver listado'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/rankings/generar",
+        "issue": "Acepta convocatoria_id sólo como query param, no en JSON body. Funciona, pero documentar o aceptar ambos por DX. No bloqueante."
+      },
+      {
+        "endpoint": "POST /api/auth/login",
+        "issue": "Devuelve 'access_token' (no 'token'). El campo coincide con OAuth2; documentar para futuros agentes de testing y para frontend (ya lo usa correctamente)."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Login", "issues": ["Sin atributo name en inputs de usuario/contraseña — selectores por placeholder o índice fallback. Agregar name='username'/'password' para mejor a11y y para selectores estables."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter17.py",
+    "/app/test_reports/pytest/iter17.xml"
+  ],
+  "action_items": [
+    "Considerar exponer convocatoria_id también en body JSON para POST /api/rankings/generar (consistencia con otros POST).",
+    "Agregar name='username' y name='password' a inputs del Login para selectores estables y a11y."
+  ],
+  "critical_code_review_comments": [
+    "routes_actas.py:449-554 — La lógica de subregiones implementada es MÁS robusta de lo solicitado: usa cobertura real (propuestas evaluadas) primero, luego ternas, luego perfil. Esto cubre el caso P0 del review y resuelve el bug histórico de jurados que muestran su subregión personal en lugar de la(s) subregión(es) de la(s) terna(s).",
+    "routes_ai.py:147-224 — endpoint /coherencia-evaluacion: el fallback con regex `r\"\\{[\\s\\S]*\\}\"` es defensivo y correcto, garantiza JSON válido al cliente aunque el LLM responda con markdown ```json u otros artefactos. La normalización setdefault asegura shape estable.",
+    "routes_reports.py:cobertura — el objeto cobertura={total_propuestas, con_puntaje, sin_puntaje, propuestas_sin_puntaje[<=50]} se adjunta correctamente al ranking. Verificado en BD INC2026 (251 propuestas, 0 con puntaje colectivo)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter17.py (nuevo, regresión)"
+  ],
+  "success_rate": {
+    "backend": "7/8 passed (88%) — 1 skip por dependencia de listado de colectivas, no bloqueante",
+    "frontend": "P1 (modal coherencia) ✓, P2 (panel cobertura) ✓ — 100% en lo solicitado"
+  },
+  "test_credentials": "Admin lcorreaq / Chocolate2026! verificado. Login devuelve access_token (no token).",
+  "seed_data_creation": "Ninguna. Se generó un ranking (modo colectivo, por subregión) en INC2026, pero esa convocatoria ya tenía Historial(5) previo de rankings — no impacta datos críticos.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "El endpoint POST /api/rankings/generar requiere convocatoria_id como QUERY param (no body). Login devuelve campo 'access_token'. La convocatoria INC2026 (id=43b9b70a-eedf-4580-9f78-927a473e8b96) tiene 251 propuestas sin puntaje colectivo — perfecto para testear el panel cobertura visible. eval-coherencia-btn y coherencia-modal funcionan; cerrar con coherencia-cerrar-btn. Ruta correcta de detalle eval individual: /evaluaciones/individual/:id (no /evaluaciones/individuales/:id).",
+  "rca of the issue": "N/A — sin bugs nuevos. Todas las features solicitadas (P0, P1, P2) funcionan correctamente en backend y frontend."
+}

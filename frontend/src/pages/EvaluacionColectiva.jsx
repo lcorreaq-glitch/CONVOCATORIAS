@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import {
   ArrowLeft, Save, FileText, CheckCircle2, EyeOff, Sparkles, Lock, ArrowRight,
@@ -34,6 +35,9 @@ export default function EvaluacionColectiva() {
   const [v2List, setV2List] = useState([]);
   const [ciego, setCiego] = useState(true);
   const [showFicha, setShowFicha] = useState(false);
+  const [coherencia, setCoherencia] = useState(null);
+  const [coherenciaLoading, setCoherenciaLoading] = useState(false);
+  const [showCoherencia, setShowCoherencia] = useState(false);
 
   const reload = async () => {
     const r = await api.get(`/evaluaciones-colectivas/${id}`);
@@ -121,6 +125,20 @@ export default function EvaluacionColectiva() {
   };
   const downloadActa = () => openPdf(`/actas/colectiva/${id}`);
 
+  const revisarCoherencia = async () => {
+    setCoherenciaLoading(true);
+    setShowCoherencia(true);
+    try {
+      const r = await api.post("/ai/coherencia-evaluacion", { evaluacion_id: id, tipo: "colectiva" });
+      setCoherencia(r.data);
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail));
+      setShowCoherencia(false);
+    } finally {
+      setCoherenciaLoading(false);
+    }
+  };
+
   const totalOf = criterios.filter((c) => c.oficial !== false)
     .reduce((s, c) => s + (parseFloat(puntajes[c.id]) || 0), 0);
   const maxOf = conv?.configuracion?.puntaje_max_evaluacion || 100;
@@ -161,6 +179,18 @@ export default function EvaluacionColectiva() {
           {!isClosed && !isModal2 && (
             <Button onClick={() => save(false)} variant="outline" className="rounded-sm gap-2" data-testid="save-col-btn">
               <Save className="w-4 h-4" />Guardar
+            </Button>
+          )}
+          {!isClosed && !isModal2 && (
+            <Button
+              onClick={revisarCoherencia}
+              disabled={coherenciaLoading}
+              variant="outline"
+              className="rounded-sm gap-2 text-[#5B21B6] border-[#DDD6FE] hover:bg-[#F5F3FF]"
+              data-testid="eval-col-coherencia-btn"
+              title="Revisar coherencia entre puntajes y observación consolidada con IA"
+            >
+              <Sparkles className="w-4 h-4" />{coherenciaLoading ? "Analizando…" : "Revisar coherencia"}
             </Button>
           )}
           {!isClosed && !isModal2 && (
@@ -464,6 +494,63 @@ export default function EvaluacionColectiva() {
           </div>
         </DrawerContent>
       </Drawer>
+
+      {/* Modal de revisión de coherencia (IA) */}
+      <Dialog open={showCoherencia} onOpenChange={setShowCoherencia}>
+        <DialogContent className="rounded-xl max-w-2xl p-0 overflow-hidden" data-testid="coherencia-col-modal">
+          <div className="bg-gradient-to-br from-[#5B21B6] to-[#3B0764] text-white px-7 py-5">
+            <div className="flex items-center gap-2 mb-1">
+              <Sparkles className="w-5 h-5" />
+              <DialogTitle className="font-display text-xl font-bold">Revisión de coherencia con IA</DialogTitle>
+            </div>
+            <p className="text-[12.5px] opacity-90">
+              Análisis automático entre puntajes y observación consolidada. <strong>No reemplaza el criterio del jurado</strong>.
+            </p>
+          </div>
+          <div className="px-7 py-5 bg-white max-h-[60vh] overflow-y-auto">
+            {coherenciaLoading && (
+              <div className="text-center py-10 text-muted-foreground text-sm">
+                <RefreshCw className="w-6 h-6 mx-auto animate-spin mb-3 text-[#5B21B6]" />
+                Analizando la evaluación colectiva…
+              </div>
+            )}
+            {!coherenciaLoading && coherencia && (
+              <>
+                <div className={`rounded-md p-3 mb-4 text-[13px] ${coherencia.coherente ? "bg-emerald-50 text-emerald-900 border border-emerald-200" : "bg-amber-50 text-amber-900 border border-amber-200"}`}>
+                  <div className="font-display font-bold text-[12px] uppercase tracking-wider mb-1">
+                    {coherencia.coherente ? "Evaluación coherente" : "Posibles inconsistencias detectadas"}
+                  </div>
+                  <div>{coherencia.resumen || (coherencia.coherente ? "No se detectaron contradicciones relevantes." : "Revisa los hallazgos.")}</div>
+                </div>
+                {(coherencia.hallazgos || []).length === 0 ? (
+                  <div className="text-center text-muted-foreground text-[13px] py-3">Sin hallazgos.</div>
+                ) : (
+                  <ul className="space-y-3">
+                    {(coherencia.hallazgos || []).map((h, idx) => {
+                      const tone = h.severidad === "alta" ? "bg-red-50 border-red-200 text-red-900"
+                                 : h.severidad === "media" ? "bg-amber-50 border-amber-200 text-amber-900"
+                                 : "bg-slate-50 border-slate-200 text-slate-900";
+                      return (
+                        <li key={idx} className={`border rounded-md p-3 ${tone}`} data-testid={`coherencia-col-hallazgo-${idx}`}>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-[10px] uppercase tracking-wider font-display font-bold px-1.5 py-0.5 rounded bg-white/60">{h.severidad || "media"}</span>
+                            <span className="text-[12px] font-semibold">{h.criterio || "—"}</span>
+                            {h.tipo && <span className="text-[10.5px] text-muted-foreground">· {h.tipo}</span>}
+                          </div>
+                          <div className="text-[13px] leading-relaxed">{h.descripcion}</div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </>
+            )}
+          </div>
+          <div className="px-7 py-3 bg-slate-50 border-t border-border flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowCoherencia(false)} className="rounded-md" data-testid="coherencia-col-cerrar-btn">Cerrar</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

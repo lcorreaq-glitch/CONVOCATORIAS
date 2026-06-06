@@ -180,6 +180,45 @@ export default function Ranking() {
             )}
           </div>
 
+          {/* COBERTURA DE PUNTAJE: propuestas sin evaluación según el modo */}
+          {active.cobertura && active.cobertura.sin_puntaje > 0 && (
+            <div className="rounded-xl border border-[#FCA5A5] bg-gradient-to-br from-[#FEF2F2] to-white p-5" data-testid="ranking-cobertura-panel">
+              <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#DC2626]"></span>
+                    <h3 className="font-display font-bold text-[14px] text-[#991B1B]">
+                      {active.cobertura.sin_puntaje} propuestas sin puntaje en modo <span className="uppercase">{active.modo || "colectivo"}</span>
+                    </h3>
+                  </div>
+                  <p className="text-[11.5px] text-muted-foreground mt-1">
+                    Estas propuestas aparecen con puntaje 0 porque no tienen {active.modo === "individual" ? "evaluaciones individuales finalizadas" : "evaluación colectiva cerrada"}. Verifica la cobertura antes de oficializar el ranking.
+                  </p>
+                </div>
+                <div className="text-right">
+                  <div className="font-display font-black text-3xl tabular-nums text-[#991B1B]">
+                    {active.cobertura.con_puntaje}<span className="text-base text-muted-foreground">/{active.cobertura.total_propuestas}</span>
+                  </div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">con puntaje</div>
+                </div>
+              </div>
+              {active.cobertura.propuestas_sin_puntaje?.length > 0 && (
+                <details className="mt-2">
+                  <summary className="text-[11.5px] text-[#991B1B] font-semibold cursor-pointer hover:underline">
+                    Ver listado ({active.cobertura.propuestas_sin_puntaje.length}{active.cobertura.sin_puntaje > active.cobertura.propuestas_sin_puntaje.length ? `+ de ${active.cobertura.sin_puntaje}` : ""})
+                  </summary>
+                  <ul className="mt-2 text-[11.5px] space-y-0.5 max-h-40 overflow-y-auto">
+                    {active.cobertura.propuestas_sin_puntaje.map((p) => (
+                      <li key={p.propuesta_id} className="font-mono text-[#1A1F2C]">
+                        <span className="text-[#991B1B] font-bold">{p.codigo}</span> · {p.nombre}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
+
           {/* INFORME DE INCENTIVOS NO ASIGNADOS */}
           {active.incentivos_no_asignados?.length > 0 && (
             <div className="rounded-xl border border-[#FDE68A] bg-gradient-to-br from-[#FFFBEB] to-white p-5">

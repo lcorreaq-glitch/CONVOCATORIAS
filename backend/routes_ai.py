@@ -138,6 +138,92 @@ async def borrador_acta_colectiva(payload: ActaDraftIn, user: dict = Depends(get
     return {"borrador": draft, "marcado_como_sugerencia": True}
 
 
+class CoherenciaIn(BaseModel):
+    evaluacion_id: str
+    tipo: Optional[str] = "individual"  # "individual" | "colectiva"
+
+
+@router.post("/coherencia-evaluacion")
+async def coherencia_evaluacion(payload: CoherenciaIn, user: dict = Depends(get_current_user)):
+    """Analiza una evaluación y detecta posibles inconsistencias entre puntajes y observaciones."""
+    import json as _json
+    import re as _re
+    db = get_db()
+    coll = "evaluaciones_individuales" if payload.tipo != "colectiva" else "evaluaciones_colectivas"
+    ev = await db[coll].find_one({"id": payload.evaluacion_id}, {"_id": 0})
+    if not ev:
+        raise HTTPException(status_code=404, detail="Evaluación no encontrada")
+    prop = await db.propuestas.find_one({"id": ev["propuesta_id"]}, {"_id": 0}) or {}
+    criterios = await db.criterios.find({"convocatoria_id": ev["convocatoria_id"]}, {"_id": 0}).to_list(500)
+    crit_map = {c["id"]: c for c in criterios}
+
+    puntajes = ev.get("puntajes") or {}
+    observaciones = ev.get("observaciones") or {}
+    obs_final = ev.get("observacion_final") or ev.get("observacion_consolidada") or ""
+
+    items = []
+    for cid, c in crit_map.items():
+        items.append({
+            "criterio": c.get("nombre"),
+            "rango": f"{c.get('puntaje_min', 0)}-{c.get('puntaje_max', 100)}",
+            "puntaje": puntajes.get(cid),
+            "observacion": (observaciones.get(cid) or "").strip(),
+        })
+
+    prompt = (
+        "Analiza esta evaluación y detecta INCONSISTENCIAS entre los puntajes asignados y las observaciones escritas. "
+        "Buscas casos como: (a) puntaje alto con comentario negativo o crítico; (b) puntaje bajo con comentario elogioso; "
+        "(c) observaciones contradictorias entre criterios; (d) criterios con puntaje pero sin observación que lo justifique; "
+        "(e) observación final que contradice el conjunto de puntajes.\n\n"
+        f"Propuesta: {prop.get('codigo')} - {prop.get('nombre')}\n"
+        f"Organización: {prop.get('organizacion')}\n\n"
+        f"Criterios y puntajes:\n{_json.dumps(items, ensure_ascii=False, indent=2)}\n\n"
+        f"Observación final / consolidada del jurado:\n\"\"\"{obs_final}\"\"\"\n\n"
+        "Responde ÚNICAMENTE en JSON válido (sin markdown, sin ```), con esta estructura exacta:\n"
+        "{\n"
+        '  "coherente": true|false,\n'
+        '  "resumen": "frase ejecutiva máx 2 líneas",\n'
+        '  "hallazgos": [\n'
+        '    {"severidad":"alta|media|baja","criterio":"nombre o \'final\'","tipo":"puntaje_vs_observacion|contradiccion|sin_observacion|otro","descripcion":"qué encontraste"}\n'
+        "  ]\n"
+        "}\n"
+        "Si la evaluación es razonablemente coherente, devuelve coherente=true y hallazgos vacío o solo de severidad baja."
+    )
+
+    raw = await _chat(
+        "Eres un auditor experto de evaluaciones. Detectas incoherencias con criterio técnico y devuelves JSON estricto.",
+        prompt, session_suffix=f"coh-{payload.evaluacion_id[:8]}",
+    )
+    # Limpieza defensiva (algunos modelos envuelven en ```json)
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = _re.sub(r"^```(?:json)?", "", cleaned).strip()
+        cleaned = _re.sub(r"```$", "", cleaned).strip()
+    try:
+        data = _json.loads(cleaned)
+    except Exception:
+        # Si el modelo no devolvió JSON parseable, intentamos extraer el primer bloque {...}
+        m = _re.search(r"\{[\s\S]*\}", cleaned)
+        if m:
+            try:
+                data = _json.loads(m.group(0))
+            except Exception:
+                data = {"coherente": True, "resumen": "No se pudo analizar la respuesta de IA.", "hallazgos": [], "raw": raw}
+        else:
+            data = {"coherente": True, "resumen": "Respuesta IA sin estructura JSON.", "hallazgos": [], "raw": raw}
+
+    # Normalización mínima
+    data.setdefault("coherente", True)
+    data.setdefault("resumen", "")
+    data.setdefault("hallazgos", [])
+    if not isinstance(data.get("hallazgos"), list):
+        data["hallazgos"] = []
+
+    await audit(user, "ai_coherencia", coll, payload.evaluacion_id,
+                detalle=f"hallazgos={len(data.get('hallazgos') or [])} coherente={data.get('coherente')}")
+    return data
+
+
 class MejorarTextoIn(BaseModel):
     texto: str
     contexto: Optional[str] = "perfil_jurado"
