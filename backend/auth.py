@@ -177,6 +177,8 @@ class UserOut(BaseModel):
     active: bool = True
     convocatoria_roles: list = Field(default_factory=list)
     jurado_id: Optional[str] = None  # solo para usuarios con rol jurado
+    habeas_consent_required: bool = False  # True si es jurado y aún no ha aceptado el tratamiento de datos
+    habeas_consent_version: Optional[str] = None  # versión de la política aceptada (si aplica)
 
 
 @router.post("/login")
@@ -225,7 +227,72 @@ async def logout(response: Response, user: dict = Depends(get_current_user)):
 
 @router.get("/me", response_model=UserOut)
 async def me(user: dict = Depends(get_current_user)):
-    return UserOut(**user)
+    # Solo los JURADOS deben aceptar el tratamiento de datos personales.
+    # El consentimiento se guarda en `habeas_data_consents` (uno por jurado).
+    consent_required = False
+    consent_version = None
+    if user.get("role") == "jurado" and user.get("jurado_id"):
+        db = get_db()
+        latest = await db.habeas_data_consents.find_one(
+            {"jurado_id": user["jurado_id"]}, sort=[("fecha_aceptacion", -1)]
+        )
+        if latest:
+            consent_version = latest.get("version")
+        else:
+            consent_required = True
+    return UserOut(
+        **{k: v for k, v in user.items() if k in UserOut.model_fields},
+        habeas_consent_required=consent_required,
+        habeas_consent_version=consent_version,
+    )
+
+
+HABEAS_DATA_POLICY_VERSION = "v1.0-2026-02"
+HABEAS_DATA_TEXT = (
+    "Autorizo a ELEA Innovación Social y a la entidad organizadora de la convocatoria "
+    "a tratar mis datos personales con fines exclusivamente vinculados a esta convocatoria, "
+    "conforme a la Ley 1581 de 2012 y el Decreto 1377 de 2013 de la República de Colombia. "
+    "Reconozco que puedo conocer, actualizar, rectificar o suprimir mi información, así como "
+    "revocar la presente autorización, escribiendo a eleainnovacionsocial@gmail.com."
+)
+
+
+@router.post("/habeas-consent")
+async def aceptar_habeas_consent(request: Request, current_user: dict = Depends(get_current_user)):
+    """Registra de forma auditable que el jurado aceptó el tratamiento de sus datos
+    personales. Se guarda: jurado_id, convocatoria_id, fecha, IP, user-agent, versión y
+    el texto exacto firmado.
+    """
+    if current_user.get("role") != "jurado":
+        raise HTTPException(status_code=400, detail="Solo aplica al rol jurado.")
+    jurado_id = current_user.get("jurado_id")
+    if not jurado_id:
+        raise HTTPException(status_code=400, detail="Usuario sin jurado_id asociado.")
+    db = get_db()
+    jur = await db.jurados.find_one({"id": jurado_id}, {"_id": 0, "convocatoria_id": 1})
+    ip = request.client.host if request.client else "anon"
+    user_agent = request.headers.get("user-agent", "")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "jurado_id": jurado_id,
+        "user_id": current_user["id"],
+        "convocatoria_id": (jur or {}).get("convocatoria_id"),
+        "version": HABEAS_DATA_POLICY_VERSION,
+        "texto": HABEAS_DATA_TEXT,
+        "ip_aceptacion": ip,
+        "user_agent": user_agent,
+        "fecha_aceptacion": now_iso(),
+    }
+    await db.habeas_data_consents.insert_one(doc)
+    await audit(current_user, "accept", "habeas_consent", doc["id"],
+                detalle=f"version={HABEAS_DATA_POLICY_VERSION} ip={ip}")
+    return {"ok": True, "version": HABEAS_DATA_POLICY_VERSION, "fecha": doc["fecha_aceptacion"]}
+
+
+@router.get("/habeas-consent/text")
+async def get_habeas_text(current_user: dict = Depends(get_current_user)):
+    """Devuelve el texto vigente para mostrar en el modal de aceptación."""
+    return {"version": HABEAS_DATA_POLICY_VERSION, "texto": HABEAS_DATA_TEXT}
 
 
 class ChangePasswordRequest(BaseModel):
