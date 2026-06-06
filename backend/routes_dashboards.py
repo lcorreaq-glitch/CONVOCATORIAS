@@ -694,7 +694,17 @@ async def mi_timeline(convocatoria_id: str, user: dict = Depends(get_current_use
     else:
         phases.append(phase("finalizacion", "Finalización", "Todas tus evaluaciones están finalizadas.", "completed", {"current": total_asignadas, "total": total_asignadas}))
 
-    # Fase Colectiva: visible si el jurado pertenece a una terna o ya tiene colectivas
+    # 4) Firma del acta INDIVIDUAL (después de finalizar todas tus V1, antes de empezar colectivas)
+    if not tiene_firma:
+        phases.append(phase("firma", "Firma del acta individual", "Carga tu firma en Mi Perfil para poder firmar el acta.", "pending", extra={"action": "mi_perfil"}))
+    elif firma_acta_at:
+        phases.append(phase("firma", "Firma del acta individual", f"Acta individual firmada el {firma_acta_at[:10]}.", "completed", extra={"firmada_at": firma_acta_at}))
+    elif finalizadas < total_asignadas or total_asignadas == 0:
+        phases.append(phase("firma", "Firma del acta individual", "Disponible cuando completes todas tus evaluaciones individuales.", "pending"))
+    else:
+        phases.append(phase("firma", "Firma del acta individual", "¡Listo para firmar tu acta individual!", "in_progress", extra={"action": "actas"}))
+
+    # 5) Fase Colectiva: visible si el jurado pertenece a una terna o ya tiene colectivas
     if ternas_del_jurado or col_total > 0 or col_pendientes_admin > 0:
         if finalizadas < total_asignadas and total_asignadas > 0:
             phases.append(phase("colectiva", "Evaluación colectiva",
@@ -710,25 +720,46 @@ async def mi_timeline(convocatoria_id: str, user: dict = Depends(get_current_use
                 "pending", {"current": 0, "total": col_pendientes_admin}, extra={"esperando_admin": True}))
         elif col_finalizadas == 0:
             phases.append(phase("colectiva", "Evaluación colectiva",
-                f"Tienes {col_total} colectivas abiertas. Inicia la consolidación con tu terna.",
+                f"Tienes {col_total} colectivas por evaluar con tu terna.",
                 "in_progress", {"current": 0, "total": col_total}, extra={"action": "evaluaciones_colectivas"}))
         elif col_finalizadas < col_total:
             phases.append(phase("colectiva", "Evaluación colectiva",
-                f"En progreso: {col_finalizadas}/{col_total} colectivas cerradas.",
+                f"En progreso: {col_finalizadas}/{col_total} colectivas evaluadas.",
                 "in_progress", {"current": col_finalizadas, "total": col_total}, extra={"action": "evaluaciones_colectivas"}))
         else:
             phases.append(phase("colectiva", "Evaluación colectiva",
-                f"Completaste las {col_total} colectivas con tu terna.",
+                f"Evaluaste las {col_total} colectivas con tu terna.",
                 "completed", {"current": col_total, "total": col_total}))
 
-    if not tiene_firma:
-        phases.append(phase("firma", "Firma del acta", "Carga tu firma en Mi Perfil para poder firmar el acta.", "pending", extra={"action": "mi_perfil"}))
-    elif firma_acta_at:
-        phases.append(phase("firma", "Firma del acta", f"Acta firmada el {firma_acta_at[:10]}.", "completed", extra={"firmada_at": firma_acta_at}))
-    elif finalizadas < total_asignadas or total_asignadas == 0:
-        phases.append(phase("firma", "Firma del acta", "Disponible cuando completes todas tus evaluaciones.", "pending"))
-    else:
-        phases.append(phase("firma", "Firma del acta", "¡Listo para firmar tu acta consolidada!", "in_progress", extra={"action": "actas"}))
+    # 6) Firma del acta DE LA TERNA (último paso del ciclo)
+    # Estado se basa en cuántas colectivas tienen el estado "Firmada" (firmada por la terna).
+    if ternas_del_jurado or col_total > 0:
+        col_firmadas_terna = 0
+        if ternas_del_jurado and col_total > 0:
+            col_firmadas_terna = await db.evaluaciones_colectivas.count_documents({
+                "convocatoria_id": convocatoria_id,
+                "terna_id": {"$in": ternas_del_jurado},
+                "estado": "Firmada",
+            })
+        if col_total == 0:
+            phases.append(phase("firma_terna", "Firma del acta de la terna",
+                "Disponible cuando se generen y completen las colectivas.", "pending"))
+        elif col_finalizadas < col_total:
+            phases.append(phase("firma_terna", "Firma del acta de la terna",
+                f"Disponible cuando evalúes las {col_total - col_finalizadas} colectivas restantes.",
+                "pending", {"current": col_firmadas_terna, "total": col_total}))
+        elif col_firmadas_terna == 0:
+            phases.append(phase("firma_terna", "Firma del acta de la terna",
+                "Listo para firmar el acta consolidada de tu terna.",
+                "in_progress", {"current": 0, "total": col_total}, extra={"action": "actas"}))
+        elif col_firmadas_terna < col_total:
+            phases.append(phase("firma_terna", "Firma del acta de la terna",
+                f"{col_firmadas_terna}/{col_total} actas de terna firmadas.",
+                "in_progress", {"current": col_firmadas_terna, "total": col_total}, extra={"action": "actas"}))
+        else:
+            phases.append(phase("firma_terna", "Firma del acta de la terna",
+                f"Las {col_total} actas de tu terna están firmadas.",
+                "completed", {"current": col_total, "total": col_total}))
 
     return {
         "jurado_id": jurado_id, "jurado_nombre": jur.get("nombre"),

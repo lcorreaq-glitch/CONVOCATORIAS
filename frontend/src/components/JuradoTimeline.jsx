@@ -8,8 +8,9 @@ const PHASE_ICONS = {
   asignacion: ClipboardList,
   evaluacion: Target,
   finalizacion: CheckCircle2,
-  colectiva: Users,
   firma: PenLine,
+  colectiva: Users,
+  firma_terna: FileSignature,
 };
 
 const STATUS_STYLES = {
