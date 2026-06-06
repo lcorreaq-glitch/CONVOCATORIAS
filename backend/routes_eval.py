@@ -347,6 +347,7 @@ async def solicitar_reapertura(eid: str, body: dict = Body(...),
     sid = str(uuid.uuid4())
     await db.reapertura_solicitudes.insert_one({
         "id": sid,
+        "tipo": "individual",
         "evaluacion_id": eid,
         "convocatoria_id": ev["convocatoria_id"],
         "propuesta_id": ev["propuesta_id"],
@@ -371,13 +372,20 @@ async def listar_solicitudes(convocatoria_id: str, estado: Optional[str] = None,
     # Enriquecer
     jurs = {j["id"]: j for j in await db.jurados.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(2000)}
     props = {p["id"]: p for p in await db.propuestas.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(5000)}
+    ternas = {t["id"]: t for t in await db.ternas.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(2000)}
     for it in items:
-        j = jurs.get(it.get("jurado_id"), {})
+        # Retrocompat: documentos antiguos sin 'tipo' son individuales
+        if not it.get("tipo"):
+            it["tipo"] = "individual"
+        j = jurs.get(it.get("jurado_id"), {}) if it.get("jurado_id") else {}
         p = props.get(it.get("propuesta_id"), {})
+        t = ternas.get(it.get("terna_id"), {}) if it.get("terna_id") else {}
         it["jurado_nombre"] = j.get("nombre")
         it["jurado_email"] = j.get("email")
         it["propuesta_codigo"] = p.get("codigo")
         it["propuesta_nombre"] = p.get("nombre")
+        it["terna_codigo"] = t.get("codigo")
+        it["terna_nombre"] = t.get("nombre")
     return items
 
 
@@ -389,9 +397,14 @@ async def aprobar_solicitud(sid: str, user: dict = Depends(require_roles("admin_
         raise HTTPException(404, "Solicitud no encontrada")
     if sol.get("estado") != "Pendiente":
         raise HTTPException(409, f"La solicitud ya está {sol['estado']}")
-    # Reabrir la evaluación reusando la lógica
-    await reabrir_eval(sol["evaluacion_id"], body={"motivo": f"[Aprobado] {sol.get('motivo','')}"}, user=user)
-    return {"ok": True, "estado": "Aprobada"}
+    # Reabrir según el tipo
+    tipo = sol.get("tipo") or "individual"
+    motivo_aprob = f"[Aprobado] {sol.get('motivo','')}"
+    if tipo == "colectiva":
+        await reabrir_eval_colectiva(sol["evaluacion_id"], body={"motivo": motivo_aprob}, user=user)
+    else:
+        await reabrir_eval(sol["evaluacion_id"], body={"motivo": motivo_aprob}, user=user)
+    return {"ok": True, "estado": "Aprobada", "tipo": tipo}
 
 
 @router.post("/reapertura-solicitudes/{sid}/rechazar")
@@ -692,30 +705,121 @@ async def save_eval_colectiva(eid: str, payload: EvalColUpdate, user: dict = Dep
         await db.evaluaciones_colectivas.update_one({"id": eid}, {"$set": updates})
     await audit(user, "save", "evaluaciones_colectivas", eid, valor_nuevo=updates)
     return await db.evaluaciones_colectivas.find_one({"id": eid}, {"_id": 0})
-async def save_eval_colectiva(eid: str, payload: EvalColUpdate, user: dict = Depends(get_current_user)):
+
+
+# ==================== REAPERTURA DE EVALUACIONES COLECTIVAS ====================
+async def _user_is_integrante_terna(db, user: dict, terna_id: str) -> bool:
+    """Determina si el usuario es integrante de una terna específica (por email del jurado)."""
+    terna = await db.ternas.find_one({"id": terna_id})
+    if not terna:
+        return False
+    user_email = (user.get("email") or "").lower()
+    if not user_email:
+        return False
+    for integ in (terna.get("integrantes") or []):
+        jur_id = integ.get("jurado_id")
+        if not jur_id:
+            continue
+        jur = await db.jurados.find_one({"id": jur_id}, {"email": 1, "_id": 0})
+        if jur and (jur.get("email") or "").lower() == user_email:
+            return True
+    return False
+
+
+@router.post("/evaluaciones-colectivas/{eid}/reabrir")
+async def reabrir_eval_colectiva(eid: str, body: dict = Body(default={}),
+                                  user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    """Reabre una evaluación colectiva Cerrada para que la terna pueda modificarla.
+    - Bloqueada si la evaluación está Firmada/Anulada (estado terminal).
+    - Crea snapshot en `evaluaciones_colectivas_versiones` para auditoría histórica.
+    - Estado pasa a 'Reabierta' (editable de nuevo, igual que Abierta).
+    - El motivo es obligatorio.
+    - Aprueba automáticamente cualquier solicitud Pendiente para esta colectiva.
+    """
     db = get_db()
-    ev = await db.evaluaciones_colectivas.find_one({"id": eid})
+    ev = await db.evaluaciones_colectivas.find_one({"id": eid}, {"_id": 0})
     if not ev:
-        raise HTTPException(status_code=404, detail="Evaluación colectiva no encontrada")
-    if ev["estado"] in ("Cerrada", "Firmada"):
-        raise HTTPException(status_code=400, detail="Evaluación colectiva ya cerrada")
-    updates = {}
-    if payload.puntajes is not None:
-        updates["puntajes"] = payload.puntajes
-        criterios = await db.criterios.find({"convocatoria_id": ev["convocatoria_id"]}, {"_id": 0}).to_list(100)
-        total_of = sum(float(payload.puntajes.get(c["id"], 0)) for c in criterios if c.get("oficial", True))
-        total_dif = sum(float(payload.puntajes.get(c["id"], 0)) for c in criterios if not c.get("oficial", True))
-        bono = await _compute_bono_priorizacion(db, ev["convocatoria_id"], ev["propuesta_id"])
-        updates["puntaje_criterios"] = round(total_of, 2)
-        updates["bono_priorizacion"] = bono
-        updates["puntaje_final"] = round(total_of + bono, 2)
-        updates["puntaje_diferencial_total"] = round(total_dif, 2)
-    if payload.observacion_consolidada is not None:
-        updates["observacion_consolidada"] = payload.observacion_consolidada
-    if payload.cerrar:
-        updates["estado"] = "Cerrada"
-        updates["fecha_cierre"] = now_iso()
-    if updates:
-        await db.evaluaciones_colectivas.update_one({"id": eid}, {"$set": updates})
-    await audit(user, "save", "evaluaciones_colectivas", eid, valor_nuevo=updates)
-    return await db.evaluaciones_colectivas.find_one({"id": eid}, {"_id": 0})
+        raise HTTPException(404, "Evaluación colectiva no encontrada")
+    if ev.get("estado") in ("Firmada", "Anulada"):
+        raise HTTPException(
+            409,
+            f"No se puede reabrir: la evaluación colectiva está {ev['estado']}. "
+            f"Si hay un error tras la firma debe registrarse una corrección/adenda en lugar de modificar.",
+        )
+    if ev.get("estado") not in ("Cerrada",):
+        raise HTTPException(409, f"La evaluación colectiva está en estado '{ev['estado']}', no requiere reapertura.")
+    motivo = (body or {}).get("motivo") or ""
+    if not motivo.strip():
+        raise HTTPException(400, "El motivo de la reapertura es obligatorio")
+    # Snapshot histórico
+    snap = {k: ev.get(k) for k in ("estado", "puntajes", "observacion_consolidada",
+                                     "puntaje_final", "puntaje_criterios", "bono_priorizacion",
+                                     "puntaje_diferencial_total", "fecha_cierre", "fuente_definitiva")}
+    await db.evaluaciones_colectivas_versiones.insert_one({
+        "id": str(uuid.uuid4()),
+        "evaluacion_colectiva_id": eid,
+        "convocatoria_id": ev["convocatoria_id"],
+        "snapshot": snap,
+        "motivo_reapertura": motivo,
+        "reabierta_por": user.get("username"),
+        "reabierta_at": now_iso(),
+    })
+    # Marcar reabierta
+    await db.evaluaciones_colectivas.update_one(
+        {"id": eid},
+        {"$set": {"estado": "Reabierta", "reaperturas": (ev.get("reaperturas", 0) + 1),
+                  "ultima_reapertura_at": now_iso(), "ultima_reapertura_motivo": motivo,
+                  "ultima_reapertura_por": user.get("username")},
+         "$unset": {"fecha_cierre": ""}}
+    )
+    # Aprobar solicitudes pendientes asociadas
+    await db.reapertura_solicitudes.update_many(
+        {"evaluacion_id": eid, "tipo": "colectiva", "estado": "Pendiente"},
+        {"$set": {"estado": "Aprobada", "resuelta_at": now_iso(), "resuelta_por": user.get("username")}}
+    )
+    await audit(user, "reopen", "evaluaciones_colectivas", eid, detalle=motivo)
+    return {"ok": True, "estado": "Reabierta", "version_guardada": True}
+
+
+@router.post("/evaluaciones-colectivas/{eid}/solicitar-reapertura")
+async def solicitar_reapertura_colectiva(eid: str, body: dict = Body(...),
+                                          user: dict = Depends(get_current_user)):
+    """Un integrante de la terna solicita reapertura de su evaluación colectiva Cerrada.
+    El admin la verá en /reapertura-solicitudes y podrá aprobar o rechazar.
+    """
+    db = get_db()
+    ev = await db.evaluaciones_colectivas.find_one({"id": eid}, {"_id": 0})
+    if not ev:
+        raise HTTPException(404, "Evaluación colectiva no encontrada")
+    # Auth: solo integrantes de la terna o admins
+    if user["role"] not in ("admin_general", "admin_convocatoria"):
+        is_member = await _user_is_integrante_terna(db, user, ev["terna_id"])
+        if not is_member:
+            raise HTTPException(403, "Solo los integrantes de la terna pueden solicitar la reapertura")
+    if ev.get("estado") in ("Firmada", "Anulada"):
+        raise HTTPException(409, f"No se puede solicitar: la evaluación colectiva está {ev['estado']}. "
+                                  f"Si requiere modificación tras firma, debe registrarse una corrección/adenda.")
+    if ev.get("estado") != "Cerrada":
+        raise HTTPException(409, f"La evaluación colectiva está en estado '{ev['estado']}' — ya es editable.")
+    motivo = (body or {}).get("motivo") or ""
+    if not motivo.strip():
+        raise HTTPException(400, "Debes indicar el motivo de la solicitud")
+    # Evitar duplicar solicitudes pendientes
+    ya = await db.reapertura_solicitudes.find_one({"evaluacion_id": eid, "tipo": "colectiva", "estado": "Pendiente"})
+    if ya:
+        raise HTTPException(409, "Ya hay una solicitud Pendiente para esta evaluación colectiva")
+    sid = str(uuid.uuid4())
+    await db.reapertura_solicitudes.insert_one({
+        "id": sid,
+        "tipo": "colectiva",
+        "evaluacion_id": eid,
+        "convocatoria_id": ev["convocatoria_id"],
+        "propuesta_id": ev["propuesta_id"],
+        "terna_id": ev["terna_id"],
+        "solicitada_por": user.get("username"),
+        "motivo": motivo,
+        "estado": "Pendiente",
+        "created_at": now_iso(),
+    })
+    await audit(user, "request_reopen", "evaluaciones_colectivas", eid, detalle=motivo)
+    return {"ok": True, "solicitud_id": sid, "estado": "Pendiente"}

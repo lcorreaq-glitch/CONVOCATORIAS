@@ -741,3 +741,16 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - ✅ Dropdown de creación de usuario filtra roles inactivos (solo muestra el rol actual si se edita).
 - ✅ Validado e2e con curl: desactivar supervisor → 1 usuario afectado → su login devuelve 403 → reactivar → login funciona.
 
+
+**Reapertura de Evaluaciones Colectivas (paridad con individuales)** — Feb 2026:
+- ✅ `POST /api/evaluaciones-colectivas/{eid}/reabrir` (admin): valida estado `Cerrada` → pasa a `Reabierta`, crea snapshot en `evaluaciones_colectivas_versiones`, incrementa `reaperturas`, motivo obligatorio, bloquea `Firmada/Anulada`.
+- ✅ `POST /api/evaluaciones-colectivas/{eid}/solicitar-reapertura` (integrante_terna): valida que el usuario es integrante por `jurado_id`, rechaza duplicados, registra en `reapertura_solicitudes` con `tipo: "colectiva"`.
+- ✅ `GET /api/reapertura-solicitudes` enriquecido: incluye `tipo`, `terna_nombre`, `terna_codigo` para colectivas; backfill retrocompat asume `individual` si no hay tipo.
+- ✅ `POST /api/reapertura-solicitudes/{sid}/aprobar` dispatch según tipo (llama `reabrir_eval` o `reabrir_eval_colectiva`).
+- ✅ Frontend `EvaluacionColectiva.jsx`: botón "Reabrir" (admin) + "Solicitar reapertura" (integrante de la terna identificado por `user.jurado_id`).
+- ✅ Frontend `Administracion.jsx → ReaperturasPanel`: tabla con columna "Tipo" (badge Colectiva/Individual) y muestra terna en lugar de jurado para colectivas.
+- ✅ Limpieza: eliminada función duplicada `save_eval_colectiva` que estaba duplicada en líneas 695-722.
+
+**Validado e2e por curl** (lcorreaq + carlos.velez de T1):
+1. Crear colectiva → Abierta · 2. Cerrar (puntajes + obs) → Cerrada · 3. Admin reabre con motivo → Reabierta, reaperturas=1 · 4. Re-cerrar · 5. Integrante solicita reapertura → 200 + solicitud_id Pendiente · 6. Duplicado → 409 · 7. Listar como admin → tipo=colectiva, terna="Terna Urabá" · 8. Admin aprueba → estado Reabierta, reaperturas=2 · 9. Jurado NO integrante → 403 "Solo los integrantes de la terna pueden solicitar la reapertura".
+

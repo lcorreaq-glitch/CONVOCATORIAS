@@ -1180,15 +1180,28 @@ function ReaperturasPanel() {
             <table className="w-full dense-table">
               <thead>
                 <tr>
-                  <th>Jurado</th><th>Propuesta</th><th>Motivo</th><th>Fecha</th><th>Estado</th><th></th>
+                  <th>Tipo</th><th>Solicitante</th><th>Propuesta / Terna</th><th>Motivo</th><th>Fecha</th><th>Estado</th><th></th>
                 </tr>
               </thead>
               <tbody>
                 {items.map((s) => (
                   <tr key={s.id} data-testid={`reap-row-${s.id}`}>
                     <td>
-                      <div className="font-semibold text-[13px]">{s.jurado_nombre}</div>
-                      <div className="text-[11px] text-muted-foreground">{s.jurado_email}</div>
+                      <Badge tone={s.tipo === "colectiva" ? "info" : "muted"}>{s.tipo === "colectiva" ? "Colectiva" : "Individual"}</Badge>
+                    </td>
+                    <td>
+                      {s.tipo === "colectiva" ? (
+                        <>
+                          <div className="font-semibold text-[13px]">{s.terna_nombre || "—"}</div>
+                          <div className="text-[11px] text-muted-foreground font-mono">{s.terna_codigo}</div>
+                          <div className="text-[10.5px] text-muted-foreground">solicitada por {s.solicitada_por}</div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="font-semibold text-[13px]">{s.jurado_nombre}</div>
+                          <div className="text-[11px] text-muted-foreground">{s.jurado_email}</div>
+                        </>
+                      )}
                     </td>
                     <td>
                       <div className="font-mono text-[11px] text-muted-foreground tabular-nums">{s.propuesta_codigo}</div>

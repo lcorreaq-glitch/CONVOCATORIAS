@@ -10,7 +10,7 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/u
 import { toast } from "sonner";
 import {
   ArrowLeft, Save, FileText, CheckCircle2, EyeOff, Sparkles, Lock, ArrowRight,
-  Info, Building2, MapPin, Calendar, Layers, Eye as EyeIcon, ExternalLink, Users,
+  Info, Building2, MapPin, Calendar, Layers, Eye as EyeIcon, ExternalLink, Users, RefreshCw,
 } from "lucide-react";
 
 const CAMPO_ICON = {
@@ -71,8 +71,31 @@ export default function EvaluacionColectiva() {
 
   const modalidad = conv?.modalidad_evaluacion_colectiva || "promedio_individuales";
   const isClosed = ["Cerrada", "Firmada"].includes(ev.estado);
+  const isCerrada = ev.estado === "Cerrada"; // reabrible (Firmada NO)
   const isAdmin = ["admin_general", "admin_convocatoria"].includes(user?.role);
   const isModal2 = modalidad === "nueva_evaluacion";
+  // ¿El usuario es integrante de esta terna? (para botón Solicitar reapertura)
+  const userJuradoId = user?.jurado_id;
+  const isIntegrante = !!(userJuradoId && terna?.integrantes?.some((i) => i.jurado_id === userJuradoId));
+
+  const reabrirColectiva = async () => {
+    const motivo = window.prompt("Motivo de la reapertura (queda en auditoría):");
+    if (!motivo || !motivo.trim()) return;
+    try {
+      await api.post(`/evaluaciones-colectivas/${id}/reabrir`, { motivo });
+      toast.success("Evaluación colectiva reabierta. La terna puede modificarla.");
+      reload();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const solicitarReaperturaColectiva = async () => {
+    const motivo = window.prompt("¿Por qué necesitan reabrir esta evaluación colectiva? (el admin debe aprobar)");
+    if (!motivo || !motivo.trim()) return;
+    try {
+      await api.post(`/evaluaciones-colectivas/${id}/solicitar-reapertura`, { motivo });
+      toast.success("Solicitud enviada al administrador. Espera su aprobación.");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
 
   const save = async (cerrar = false) => {
     try {
@@ -148,6 +171,28 @@ export default function EvaluacionColectiva() {
           {isClosed && (
             <Button onClick={downloadActa} variant="outline" className="rounded-sm gap-2" data-testid="download-acta-col-btn">
               <FileText className="w-4 h-4" />Acta PDF
+            </Button>
+          )}
+          {/* Reabrir colectiva (solo admin, estado Cerrada — no Firmada) */}
+          {isCerrada && isAdmin && (
+            <Button
+              onClick={reabrirColectiva}
+              variant="outline"
+              className="rounded-sm gap-2 text-amber-700 border-amber-300 hover:bg-amber-50"
+              data-testid="eval-col-reabrir-btn"
+            >
+              <RefreshCw className="w-4 h-4" />Reabrir
+            </Button>
+          )}
+          {/* Solicitar reapertura (integrante de la terna, estado Cerrada) */}
+          {isCerrada && !isAdmin && isIntegrante && (
+            <Button
+              onClick={solicitarReaperturaColectiva}
+              variant="outline"
+              className="rounded-sm gap-2 text-amber-700 border-amber-300 hover:bg-amber-50"
+              data-testid="eval-col-solicitar-reapertura-btn"
+            >
+              <RefreshCw className="w-4 h-4" />Solicitar reapertura
             </Button>
           )}
         </div>
