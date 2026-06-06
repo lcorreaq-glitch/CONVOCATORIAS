@@ -1187,9 +1187,6 @@ async def acta_colectiva_terna(terna_id: str, user: dict = Depends(get_current_u
     for i, e in enumerate(evs_col, 1):
         p = pmap.get(e["propuesta_id"], {})
         d = p.get("datos") or {}
-        # NIT: probar todas las variantes comunes
-        nit = (p.get("nit") or d.get("nit") or d.get("NIT") or d.get("numero_documento")
-               or d.get("documento_organizacion") or d.get("identificacion") or "—")
         org_full = (p.get("organizacion") or d.get("nombre_organizacion") or "—")
         # Puntaje de cada integrante (en el orden de la terna)
         puntajes_jur = []
@@ -1197,19 +1194,16 @@ async def acta_colectiva_terna(terna_id: str, user: dict = Depends(get_current_u
             v = v2_lookup.get((e["propuesta_id"], jid))
             pt = v.get("puntaje_total") if v else None
             if pt is None and v:
-                # Si V2 no tiene puntaje_total pre-calculado, sumar puntajes
                 pt = sum(float(x) for x in (v.get("puntajes") or {}).values())
             puntajes_jur.append(f"{round(pt, 2)}" if pt is not None else "—")
-        # Asegurar 3 columnas aunque la terna tenga menos integrantes registrados
         while len(puntajes_jur) < 3:
             puntajes_jur.append("—")
-        # Promedio definitivo (validado contra el puntaje_final guardado)
+        # Promedio calculado vs guardado
         promedio_calculado = None
         vals_validos = [float(x) for x in puntajes_jur if x != "—"]
         if vals_validos:
             promedio_calculado = round(sum(vals_validos) / len(vals_validos), 2)
         promedio_final = e.get("puntaje_final", 0)
-        # Si hay discrepancia notable, marcar con ⚠
         promedio_str = f"{promedio_final}"
         if promedio_calculado is not None and abs(float(promedio_final) - promedio_calculado) > 0.5:
             promedio_str = f"{promedio_final} (calc: {promedio_calculado})"
@@ -1217,16 +1211,11 @@ async def acta_colectiva_terna(terna_id: str, user: dict = Depends(get_current_u
             str(i), p.get("codigo", "—"),
             d.get("municipio", "—"),
             org_full[:60],
-            str(nit)[:18],
             puntajes_jur[0], puntajes_jur[1], puntajes_jur[2],
             promedio_str,
         ])
-    n1 = (integrantes_ordenados[0].get("nombre", "Jurado 1").split() if integrantes_ordenados else ["J1"])
-    n2 = (integrantes_ordenados[1].get("nombre", "Jurado 2").split() if len(integrantes_ordenados) > 1 else ["J2"])
-    n3 = (integrantes_ordenados[2].get("nombre", "Jurado 3").split() if len(integrantes_ordenados) > 2 else ["J3"])
-    # Etiquetas genéricas (los nombres ya aparecen en el bloque INTEGRANTES del encabezado)
     headers = [
-        "Nº", "Cód.", "Municipio", "Organización", "NIT",
+        "Nº", "Cód.", "Municipio", "Organización",
         "Puntaje Jurado 1", "Puntaje Jurado 2", "Puntaje Jurado 3",
         "Puntaje Total (promedio)",
     ]
