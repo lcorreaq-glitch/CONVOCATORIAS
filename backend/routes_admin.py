@@ -29,8 +29,16 @@ RESET_COLLECTIONS_DEFAULT = [
     "asignaciones",
     "evaluaciones_individuales",
     "evaluaciones_colectivas",
+    "evaluaciones_versiones",              # snapshots de reaperturas individuales
+    "evaluaciones_colectivas_versiones",   # snapshots de reaperturas colectivas
+    "reapertura_solicitudes",              # solicitudes de reapertura pendientes/resueltas
     "rankings",
     "actas",
+    "actas_subregionales",
+    "actas_verificacion",                  # códigos QR de verificación pública
+    "email_log",                           # bitácora de correos enviados
+    "login_attempts",                      # lockouts de bruteforce
+    "uploads",                             # archivos huérfanos (firmas, hojas de vida)
     "auditoria",
 ]
 
@@ -55,12 +63,15 @@ async def reset_datos(payload: ResetPayload,
         raise HTTPException(status_code=400,
                             detail="Confirmación requerida (escribe REINICIAR).")
     db = get_db()
+    # Colecciones globales (sin convocatoria_id) → siempre se barren sin filtro
+    GLOBAL_COLLECTIONS = {"auditoria", "actas_verificacion", "email_log",
+                          "login_attempts", "uploads"}
     base_filter = {"convocatoria_id": payload.convocatoria_id} if payload.convocatoria_id else {}
     resumen = {}
     for col in RESET_COLLECTIONS_DEFAULT:
         if col == "auditoria" and not payload.incluir_auditoria:
             continue
-        flt = {} if col == "auditoria" else base_filter  # auditoría no tiene convocatoria_id
+        flt = {} if col in GLOBAL_COLLECTIONS else base_filter
         r = await db[col].delete_many(flt)
         resumen[col] = r.deleted_count
 
@@ -73,7 +84,7 @@ async def reset_datos(payload: ResetPayload,
                 detalle=f"reset {resumen}, convocatoria={payload.convocatoria_id}")
     return {"ok": True, "resumen": resumen, "preservado": [
         "convocatorias", "campos", "catalogos", "criterios", "desempates",
-        "settings", "users (admin_general)"
+        "system_settings", "roles", "users (admin_general)"
     ]}
 
 
