@@ -117,8 +117,8 @@ def _dashboards_for_role(role: str, is_inc2026: bool, campos: list) -> List[dict
             "subtitulo": "Tu avance personal en las deliberaciones de tu terna", "icon": "Users",
             "widgets": [
                 {"id": "kpi_col_asignadas", "tipo": "kpi", "titulo": "Colectivas asignadas", "ds": "mias_colectivas_asignadas", "color": "morado"},
-                {"id": "kpi_col_abiertas", "tipo": "kpi", "titulo": "Por calificar", "ds": "mias_colectivas_abiertas", "color": "amber"},
-                {"id": "kpi_col_cerradas", "tipo": "kpi", "titulo": "Calificadas por mí", "ds": "mias_colectivas_finalizadas", "color": "verde"},
+                {"id": "kpi_col_abiertas", "tipo": "kpi", "titulo": "Por evaluar", "ds": "mias_colectivas_abiertas", "color": "amber"},
+                {"id": "kpi_col_cerradas", "tipo": "kpi", "titulo": "Evaluadas por mí", "ds": "mias_colectivas_finalizadas", "color": "verde"},
                 {"id": "progress_col_avance", "tipo": "progress", "titulo": "Mi avance personal", "ds": "mi_avance_colectivas"},
             ],
         })

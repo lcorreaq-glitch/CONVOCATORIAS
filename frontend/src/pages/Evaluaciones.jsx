@@ -459,8 +459,8 @@ function EvalTableColectiva({ evaluaciones, propMap, ternaMap, isJurado, isAdmin
                     const miEstado = v?.estado || "Sin iniciar";
                     const miTerminada = TERMINADAS_STATES.includes(miEstado);
                     const tone = miTerminada ? "verde" : (miEstado === "Sin iniciar" ? "amber" : "amber");
-                    // Etiqueta institucional: "Pendiente" (no iniciada/en curso) o "Calificada" (finalizada/firmada)
-                    const label = miTerminada ? "Calificada" : "Pendiente";
+                    // Etiqueta institucional: "Pendiente" (no iniciada/en curso) o "Evaluada" (finalizada/firmada)
+                    const label = miTerminada ? "Evaluada" : "Pendiente";
                     const ternaEstado = e.estado;
                     return (
                       <div className="space-y-0.5">
@@ -495,7 +495,7 @@ function EvalTableColectiva({ evaluaciones, propMap, ternaMap, isJurado, isAdmin
                           const v = myV2ByProp[e.propuesta_id];
                           const me = v?.estado || "Sin iniciar";
                           if (TERMINADAS_STATES.includes(me)) return "Ver";
-                          return "Calificar";
+                          return "Evaluar";
                         }
                         return PENDIENTE_STATES.includes(e.estado) ? "Continuar" : "Abrir";
                       })()} <ArrowRight className="w-3 h-3" />
