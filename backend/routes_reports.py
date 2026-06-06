@@ -427,41 +427,80 @@ async def reporte_consolidado_individual(convocatoria_id: str, user: dict = Depe
 
 @router.get("/reportes/consolidado-colectiva")
 async def reporte_consolidado_colectiva(convocatoria_id: str, user: dict = Depends(get_current_user)):
-    """Reporte de evaluaciones colectivas (por terna) con todos sus criterios y observaciones."""
+    """Reporte consolidado de evaluaciones colectivas por terna.
+
+    Estructura: una fila por (propuesta, terna). Incluye:
+      - Datos de la propuesta (código, nombre, organización, NIT, subregión, municipio).
+      - Identificación de la terna y sus integrantes.
+      - Puntaje TOTAL emitido por cada uno de los 3 jurados (suma de criterios oficiales de su V2).
+      - Puntaje TOTAL promedio (validado contra el cierre automático de la colectiva).
+      - Estado y fechas.
+
+    No se incluyen observaciones por criterio porque en la evaluación colectiva
+    el promedio se calcula numéricamente y no existe una observación consensuada por criterio.
+    """
     db = get_db()
     evals = await db.evaluaciones_colectivas.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(20000)
     propuestas = {p["id"]: p async for p in db.propuestas.find({"convocatoria_id": convocatoria_id})}
     ternas = {t["id"]: t async for t in db.ternas.find({"convocatoria_id": convocatoria_id})}
+    juradoMap = {j["id"]: j async for j in db.jurados.find({"convocatoria_id": convocatoria_id})}
     criterios = await db.criterios.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).sort("orden", 1).to_list(200)
-    oficiales = [c for c in criterios if c.get("oficial") and not c.get("diferencial")]
-    desempate = [c for c in criterios if c.get("diferencial")]
+    crit_oficiales_ids = [c["id"] for c in criterios if c.get("oficial") and not c.get("diferencial")]
+
+    # Pre-cargar todas las V2 de la convocatoria (etapa=colectiva, finalizadas/firmadas)
+    v2s = await db.evaluaciones_individuales.find({
+        "convocatoria_id": convocatoria_id, "etapa": "colectiva",
+        "estado": {"$in": ["Finalizada", "Firmada"]},
+    }, {"_id": 0}).to_list(20000)
+    # Map: (propuesta_id, jurado_id) -> total_oficial
+    v2_total = {}
+    for v in v2s:
+        pj_total = v.get("puntaje_total")
+        if pj_total is None:
+            pj_total = sum(float((v.get("puntajes") or {}).get(cid, 0)) for cid in crit_oficiales_ids)
+        v2_total[(v["propuesta_id"], v["jurado_id"])] = round(float(pj_total), 2)
+
     out = []
     for ev in evals:
         p = propuestas.get(ev.get("propuesta_id"), {})
         t = ternas.get(ev.get("terna_id"), {})
+        d = p.get("datos") or {}
+        integrantes_ids = [i.get("jurado_id") for i in (t.get("integrantes") or []) if i.get("jurado_id")]
+        # Resolver nombres
+        nombres = [juradoMap.get(jid, {}).get("nombre", "—") for jid in integrantes_ids]
+        # Puntajes por jurado (en orden de la terna)
+        puntajes_jur = [v2_total.get((ev.get("propuesta_id"), jid)) for jid in integrantes_ids]
+        # Asegurar 3 columnas
+        while len(puntajes_jur) < 3:
+            puntajes_jur.append(None)
+            nombres.append("—")
+        # Promedio calculado
+        vals_validos = [v for v in puntajes_jur if v is not None]
+        promedio_calc = round(sum(vals_validos) / len(vals_validos), 2) if vals_validos else None
+        puntaje_oficial = ev.get("puntaje_criterios") or ev.get("puntaje_total") or ev.get("puntaje_consensuado")
         row = {
             "propuesta_codigo": p.get("codigo"),
             "propuesta_nombre": p.get("nombre"),
-            "organizacion": p.get("organizacion") or (p.get("datos") or {}).get("nombre_organizacion"),
-            "subregion": (p.get("datos") or {}).get("subregion"),
+            "organizacion": p.get("organizacion") or d.get("nombre_organizacion"),
+            "nit": p.get("nit") or d.get("nit") or d.get("NIT") or d.get("numero_documento"),
+            "municipio": d.get("municipio"),
+            "subregion": d.get("subregion") or p.get("subregion"),
             "terna_codigo": t.get("codigo"),
             "terna_nombre": t.get("nombre"),
+            "jurado_1": nombres[0],
+            "puntaje_jurado_1": puntajes_jur[0],
+            "jurado_2": nombres[1],
+            "puntaje_jurado_2": puntajes_jur[1],
+            "jurado_3": nombres[2],
+            "puntaje_jurado_3": puntajes_jur[2],
+            "puntaje_total_promedio_calculado": promedio_calc,
+            "puntaje_total_oficial": round(float(puntaje_oficial), 2) if puntaje_oficial is not None else None,
+            "bono_priorizacion": ev.get("bono_priorizacion") or 0,
+            "puntaje_final_con_bono": ev.get("puntaje_final"),
+            "puntaje_diferencial_total": ev.get("puntaje_diferencial_total"),
             "estado": ev.get("estado"),
-            "puntaje_total_oficial": ev.get("puntaje_total") or ev.get("puntaje_consensuado"),
-            "puntaje_total_priorizacion": ev.get("puntaje_diferencial_total"),
+            "fecha_cierre": ev.get("fecha_cierre") or ev.get("fecha_finalizacion"),
         }
-        puntajes = ev.get("puntajes") or ev.get("puntajes_consensuados") or {}
-        observaciones = ev.get("observaciones") or {}
-        for c in oficiales:
-            base = f"OF · {c.get('nombre','')}"
-            row[f"{base} (puntaje)"] = puntajes.get(c["id"])
-            row[f"{base} (obs.)"] = observaciones.get(c["id"], "")
-        for c in desempate:
-            base = f"DIF · {c.get('nombre','')}"
-            row[f"{base} (puntaje)"] = puntajes.get(c["id"])
-            row[f"{base} (obs.)"] = observaciones.get(c["id"], "")
-        row["observacion_final"] = ev.get("observacion_final") or ev.get("acta_resumen") or ""
-        row["fecha_finalizacion"] = ev.get("fecha_finalizacion") or ev.get("fecha_cierre")
         out.append(row)
     return out
 

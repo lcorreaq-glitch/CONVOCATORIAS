@@ -156,7 +156,7 @@ DEFAULT_INC2026_TEMPLATES = {
             "y que las decisiones que avalamos representan el consenso del cuerpo evaluador de la subregión."
         ),
         "tabla_titulo": "RESULTADOS CONSOLIDADOS POR EL APLICATIVO",
-        "tabla_subtitulo": "La siguiente tabla oficializa el listado de las propuestas evaluadas por la terna, con el puntaje total definitivo calculado por la plataforma y la observación cualitativa de consenso.",
+        "tabla_subtitulo": "La siguiente tabla oficializa el listado de las propuestas evaluadas por la terna, con el puntaje total emitido por cada jurado y el promedio aritmético validado por la plataforma. Los puntajes individuales corresponden a la calificación V2 emitida por cada jurado en la etapa colectiva; el Puntaje Total (promedio) es la media aritmética validada por el sistema y constituye el resultado oficial de la deliberación.",
         "texto_cierre": (
             "Este documento se firma el día {{fecha_dia}} del mes de {{fecha_mes}} de {{fecha_anio}}, como "
             "constancia del cierre de la sesión de evaluación colectiva y la validación final de los resultados "
