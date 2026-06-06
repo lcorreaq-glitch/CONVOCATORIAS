@@ -2,12 +2,13 @@ import React, { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
-import { CheckCircle2, Circle, Clock, ArrowRight, ClipboardList, PenLine, FileSignature, Target } from "lucide-react";
+import { CheckCircle2, Circle, Clock, ArrowRight, ClipboardList, PenLine, FileSignature, Target, Users } from "lucide-react";
 
 const PHASE_ICONS = {
   asignacion: ClipboardList,
   evaluacion: Target,
   finalizacion: CheckCircle2,
+  colectiva: Users,
   firma: PenLine,
 };
 
@@ -63,6 +64,7 @@ export default function JuradoTimeline({ convocatoriaId }) {
   const goAction = (extra) => {
     if (extra?.action === "mi_perfil") navigate("/mi-perfil");
     if (extra?.action === "actas") navigate("/actas");
+    if (extra?.action === "evaluaciones_colectivas") navigate("/evaluaciones?tab=colectivas");
   };
 
   return (

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader, { Badge, estadoTone, EmptyState } from "@/components/PageHeader";
@@ -16,6 +16,7 @@ import { PENDIENTE_STATES, TERMINADAS_STATES } from "@/constants/evalStates";
 export default function Evaluaciones() {
   const { activeConvocatoriaId, user } = useAuth();
   const isJurado = user?.role === "jurado";
+  const [searchParams] = useSearchParams();
   const isAdmin = user?.role === "admin_general" || user?.role === "admin_convocatoria";
   const [individuales, setIndividuales] = useState([]);
   const [colectivas, setColectivas] = useState([]);
@@ -203,7 +204,7 @@ export default function Evaluaciones() {
         )}
       </div>
 
-      <Tabs defaultValue="individuales">
+      <Tabs defaultValue={searchParams.get("tab") === "colectivas" ? "colectivas" : "individuales"}>
         <TabsList className="rounded-sm bg-secondary p-1">
           <TabsTrigger value="individuales" className="rounded-sm gap-1.5" data-testid="tab-eval-individuales">
             <ClipboardCheck className="w-3.5 h-3.5" /> Individuales

@@ -112,6 +112,16 @@ def _dashboards_for_role(role: str, is_inc2026: bool, campos: list) -> List[dict
                 {"id": "kpi_promedio_emitido", "tipo": "kpi", "titulo": "Promedio de puntajes emitidos", "ds": "mi_promedio_emitido", "color": "azul"},
             ],
         })
+        base.append({
+            "id": "mi_etapa_colectiva", "titulo": "Etapa colectiva (tu terna)",
+            "subtitulo": "Deliberaciones consolidadas con tu terna", "icon": "Users",
+            "widgets": [
+                {"id": "kpi_col_asignadas", "tipo": "kpi", "titulo": "Colectivas asignadas", "ds": "mias_colectivas_asignadas", "color": "morado"},
+                {"id": "kpi_col_abiertas", "tipo": "kpi", "titulo": "Abiertas", "ds": "mias_colectivas_abiertas", "color": "amber"},
+                {"id": "kpi_col_cerradas", "tipo": "kpi", "titulo": "Cerradas/Firmadas", "ds": "mias_colectivas_finalizadas", "color": "verde"},
+                {"id": "progress_col_avance", "tipo": "progress", "titulo": "Avance colectiva", "ds": "mi_avance_colectivas"},
+            ],
+        })
 
     return base
 
@@ -144,6 +154,10 @@ DATA_SOURCE_CATALOG = [
     {"id": "kpi_elegibles", "label": "Cantidad de elegibles", "returns": "kpi"},
     {"id": "kpi_lista_espera", "label": "Lista de espera", "returns": "kpi"},
     {"id": "time_series_evaluaciones", "label": "Evaluaciones finalizadas por día", "returns": "time_series"},
+    {"id": "mias_colectivas_asignadas", "label": "Mis colectivas asignadas", "returns": "kpi"},
+    {"id": "mias_colectivas_abiertas", "label": "Mis colectivas abiertas", "returns": "kpi"},
+    {"id": "mias_colectivas_finalizadas", "label": "Mis colectivas cerradas/firmadas", "returns": "kpi"},
+    {"id": "mi_avance_colectivas", "label": "Mi avance colectivas", "returns": "progress"},
 ]
 
 WIDGET_TYPES = ["kpi", "progress", "pie", "bar", "ranking", "stats", "progress_multi", "comparativo", "time_series"]
@@ -363,6 +377,29 @@ async def _resolve_ds(db, ds: str, cid: str, user: dict) -> Any:
         if ds == "mi_promedio_emitido":
             vals = [e.get("puntaje_total", 0) for e in evs if e.get("estado") in ("Finalizada", "Firmada") and e.get("puntaje_total") is not None]
             return {"value": round(sum(vals) / len(vals), 1) if vals else 0}
+
+    if ds in ("mias_colectivas_asignadas", "mias_colectivas_abiertas", "mias_colectivas_finalizadas", "mi_avance_colectivas"):
+        if not my_jurado_id:
+            if ds == "mi_avance_colectivas": return {"total": 0, "done": 0, "pct": 0}
+            return {"value": 0}
+        ternas_ids = [t["id"] for t in await db.ternas.find({
+            "convocatoria_id": cid, "integrantes.jurado_id": my_jurado_id
+        }, {"_id": 0, "id": 1}).to_list(50)]
+        if not ternas_ids:
+            if ds == "mi_avance_colectivas": return {"total": 0, "done": 0, "pct": 0}
+            return {"value": 0}
+        cols = await db.evaluaciones_colectivas.find({
+            "convocatoria_id": cid, "terna_id": {"$in": ternas_ids},
+            "estado": {"$ne": "Pendiente"},  # Pendientes están ocultas para el jurado
+        }, {"_id": 0, "estado": 1}).to_list(2000)
+        total = len(cols)
+        cerradas = sum(1 for c in cols if c.get("estado") in ("Cerrada", "Firmada"))
+        abiertas = sum(1 for c in cols if c.get("estado") in ("Abierta", "Reabierta", "En proceso"))
+        if ds == "mias_colectivas_asignadas": return {"value": total}
+        if ds == "mias_colectivas_abiertas": return {"value": abiertas}
+        if ds == "mias_colectivas_finalizadas": return {"value": cerradas}
+        if ds == "mi_avance_colectivas":
+            return {"total": total, "done": cerradas, "pct": round((cerradas / total) * 100) if total else 0}
 
     return {"error": f"Data source '{ds}' no implementado"}
 
@@ -596,6 +633,22 @@ async def mi_timeline(convocatoria_id: str, user: dict = Depends(get_current_use
     firma_acta_at = (jur.get("datos") or {}).get("acta_individual_firma_at")
     tiene_firma = bool((jur.get("datos") or {}).get("firma_url"))
 
+    # Colectivas: contar las que pertenecen a las ternas del jurado (excluyendo Pendiente, que está oculta)
+    ternas_del_jurado = [t["id"] for t in await db.ternas.find({
+        "convocatoria_id": convocatoria_id, "integrantes.jurado_id": jurado_id
+    }, {"_id": 0, "id": 1}).to_list(50)]
+    col_total = 0
+    col_finalizadas = 0
+    col_pendientes_admin = 0  # creadas pero aún en estado "Pendiente" (esperan habilitación)
+    if ternas_del_jurado:
+        all_cols = await db.evaluaciones_colectivas.find({
+            "convocatoria_id": convocatoria_id, "terna_id": {"$in": ternas_del_jurado}
+        }, {"_id": 0, "estado": 1}).to_list(2000)
+        col_pendientes_admin = sum(1 for c in all_cols if c.get("estado") == "Pendiente")
+        visibles = [c for c in all_cols if c.get("estado") != "Pendiente"]
+        col_total = len(visibles)
+        col_finalizadas = sum(1 for c in visibles if c.get("estado") in ("Cerrada", "Firmada"))
+
     def phase(key, label, desc, status, counter=None, extra=None):
         return {"key": key, "label": label, "description": desc, "status": status,
                 "counter": counter, "extra": extra}
@@ -624,6 +677,33 @@ async def mi_timeline(convocatoria_id: str, user: dict = Depends(get_current_use
     else:
         phases.append(phase("finalizacion", "Finalización", "Todas tus evaluaciones están finalizadas.", "completed", {"current": total_asignadas, "total": total_asignadas}))
 
+    # Fase Colectiva: visible si el jurado pertenece a una terna o ya tiene colectivas
+    if ternas_del_jurado or col_total > 0 or col_pendientes_admin > 0:
+        if finalizadas < total_asignadas and total_asignadas > 0:
+            phases.append(phase("colectiva", "Evaluación colectiva",
+                "Disponible cuando completes tus evaluaciones individuales.",
+                "pending", {"current": col_finalizadas, "total": max(col_total + col_pendientes_admin, 1)}))
+        elif col_total == 0 and col_pendientes_admin == 0:
+            phases.append(phase("colectiva", "Evaluación colectiva",
+                "Sin colectivas asignadas aún. Cuando tu terna complete sus individuales, se generarán automáticamente.",
+                "pending", {"current": 0, "total": 0}))
+        elif col_total == 0 and col_pendientes_admin > 0:
+            phases.append(phase("colectiva", "Evaluación colectiva",
+                f"Tienes {col_pendientes_admin} colectivas en revisión por el administrador.",
+                "pending", {"current": 0, "total": col_pendientes_admin}, extra={"esperando_admin": True}))
+        elif col_finalizadas == 0:
+            phases.append(phase("colectiva", "Evaluación colectiva",
+                f"Tienes {col_total} colectivas abiertas. Inicia la consolidación con tu terna.",
+                "in_progress", {"current": 0, "total": col_total}, extra={"action": "evaluaciones_colectivas"}))
+        elif col_finalizadas < col_total:
+            phases.append(phase("colectiva", "Evaluación colectiva",
+                f"En progreso: {col_finalizadas}/{col_total} colectivas cerradas.",
+                "in_progress", {"current": col_finalizadas, "total": col_total}, extra={"action": "evaluaciones_colectivas"}))
+        else:
+            phases.append(phase("colectiva", "Evaluación colectiva",
+                f"Completaste las {col_total} colectivas con tu terna.",
+                "completed", {"current": col_total, "total": col_total}))
+
     if not tiene_firma:
         phases.append(phase("firma", "Firma del acta", "Carga tu firma en Mi Perfil para poder firmar el acta.", "pending", extra={"action": "mi_perfil"}))
     elif firma_acta_at:
@@ -640,6 +720,9 @@ async def mi_timeline(convocatoria_id: str, user: dict = Depends(get_current_use
             "total_asignadas": total_asignadas, "finalizadas": finalizadas, "iniciadas": iniciadas,
             "tiene_firma": tiene_firma, "acta_firmada": bool(firma_acta_at),
             "porcentaje_global": round((finalizadas / total_asignadas) * 100) if total_asignadas else 0,
+            "colectivas_total": col_total,
+            "colectivas_finalizadas": col_finalizadas,
+            "colectivas_pendientes_admin": col_pendientes_admin,
         },
     }
 
