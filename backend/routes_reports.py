@@ -96,11 +96,17 @@ def _resolve_desempate(a: dict, b: dict, desempates: list, criterios_by_nombre: 
                 va = a["criterios_detalle"].get(c["id"], 0)
                 vb = b["criterios_detalle"].get(c["id"], 0)
         elif campo == "fecha_radicacion":
-            va = a["datos"].get("fecha_radicacion") or "9999"
-            vb = b["datos"].get("fecha_radicacion") or "9999"
+            # Combinar fecha + hora para desempate cronológico exacto
+            # (las propuestas tienen `datos.fecha_radicacion` y `datos.hora_radicacion` por separado)
+            fa = (a["datos"].get("fecha_radicacion") or "9999-12-31").split("T")[0]
+            fb = (b["datos"].get("fecha_radicacion") or "9999-12-31").split("T")[0]
+            ha = a["datos"].get("hora_radicacion") or "23:59:59"
+            hb = b["datos"].get("hora_radicacion") or "23:59:59"
+            va = f"{fa} {ha}"
+            vb = f"{fb} {hb}"
         elif campo == "hora_radicacion":
-            va = a["datos"].get("hora_radicacion") or "99:99"
-            vb = b["datos"].get("hora_radicacion") or "99:99"
+            va = a["datos"].get("hora_radicacion") or "99:99:99"
+            vb = b["datos"].get("hora_radicacion") or "99:99:99"
         elif campo == "sorteo":
             return (0, d["nombre"])
         if va is None or vb is None:
@@ -249,6 +255,66 @@ async def get_ranking(rid: str, user: dict = Depends(get_current_user)):
     if not item:
         raise HTTPException(status_code=404, detail="Ranking no encontrado")
     return item
+
+
+@router.get("/rankings/{rid}/excel")
+async def export_ranking_excel(rid: str, user: dict = Depends(get_current_user)):
+    """Descarga el ranking como Excel con una hoja por grupo (línea/subregión/etc)."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from io import BytesIO
+    from fastapi.responses import StreamingResponse
+    db = get_db()
+    rk = await db.rankings.find_one({"id": rid}, {"_id": 0})
+    if not rk:
+        raise HTTPException(status_code=404, detail="Ranking no encontrado")
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    header_fill = PatternFill("solid", fgColor="14776A")
+    header_font = Font(bold=True, color="FFFFFF")
+    headers = ["#", "Código", "Nombre propuesta", "Organización", "Municipio",
+               "Subregión", "Puntaje total", "Bono priorización", "Puntaje final",
+               "Puntaje diferencial", "Fuente", "Estado", "Cupos", "Desempate aplicado"]
+    # Hoja Resumen
+    wsr = wb.create_sheet("Resumen")
+    wsr.append(["Convocatoria", rk.get("convocatoria_id", "")])
+    wsr.append(["Modo", rk.get("modo", "")])
+    wsr.append(["Agrupar por", rk.get("agrupar_por", "")])
+    wsr.append(["Generado", rk.get("fecha_generacion", "")])
+    cob = rk.get("cobertura") or {}
+    if cob:
+        wsr.append([])
+        wsr.append(["Cobertura: con puntaje", cob.get("con_puntaje", 0), "/", cob.get("total_propuestas", 0)])
+        wsr.append(["Sin puntaje", cob.get("sin_puntaje", 0)])
+    for c in wsr["A"]:
+        c.font = Font(bold=True)
+    # Hoja por grupo
+    for g in rk.get("grupos", []):
+        title = (g.get("grupo") or "Sin grupo")[:31] or "Grupo"
+        ws = wb.create_sheet(title)
+        ws.append(headers)
+        for cell in ws[1]:
+            cell.fill = header_fill; cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        for idx, p in enumerate(g.get("items", []), 1):
+            ws.append([
+                idx, p.get("codigo"), p.get("nombre"), p.get("organizacion"),
+                p.get("municipio"), p.get("subregion") or g.get("grupo"),
+                p.get("puntaje_total"), p.get("bono_priorizacion") or 0,
+                p.get("puntaje_final") or p.get("puntaje_total"),
+                p.get("puntaje_diferencial") or 0,
+                p.get("fuente") or "—", p.get("estado") or "—",
+                p.get("cupo") or "", p.get("regla_desempate") or "",
+            ])
+        # ancho
+        for col_idx, h in enumerate(headers, 1):
+            ws.column_dimensions[chr(64 + col_idx) if col_idx <= 26 else "AA"].width = max(12, len(h) + 2)
+    buf = BytesIO()
+    wb.save(buf); buf.seek(0)
+    return StreamingResponse(
+        buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="ranking_{rid[:8]}.xlsx"'}
+    )
 
 
 # ============================================================

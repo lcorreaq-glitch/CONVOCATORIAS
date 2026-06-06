@@ -1095,20 +1095,15 @@ async def acta_individual_jurado(jurado_id: str, user: dict = Depends(get_curren
     for i, e in enumerate(evs, 1):
         p = pmap.get(e["propuesta_id"], {})
         d = p.get("datos") or {}
-        nit = p.get("nit") or d.get("nit") or "—"
-        repr_legal = (p.get("representante_legal") or d.get("representante_legal")
-                      or d.get("nombre_representante_legal") or "—")
         org_full = (p.get("organizacion") or d.get("nombre_organizacion") or "—")
         rows.append([
             str(i),
             p.get("codigo", "—"),
             d.get("municipio", p.get("municipio", "—")),
             org_full[:60],
-            str(nit)[:18],
-            (str(repr_legal) or "—")[:35],
             str(e.get("puntaje_total", 0)),
         ])
-    headers = ["Nº", "Cód.", "Municipio", "Organización", "NIT", "Representante Legal", "Puntaje"]
+    headers = ["Nº", "Cód.", "Municipio", "Organización", "Puntaje"]
     firmantes = [{
         "nombre": jur.get("nombre"),
         "documento": _doc_jurado(jur),
@@ -1229,12 +1224,10 @@ async def acta_colectiva_terna(terna_id: str, user: dict = Depends(get_current_u
     n1 = (integrantes_ordenados[0].get("nombre", "Jurado 1").split() if integrantes_ordenados else ["J1"])
     n2 = (integrantes_ordenados[1].get("nombre", "Jurado 2").split() if len(integrantes_ordenados) > 1 else ["J2"])
     n3 = (integrantes_ordenados[2].get("nombre", "Jurado 3").split() if len(integrantes_ordenados) > 2 else ["J3"])
-    # Etiquetas cortas para las 3 columnas de puntaje (apellido + primera letra del nombre)
-    def _short(parts):
-        return (parts[-1] + " " + parts[0][0] + ".") if len(parts) >= 2 else (parts[0] if parts else "—")
+    # Etiquetas genéricas (los nombres ya aparecen en el bloque INTEGRANTES del encabezado)
     headers = [
         "Nº", "Cód.", "Municipio", "Organización", "NIT",
-        f"Pje {_short(n1)}", f"Pje {_short(n2)}", f"Pje {_short(n3)}",
+        "Puntaje Jurado 1", "Puntaje Jurado 2", "Puntaje Jurado 3",
         "Puntaje Total (promedio)",
     ]
     firmas = (terna.get("datos") or {}).get("firmas_acta_colectiva") or {}

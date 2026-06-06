@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { api, formatApiError, openPdf } from "@/lib/api";
+import { api, formatApiError, openPdf, downloadFile } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import PageHeader, { Badge, EmptyState } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
-import { Trophy, Sparkles, FileText, Crown, Eye, History, ChevronRight, Users, Layers, Trash2 } from "lucide-react";
+import { Trophy, Sparkles, FileText, Crown, Eye, History, ChevronRight, Users, Layers, Trash2, Download } from "lucide-react";
 import { TID } from "@/constants/testIds";
 
 const FUENTE_LABEL = {
@@ -55,6 +55,12 @@ export default function Ranking() {
   };
 
   const acta = () => active && openPdf(`/actas/ranking/${active.id}`);
+  const exportExcel = async () => {
+    if (!active) return;
+    try {
+      await downloadFile(`/rankings/${active.id}/excel`, `ranking_${active.id?.slice(0, 8) || "export"}.xlsx`);
+    } catch (e) { toast.error(formatApiError(e?.message)); }
+  };
 
   const deleteRanking = async (r) => {
     if (!confirm(`¿Eliminar este ranking generado el ${new Date(r.fecha_generacion).toLocaleString("es-CO")}?\n\nEsta acción no se puede deshacer.`)) return;
@@ -157,6 +163,7 @@ export default function Ranking() {
             <Button onClick={generar} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-sm gap-2" data-testid={TID.generarRankingBtn}>
               <Sparkles className="w-4 h-4" /> Generar
             </Button>
+            {active && <Button onClick={exportExcel} variant="outline" className="rounded-sm gap-2 text-[#0E6650] border-[#0E6650]/30 hover:bg-[#0E6650]/10" data-testid="ranking-excel-btn"><Download className="w-4 h-4" />Excel</Button>}
             {active && <Button onClick={acta} variant="outline" className="rounded-sm gap-2" data-testid="ranking-acta-btn"><FileText className="w-4 h-4" />Acta PDF</Button>}
           </div>
         </div>
