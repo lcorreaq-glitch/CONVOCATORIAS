@@ -237,13 +237,25 @@ async def _resolve_ds(db, ds: str, cid: str, user: dict) -> Any:
         return {"items": items[:25]}
 
     if ds == "carga_terna":
-        ternas = await db.ternas.find({"convocatoria_id": cid}, {"_id": 0, "id": 1, "codigo": 1, "nombre": 1}).to_list(200)
+        ternas = await db.ternas.find({"convocatoria_id": cid}, {"_id": 0, "id": 1, "codigo": 1, "nombre": 1, "propuestas_ids": 1}).to_list(200)
         collections = await db.list_collection_names()
-        asigs = []
-        if "asignaciones_colectivas" in collections:
-            asigs = await db.asignaciones_colectivas.find({"convocatoria_id": cid}, {"_id": 0, "terna_id": 1}).to_list(2000)
-        c = Counter(a["terna_id"] for a in asigs)
-        items = [{"name": f"{t['codigo']} · {(t.get('nombre') or '')}", "total": c.get(t["id"], 0)} for t in ternas]
+        # 1) Intentar contar desde la colección 'asignaciones' (la real)
+        c = Counter()
+        if "asignaciones" in collections:
+            async for a in db.asignaciones.find({"convocatoria_id": cid}, {"_id": 0, "terna_id": 1}):
+                if a.get("terna_id"):
+                    c[a["terna_id"]] += 1
+        # 2) Fallback: contar desde 'asignaciones_colectivas' si existe
+        if not c and "asignaciones_colectivas" in collections:
+            async for a in db.asignaciones_colectivas.find({"convocatoria_id": cid}, {"_id": 0, "terna_id": 1}):
+                if a.get("terna_id"):
+                    c[a["terna_id"]] += 1
+        # 3) Fallback final: usar terna.propuestas_ids
+        if not c:
+            for t in ternas:
+                pids = t.get("propuestas_ids") or []
+                if pids: c[t["id"]] = len(pids)
+        items = [{"name": f"{t['codigo']} · {(t.get('nombre') or '')[:30]}", "total": c.get(t["id"], 0)} for t in ternas]
         items.sort(key=lambda x: -x["total"])
         return {"items": items}
 
@@ -298,27 +310,62 @@ async def _resolve_ds(db, ds: str, cid: str, user: dict) -> Any:
         c = Counter(((p.get("datos") or {}).get("linea") or (p.get("datos") or {}).get("tematica") or "Sin línea") for p in props)
         return {"items": [{"name": k, "value": v} for k, v in c.most_common()]}
     if ds == "ranking_por_linea":
-        rk = await db.rankings.find({"convocatoria_id": cid}, {"_id": 0}).sort("fecha_generacion", -1).to_list(1)
-        if not rk: return {"items": []}
-        # Top1 por grupo (asumiendo grupos por línea o subregión)
+        # Top1 por línea (no por ranking guardado): calcula al vuelo desde propuestas + sus puntajes
+        # más recientes (colectiva cerrada → individual finalizada).
+        props = await db.propuestas.find({"convocatoria_id": cid}, {"_id": 0, "id": 1, "codigo": 1, "nombre": 1, "datos": 1}).to_list(5000)
+        by_linea = defaultdict(list)  # linea -> [(puntaje, codigo, nombre)]
+        for p in props:
+            d = p.get("datos") or {}
+            linea = d.get("linea") or d.get("tematica") or "Sin línea"
+            # Buscar mejor puntaje: 1) colectiva cerrada/firmada; 2) promedio individuales
+            col = await db.evaluaciones_colectivas.find_one({
+                "propuesta_id": p["id"], "estado": {"$in": ["Cerrada", "Firmada"]}
+            }, {"_id": 0, "puntaje_final": 1})
+            if col and isinstance(col.get("puntaje_final"), (int, float)):
+                pt = col["puntaje_final"]
+            else:
+                ind = await db.evaluaciones_individuales.find({
+                    "propuesta_id": p["id"], "estado": {"$in": ["Finalizada", "Firmada"]},
+                    "etapa": {"$ne": "colectiva"},
+                }, {"_id": 0, "puntaje_total": 1}).to_list(50)
+                vals = [e["puntaje_total"] for e in ind if isinstance(e.get("puntaje_total"), (int, float))]
+                pt = round(sum(vals) / len(vals), 2) if vals else 0
+            if pt > 0:
+                by_linea[linea].append((pt, p.get("codigo"), p.get("nombre"), d.get("subregion") or d.get("territorio") or ""))
         items = []
-        for g in rk[0].get("grupos", []):
-            top = (g.get("items") or [])[:1]
-            for t in top:
-                items.append({"codigo": t.get("codigo"), "nombre": f"{t.get('nombre','')} ({g.get('grupo')})", "puntaje": t.get("puntaje_total")})
+        for linea, arr in by_linea.items():
+            arr.sort(key=lambda x: -x[0])
+            pt, cod, nom, sub = arr[0]
+            items.append({"codigo": cod, "nombre": f"{nom} ({sub})" if sub else nom, "puntaje": pt})
+        items.sort(key=lambda x: -(x["puntaje"] or 0))
         return {"items": items[:10]}
 
     if ds == "dist_priorizacion":
-        props = await db.propuestas.find({"convocatoria_id": cid}, {"_id": 0, "datos": 1}).to_list(5000)
-        enfoques = {"Mujeres": 0, "Discapacidad": 0, "Étnico": 0, "Víctimas": 0, "PDET": 0}
-        for p in props:
-            d = p.get("datos") or {}
-            if d.get("mujeres") or "mujer" in str(d.get("enfoque_poblacional", "")).lower(): enfoques["Mujeres"] += 1
-            if d.get("discapacidad") or "discapacidad" in str(d.get("enfoque_poblacional", "")).lower(): enfoques["Discapacidad"] += 1
-            if d.get("etnico") or "etn" in str(d.get("enfoque_poblacional", "")).lower(): enfoques["Étnico"] += 1
-            if d.get("victimas") or "victima" in str(d.get("enfoque_poblacional", "")).lower(): enfoques["Víctimas"] += 1
-            if d.get("pdet") or "pdet" in str(d.get("priorizacion_territorial", "")).lower(): enfoques["PDET"] += 1
-        return {"items": [{"name": k, "value": v} for k, v in enfoques.items() if v > 0] or [{"name": "Sin datos", "value": 0}]}
+        # Cuenta propuestas con priorización poblacional usando los campos REALES de criterios diferenciales
+        # ya evaluados (puntajes_diferenciales > 0) o el campo 'datos.enfoques' / 'datos.priorizacion'.
+        criterios_dif = [c["id"] async for c in db.criterios.find({"convocatoria_id": cid, "diferencial": True}, {"_id": 0, "id": 1})]
+        evals = await db.evaluaciones_individuales.find({
+            "convocatoria_id": cid, "estado": {"$in": ["Finalizada", "Firmada"]}, "etapa": {"$ne": "colectiva"},
+        }, {"_id": 0, "propuesta_id": 1, "puntajes": 1}).to_list(20000)
+        # Para cada propuesta, ver si tiene puntaje diferencial > 0 en cualquier criterio
+        criterios_info = {c["id"]: c async for c in db.criterios.find({"convocatoria_id": cid, "diferencial": True}, {"_id": 0})}
+        enfoques = Counter()
+        propuestas_con_enfoque = set()
+        for e in evals:
+            for cid_dif in criterios_dif:
+                val = (e.get("puntajes") or {}).get(cid_dif, 0)
+                try: val = float(val)
+                except Exception: val = 0
+                if val > 0:
+                    nombre = criterios_info.get(cid_dif, {}).get("nombre", "Otro")
+                    # Acortar etiquetas largas
+                    short = nombre.replace("Impacto en ", "").replace("Población ", "")[:35]
+                    enfoques[short] += 1
+                    propuestas_con_enfoque.add(e["propuesta_id"])
+        items = [{"name": k, "value": v} for k, v in enfoques.most_common(8)]
+        if not items:
+            items = [{"name": "Aún sin propuestas con puntajes diferenciales", "value": 0}]
+        return {"items": items}
 
     if ds == "stats_puntajes_colectiva":
         evs = await db.evaluaciones_colectivas.find({"convocatoria_id": cid, "puntaje_final": {"$ne": None}}, {"_id": 0, "puntaje_final": 1}).to_list(2000)
