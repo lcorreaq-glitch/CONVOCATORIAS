@@ -826,3 +826,19 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - ✅ `WelcomeOnboarding.jsx` ahora **gateé**: NO se muestra mientras `habeas_consent_required: true` (Habeas tiene precedencia legal sobre el onboarding UX).
 - ✅ **Validado e2e por curl**: jurado sin consent → `requires: true` → POST `/habeas-consent` → ok+version → `/auth/me` ahora `requires: false, version: "v1.0-2026-02"`.
 
+
+**Envío masivo de correos de bienvenida por rol** — Feb 2026:
+- ✅ Endpoint `POST /api/admin/bulk-welcome` (`routes_admin.py`):
+  - Params: `role`, `convocatoria_id?`, `reset_password: bool`, `solo_inactivos: bool`, `base_url?`.
+  - Recorre `users` filtrando por rol + activo + (opcional) `last_login_at == null`.
+  - Para jurados con `convocatoria_id`, intersecta con `db.jurados` para enviar solo a los de esa convocatoria.
+  - Si `reset_password=true`, genera nueva contraseña temporal de 10 chars y la incluye en el correo (reseteando el hash).
+  - Usa la misma plantilla cálida `render_welcome` (con bloque de convocatoria, Habeas Data y firma ELEA).
+  - Devuelve `{total_candidatos, enviados, fallidos, errores}` con cap de 50 errores.
+  - Audit log automático.
+- ✅ Frontend `Administracion.jsx → UsersPanel`:
+  - Botón "Envío masivo por rol" en la cabecera (data-testid: `admin-bulk-welcome-btn`).
+  - Dialog con: select de rol, contador en vivo de candidatos, toggle "Solo a quienes nunca han iniciado sesión", toggle "Generar nueva contraseña" (con warning amarillo).
+  - Resumen post-envío: cards con candidatos/enviados/fallidos + detalle de errores.
+  - Confirmación destructiva si `reset_password=true`.
+

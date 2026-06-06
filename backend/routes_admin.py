@@ -11,7 +11,7 @@ import secrets
 import string
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from db import get_db, now_iso
 from auth import require_roles, hash_password, audit
@@ -480,3 +480,128 @@ async def delete_ranking(rid: str,
         raise HTTPException(status_code=404, detail="Ranking no encontrado")
     await audit(user, "delete", "rankings", rid)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# 9. ENVÍO MASIVO DE CORREOS DE BIENVENIDA POR ROL
+# ---------------------------------------------------------------------------
+class BulkWelcomePayload(BaseModel):
+    role: str = Field(..., description="jurado | supervisor | admin_convocatoria | invitado | auditor")
+    convocatoria_id: Optional[str] = None
+    reset_password: bool = Field(default=False, description="Si True, genera nueva contraseña temporal y la incluye en el correo")
+    solo_inactivos: bool = Field(default=False, description="Si True, solo envía a usuarios que aún no han iniciado sesión")
+    base_url: Optional[str] = None
+
+ROLE_LABELS_ES = {
+    "admin_general": "Administrador General",
+    "admin_convocatoria": "Administrador de Convocatoria",
+    "supervisor": "Supervisor",
+    "jurado": "Jurado evaluador",
+    "invitado": "Invitado de Consulta",
+    "auditor": "Auditor",
+}
+
+
+@router.post("/bulk-welcome")
+async def bulk_send_welcome(payload: BulkWelcomePayload,
+                             user: dict = Depends(require_roles("admin_general", "admin_convocatoria"))):
+    """Envía el correo de bienvenida (con o sin reseteo de contraseña) a TODOS los usuarios
+    con el rol indicado. Si `convocatoria_id` se provee y el rol es `jurado`, filtra solo
+    a los jurados de esa convocatoria.
+    Retorna resumen detallado: total, enviados, fallidos, errores.
+    """
+    if payload.role not in ROLE_LABELS_ES:
+        raise HTTPException(status_code=400, detail=f"Rol inválido. Valores válidos: {list(ROLE_LABELS_ES.keys())}")
+    db = get_db()
+    from email_service import send_email, render_welcome, log_email
+
+    base = payload.base_url or "https://convocatoria-hub-2.emergent.host"
+    login_url = f"{base.rstrip('/')}/login"
+    branding_doc = await db.system_settings.find_one({"id": "global"}, {"_id": 0}) or {}
+    product_name = (branding_doc.get("branding") or {}).get("product_name", "KRINOS")
+    entidad = (branding_doc.get("branding") or {}).get("entidad_nombre")
+    rol_legible = ROLE_LABELS_ES[payload.role]
+
+    # Construir lista de destinatarios
+    user_query = {"role": payload.role, "active": True}
+    if payload.solo_inactivos:
+        user_query["last_login_at"] = {"$exists": False}
+    candidates = await db.users.find(user_query, {"_id": 0, "password_hash": 0}).to_list(5000)
+
+    # Si es rol jurado y se filtra por convocatoria, cruzar con db.jurados
+    if payload.role == "jurado" and payload.convocatoria_id:
+        emails_conv = {j["email"].lower() for j in await db.jurados.find(
+            {"convocatoria_id": payload.convocatoria_id},
+            {"_id": 0, "email": 1}
+        ).to_list(5000)}
+        candidates = [u for u in candidates if u.get("username", "").lower() in emails_conv]
+
+    enviados, fallidos, errores = 0, 0, []
+    for u in candidates:
+        try:
+            email = u.get("email") or u.get("username")
+            if not email:
+                fallidos += 1
+                errores.append({"username": u.get("username"), "error": "Sin email"})
+                continue
+
+            # Convocatoria a referenciar en el correo (si jurado o si user tiene 1 sola)
+            conv = None
+            if payload.role == "jurado" and u.get("jurado_id"):
+                jur = await db.jurados.find_one({"id": u["jurado_id"]}, {"_id": 0, "convocatoria_id": 1})
+                if jur:
+                    conv = await db.convocatorias.find_one({"id": jur["convocatoria_id"]},
+                                                            {"_id": 0, "nombre": 1, "codigo": 1})
+            elif payload.convocatoria_id:
+                conv = await db.convocatorias.find_one({"id": payload.convocatoria_id},
+                                                        {"_id": 0, "nombre": 1, "codigo": 1})
+            else:
+                cr = u.get("convocatoria_roles") or []
+                if len(cr) == 1 and cr[0].get("convocatoria_id"):
+                    conv = await db.convocatorias.find_one({"id": cr[0]["convocatoria_id"]},
+                                                            {"_id": 0, "nombre": 1, "codigo": 1})
+
+            # Si reset_password=True, generar nueva contraseña
+            password_to_send = None
+            if payload.reset_password:
+                password_to_send = _generate_password(10)
+                await db.users.update_one(
+                    {"id": u["id"]},
+                    {"$set": {"password_hash": hash_password(password_to_send), "active": True}}
+                )
+
+            html, text = render_welcome(
+                u.get("name") or u.get("username"),
+                email, password_to_send, login_url, product_name,
+                convocatoria_nombre=(conv or {}).get("nombre"),
+                convocatoria_codigo=(conv or {}).get("codigo"),
+                rol_legible=rol_legible,
+                entidad=entidad,
+            )
+            subject = f"Bienvenido(a) a {product_name}"
+            if conv and conv.get("codigo"):
+                subject += f" · {conv['codigo']}"
+            result = await send_email(email, subject, html, text_body=text)
+            await log_email(email, "Bienvenida masiva", "welcome", result, user_id=u.get("id"))
+            if result.get("ok"):
+                enviados += 1
+            else:
+                fallidos += 1
+                errores.append({"username": email, "error": result.get("error") or "Falla de proveedor"})
+        except Exception as e:
+            fallidos += 1
+            errores.append({"username": u.get("username"), "error": str(e)[:120]})
+
+    await audit(user, "bulk_welcome", "users", payload.role,
+                detalle=f"role={payload.role} conv={payload.convocatoria_id} reset_pwd={payload.reset_password} "
+                        f"total={len(candidates)} enviados={enviados} fallidos={fallidos}")
+
+    return {
+        "ok": True,
+        "rol": payload.role,
+        "rol_legible": rol_legible,
+        "total_candidatos": len(candidates),
+        "enviados": enviados,
+        "fallidos": fallidos,
+        "errores": errores[:50],  # cap para no romper la respuesta JSON
+    }

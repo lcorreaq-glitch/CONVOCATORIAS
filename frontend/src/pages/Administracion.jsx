@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Shield, Sparkles, Mail, Users as UsersIcon, Palette,
@@ -71,6 +73,12 @@ function UsersPanel() {
   const [editing, setEditing] = useState(null);
   const [f, setF] = useState({ username: "", email: "", name: "", password: "", role: "supervisor" });
 
+  // Envío masivo por rol
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState(null);
+  const [bulkForm, setBulkForm] = useState({ role: "jurado", reset_password: false, solo_inactivos: true });
+
   const load = () => api.get("/users").then((r) => setItems(r.data));
   const loadRoles = () => api.get("/permissions/roles").then((r) => setRoles(r.data));
   useEffect(() => { load(); loadRoles(); }, []);
@@ -128,16 +136,58 @@ function UsersPanel() {
     setOpen(true);
   };
 
+  // Envío masivo: cuenta candidatos y dispara confirmación
+  const runBulkWelcome = async () => {
+    // Vista previa: cuántos candidatos hay con ese rol
+    const previewItems = items.filter((u) => u.role === bulkForm.role && u.active);
+    let count = previewItems.length;
+    if (bulkForm.solo_inactivos) {
+      count = previewItems.filter((u) => !u.last_login_at).length;
+    }
+    if (count === 0) {
+      toast.warning(`No hay usuarios candidatos con rol "${bulkForm.role}"${bulkForm.solo_inactivos ? " que aún no hayan iniciado sesión" : ""}.`);
+      return;
+    }
+    const msg = `Vas a enviar el correo de bienvenida a ${count} usuario(s) con rol "${bulkForm.role}".\n\n` +
+                (bulkForm.reset_password
+                  ? "⚠️  IMPORTANTE: Esta acción REGENERARÁ la contraseña de cada uno y la incluirá en el correo. Sus contraseñas actuales dejarán de funcionar."
+                  : "Se enviará el correo SIN incluir contraseña (deberán usar 'Recuperar contraseña' si la olvidaron).") +
+                "\n\n¿Continuar?";
+    if (!confirm(msg)) return;
+    setBulkBusy(true);
+    setBulkResult(null);
+    try {
+      const { data } = await api.post("/admin/bulk-welcome", { ...bulkForm, base_url: window.location.origin });
+      setBulkResult(data);
+      toast.success(`Envío completado: ${data.enviados} enviado(s), ${data.fallidos} fallido(s).`);
+      load();
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail) || "Error al enviar.");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-[#5E6878]">
+      <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+        <p className="text-sm text-[#5E6878] flex-1 min-w-[280px]">
           Gestione los usuarios que tendrán acceso a KRINOS. Solo el Administrador General puede crear o desactivar usuarios.
         </p>
-        <Button onClick={() => { setEditing(null); setF({ username: "", email: "", name: "", password: "", role: "supervisor" }); setOpen(true); }}
-                className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg" data-testid="admin-add-user-btn">
-          + Nuevo usuario
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={() => { setBulkOpen(true); setBulkResult(null); }}
+            variant="outline"
+            className="rounded-lg gap-2 border-[#14776A] text-[#0F5E54] hover:bg-[#E8F3F0]"
+            data-testid="admin-bulk-welcome-btn"
+          >
+            <Send className="w-4 h-4" /> Envío masivo por rol
+          </Button>
+          <Button onClick={() => { setEditing(null); setF({ username: "", email: "", name: "", password: "", role: "supervisor" }); setOpen(true); }}
+                  className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg" data-testid="admin-add-user-btn">
+            + Nuevo usuario
+          </Button>
+        </div>
       </div>
 
       {open && (
@@ -200,6 +250,106 @@ function UsersPanel() {
           </tbody>
         </table>
       </div>
+
+      {/* ========== Dialog: Envío masivo por rol ========== */}
+      <Dialog open={bulkOpen} onOpenChange={(v) => { if (!bulkBusy) { setBulkOpen(v); if (!v) setBulkResult(null); } }}>
+        <DialogContent className="max-w-xl rounded-xl" data-testid="bulk-welcome-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-display font-extrabold text-[18px] flex items-center gap-2">
+              <Send className="w-4.5 h-4.5 text-[#14776A]" /> Envío masivo de bienvenida
+            </DialogTitle>
+          </DialogHeader>
+
+          {!bulkResult ? (
+            <div className="space-y-4 mt-2">
+              <p className="text-[12.5px] text-[#5E6878]">
+                Envía el correo de bienvenida (con o sin contraseña temporal) a TODOS los usuarios con el rol seleccionado.
+                Solo cuentas activas reciben el correo.
+              </p>
+
+              <div>
+                <Label className="text-xs font-semibold">Rol destinatario</Label>
+                <Select value={bulkForm.role} onValueChange={(v) => setBulkForm({ ...bulkForm, role: v })}>
+                  <SelectTrigger className="rounded-lg mt-1" data-testid="bulk-role-select"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {roles.filter((r) => r.active !== false).map((r) => (
+                      <SelectItem key={r.code} value={r.code}>{r.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="text-[11px] text-[#5E6878] mt-1.5">
+                  Candidatos actuales con este rol:{" "}
+                  <strong className="text-[#0F5E54]" data-testid="bulk-candidates-count">
+                    {items.filter((u) => u.role === bulkForm.role && u.active &&
+                      (!bulkForm.solo_inactivos || !u.last_login_at)).length}
+                  </strong>
+                </div>
+              </div>
+
+              <label className="flex items-start gap-3 p-3 rounded-lg border border-[#E2E7EC] hover:bg-[#F7FAF9] cursor-pointer">
+                <Switch
+                  checked={bulkForm.solo_inactivos}
+                  onCheckedChange={(v) => setBulkForm({ ...bulkForm, solo_inactivos: !!v })}
+                  data-testid="bulk-solo-inactivos"
+                />
+                <div>
+                  <div className="text-[12.5px] font-semibold text-[#1A1F2C]">Solo a quienes nunca han iniciado sesión</div>
+                  <div className="text-[11px] text-[#5E6878] leading-snug mt-0.5">
+                    Recomendado para evitar spam. Si lo desmarcas, llegará a TODOS los usuarios activos del rol.
+                  </div>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 cursor-pointer">
+                <Switch
+                  checked={bulkForm.reset_password}
+                  onCheckedChange={(v) => setBulkForm({ ...bulkForm, reset_password: !!v })}
+                  data-testid="bulk-reset-password"
+                />
+                <div>
+                  <div className="text-[12.5px] font-semibold text-amber-900">Generar y enviar nueva contraseña temporal</div>
+                  <div className="text-[11px] text-amber-800 leading-snug mt-0.5">
+                    ⚠️ Esto regenerará la contraseña de cada usuario. Sus contraseñas actuales dejarán de funcionar. Útil cuando aún no se han activado.
+                  </div>
+                </div>
+              </label>
+            </div>
+          ) : (
+            <div className="space-y-3 mt-2">
+              <div className="rounded-lg bg-[#E8F3F0] border border-[#CDE7E1] p-4">
+                <div className="font-display font-bold text-[14px] text-[#0F5E54]">Resumen del envío</div>
+                <div className="grid grid-cols-3 gap-2 mt-3">
+                  <div><div className="text-[10px] uppercase text-[#5E6878]">Candidatos</div><div className="font-display font-extrabold text-[20px] text-[#1A1F2C]">{bulkResult.total_candidatos}</div></div>
+                  <div><div className="text-[10px] uppercase text-[#5E6878]">Enviados</div><div className="font-display font-extrabold text-[20px] text-emerald-700">{bulkResult.enviados}</div></div>
+                  <div><div className="text-[10px] uppercase text-[#5E6878]">Fallidos</div><div className={`font-display font-extrabold text-[20px] ${bulkResult.fallidos ? "text-red-700" : "text-[#1A1F2C]"}`}>{bulkResult.fallidos}</div></div>
+                </div>
+              </div>
+              {bulkResult.errores?.length > 0 && (
+                <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-[12px] max-h-48 overflow-y-auto">
+                  <div className="font-semibold text-red-700 mb-1.5">Detalle de errores</div>
+                  {bulkResult.errores.map((e, i) => (
+                    <div key={`err-${e.username}-${i}`} className="font-mono text-[11px] text-red-900">
+                      {e.username}: {e.error}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { setBulkOpen(false); setBulkResult(null); }} disabled={bulkBusy} className="rounded-lg">
+              {bulkResult ? "Cerrar" : "Cancelar"}
+            </Button>
+            {!bulkResult && (
+              <Button onClick={runBulkWelcome} disabled={bulkBusy} className="bg-[#14776A] hover:bg-[#0F5E54] rounded-lg gap-2" data-testid="bulk-send-btn">
+                {bulkBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                Enviar a {items.filter((u) => u.role === bulkForm.role && u.active && (!bulkForm.solo_inactivos || !u.last_login_at)).length} usuarios
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
