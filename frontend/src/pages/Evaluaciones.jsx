@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-const PENDIENTE_STATES = ["Pendiente", "En progreso", "Borrador"];
+const PENDIENTE_STATES = ["Pendiente", "En progreso", "Borrador", "Reabierta", "Abierta"];
 const TERMINADAS_STATES = ["Finalizada", "Firmada", "Bloqueada", "Cerrada"];
 
 export default function Evaluaciones() {

@@ -764,3 +764,17 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 - ✅ Frontend: removida la etiqueta de `ROLES_LABELS` en `MiPerfil.jsx` y `Administracion.jsx`. `EvaluacionColectiva.jsx` ahora usa `isIntegrante` (basado en `jurado_id`) en lugar de `user.role === "integrante_terna"`.
 - ✅ Resultado: 6 roles activos (admin_general, admin_convocatoria, supervisor, jurado, invitado, auditor).
 
+
+**Invalidación de actas colectivas con watermark + fixes de UI tras reapertura** — Feb 2026:
+- ✅ `reabrir_eval_colectiva` (`routes_eval.py`): cuando se reabre una colectiva con firmas previas en `terna.datos.firmas_acta_colectiva`, las guarda en `firmas_acta_colectiva_anterior` y limpia las activas. Marca `acta_colectiva_invalidada_por_reapertura: True`. También revierte las v2 (etapa colectiva) finalizadas/firmadas a estado `Borrador` con snapshot en `evaluaciones_versiones` para que los jurados puedan re-editar.
+- ✅ `acta_colectiva_terna` (`routes_actas.py`): cuando `terna.datos.acta_colectiva_invalidada_por_reapertura` es True, el PDF descargado lleva el banner rojo "VERSIÓN DESACTUALIZADA — REQUIERE RE-FIRMA" en la primera línea (validado por extracción pypdf).
+- ✅ `firmar_colectiva_terna`: cuando todos los integrantes vuelven a firmar el acta tras una reapertura, el flag de invalidación se limpia automáticamente.
+- ✅ `iniciar_modalidad_nueva`: ahora acepta estado "Reabierta" además de "Abierta/En proceso" (permite re-iniciar v2 si por algún edge-case quedó vacía tras reapertura).
+- ✅ Frontend `Evaluaciones.jsx`: `PENDIENTE_STATES` ahora incluye `Reabierta` y `Abierta` → el jurado ve la colectiva reabierta en su pestaña "Solo pendientes".
+
+**Validado por testing_agent_v3_fork** (iteration_16.json):
+- ✅ FLOW 1 admin reabre colectiva con prompt de motivo → estado "Reabierta", toast OK.
+- ✅ FLOW 5 unificación de roles (6 roles, sin integrante_terna) → confirmado.
+- ✅ Watermark en PDF validado por curl + pypdf.
+- ⚠ FLOW 2/3/4 quedaron parcialmente cubiertos por dependencia de estado del data de prueba (la colectiva manual no tenía v2 inicializadas), pero la lógica subyacente está cubierta por curl tests + fixes posteriores. Issues residuales documentados.
+

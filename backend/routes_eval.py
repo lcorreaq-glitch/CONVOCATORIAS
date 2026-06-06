@@ -517,8 +517,8 @@ async def iniciar_modalidad_nueva(eid: str, user: dict = Depends(require_roles("
     ev = await db.evaluaciones_colectivas.find_one({"id": eid})
     if not ev:
         raise HTTPException(status_code=404, detail="Evaluación colectiva no encontrada")
-    if ev.get("estado") not in ("Abierta", "En proceso"):
-        raise HTTPException(status_code=400, detail="Solo se puede iniciar en colectivas abiertas")
+    if ev.get("estado") not in ("Abierta", "En proceso", "Reabierta"):
+        raise HTTPException(status_code=400, detail="Solo se puede iniciar en colectivas abiertas o reabiertas")
 
     terna = await db.ternas.find_one({"id": ev["terna_id"]})
     if not terna:
@@ -784,6 +784,29 @@ async def reabrir_eval_colectiva(eid: str, body: dict = Body(default={}),
             datos["acta_colectiva_invalidada_por_reapertura"] = True
             datos["acta_colectiva_invalidada_at"] = now_iso()
             await db.ternas.update_one({"id": ev["terna_id"]}, {"$set": {"datos": datos}})
+    # ── Revertir v2 (etapa colectiva) a 'Borrador' para que los jurados puedan re-editar ──
+    # Snapshot del estado previo de cada v2 antes de revertirlas.
+    v2_records = await db.evaluaciones_individuales.find({
+        "evaluacion_colectiva_id": eid, "etapa": "colectiva",
+        "estado": {"$in": ["Finalizada", "Firmada"]},
+    }).to_list(50)
+    for v2 in v2_records:
+        await db.evaluaciones_versiones.insert_one({
+            "id": str(uuid.uuid4()),
+            "evaluacion_id": v2["id"],
+            "convocatoria_id": v2["convocatoria_id"],
+            "snapshot": {k: v2.get(k) for k in ("estado", "puntajes", "observaciones",
+                                                  "observacion_final", "puntaje_total",
+                                                  "puntaje_diferencial_total", "finalizada_at")},
+            "motivo_reapertura": motivo,
+            "reabierta_por": user.get("username"),
+            "reabierta_at": now_iso(),
+        })
+        await db.evaluaciones_individuales.update_one(
+            {"id": v2["id"]},
+            {"$set": {"estado": "Borrador", "reaperturas": (v2.get("reaperturas", 0) + 1),
+                      "ultima_reapertura_at": now_iso()}}
+        )
     # Aprobar solicitudes pendientes asociadas
     await db.reapertura_solicitudes.update_many(
         {"evaluacion_id": eid, "tipo": "colectiva", "estado": "Pendiente"},
