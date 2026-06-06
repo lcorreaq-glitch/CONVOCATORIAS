@@ -359,12 +359,16 @@ async def reporte_avance_jurado(convocatoria_id: str, user: dict = Depends(get_c
 async def reporte_avance_terna(convocatoria_id: str, user: dict = Depends(get_current_user)):
     db = get_db()
     ternas = await db.ternas.find({"convocatoria_id": convocatoria_id}, {"_id": 0}).to_list(500)
+    # Resolver nombres de jurados desde la colección (no confiar en cache de la terna)
+    juradoMap = {j["id"]: j.get("nombre") or j.get("email") or j["id"]
+                 async for j in db.jurados.find({"convocatoria_id": convocatoria_id})}
     out = []
     for t in ternas:
         prop_count = await db.asignaciones.count_documents({"terna_id": t["id"]})
-        col_abr = await db.evaluaciones_colectivas.count_documents({"terna_id": t["id"], "estado": "Abierta"})
+        col_abr = await db.evaluaciones_colectivas.count_documents({"terna_id": t["id"], "estado": {"$in": ["Abierta", "Reabierta", "En proceso"]}})
         col_cer = await db.evaluaciones_colectivas.count_documents({"terna_id": t["id"], "estado": {"$in": ["Cerrada", "Firmada"]}})
-        integrantes = ", ".join([i.get("nombre", i.get("jurado_id", "")) for i in t.get("integrantes", [])])
+        integrantes = ", ".join([juradoMap.get(i.get("jurado_id"), i.get("nombre") or i.get("jurado_id") or "?")
+                                  for i in t.get("integrantes", [])])
         out.append({
             "codigo": t["codigo"], "nombre": t["nombre"], "integrantes": integrantes,
             "propuestas_asignadas": prop_count, "colectivas_abiertas": col_abr,

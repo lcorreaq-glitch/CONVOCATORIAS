@@ -194,6 +194,14 @@ async def save_eval(eid: str, payload: EvalUpdate, user: dict = Depends(get_curr
         except Exception as ex:
             import logging
             logging.getLogger("krinos").warning(f"Auto-gen colectivas falló: {ex}")
+        # Si lo que acaba de finalizarse es una V2 (etapa=colectiva) y los 3 integrantes ya terminaron,
+        # cerrar AUTOMÁTICAMENTE la colectiva calculando el promedio definitivo.
+        try:
+            if ev.get("etapa") == "colectiva" and ev.get("evaluacion_colectiva_id"):
+                await _auto_close_colectiva_si_completa(db, ev["evaluacion_colectiva_id"], user)
+        except Exception as ex:
+            import logging
+            logging.getLogger("krinos").warning(f"Auto-cierre colectiva falló: {ex}")
 
     out = await db.evaluaciones_individuales.find_one({"id": eid}, {"_id": 0})
     return out
@@ -539,6 +547,55 @@ async def _materialize_colectiva(db, convocatoria_id: str, propuesta_id: str, te
     await db.evaluaciones_colectivas.insert_one(doc)
     doc.pop("_id", None)
     return doc
+
+
+async def _auto_close_colectiva_si_completa(db, colectiva_id: str, user: dict):
+    """Si todos los integrantes de la terna ya finalizaron su V2, cierra la colectiva
+    calculando el promedio definitivo. Idempotente."""
+    col = await db.evaluaciones_colectivas.find_one({"id": colectiva_id})
+    if not col or col.get("estado") in ("Cerrada", "Firmada"):
+        return
+    terna = await db.ternas.find_one({"id": col["terna_id"]})
+    if not terna:
+        return
+    miembros = [m.get("jurado_id") for m in (terna.get("integrantes") or []) if m.get("jurado_id")]
+    if not miembros:
+        return
+    v2s = await db.evaluaciones_individuales.find({
+        "evaluacion_colectiva_id": colectiva_id, "etapa": "colectiva",
+        "estado": {"$in": ["Finalizada", "Firmada"]},
+    }).to_list(50)
+    v2_jurado_ids = {e.get("jurado_id") for e in v2s}
+    if not all(m in v2_jurado_ids for m in miembros):
+        return  # aún faltan integrantes
+    all_crits = set()
+    for e in v2s:
+        all_crits.update((e.get("puntajes") or {}).keys())
+    promedio = {}
+    for cid in all_crits:
+        vals = [float((e.get("puntajes") or {}).get(cid, 0)) for e in v2s]
+        promedio[cid] = round(sum(vals) / len(vals), 2)
+    criterios = await db.criterios.find({"convocatoria_id": col["convocatoria_id"]}).to_list(100)
+    total_of = sum(promedio.get(c["id"], 0) for c in criterios if c.get("oficial", True))
+    total_dif = sum(promedio.get(c["id"], 0) for c in criterios if not c.get("oficial", True))
+    bono = await _compute_bono_priorizacion(db, col["convocatoria_id"], col["propuesta_id"])
+    await db.evaluaciones_colectivas.update_one(
+        {"id": colectiva_id},
+        {"$set": {
+            "estado": "Cerrada",
+            "puntajes": promedio,
+            "puntaje_criterios": round(total_of, 2),
+            "bono_priorizacion": bono,
+            "puntaje_final": round(total_of + bono, 2),
+            "puntaje_diferencial_total": round(total_dif, 2),
+            "fuente_definitiva": "promedio_etapa_colectiva",
+            "fecha_cierre": now_iso(),
+            "v2_relacionadas": [e["id"] for e in v2s],
+            "cerrada_automaticamente": True,
+        }}
+    )
+    await audit(user, "auto_close_modalidad_nueva", "evaluaciones_colectivas", colectiva_id,
+                detalle=f"promedio_v2 puntaje_final={round(total_of + bono, 2)}")
 
 
 async def _auto_generate_colectivas_after_finalizar(db, ev: dict):
