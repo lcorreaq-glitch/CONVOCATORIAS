@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  ArrowRight, Loader2, ShieldCheck, FileSignature, Layers, Workflow, Mail, X,
+  ArrowRight, Loader2, ShieldCheck, FileSignature, Layers, Workflow, Mail, X, Building2,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
@@ -83,39 +83,47 @@ export default function Login() {
       </header>
 
       <main className="px-6 lg:px-12 pb-16">
-        <div className="max-w-7xl mx-auto grid lg:grid-cols-[1.05fr_1fr] gap-12 lg:gap-20 items-start mt-8 lg:mt-14">
+        <div className="max-w-7xl mx-auto grid lg:grid-cols-[1.1fr_1fr] gap-12 lg:gap-16 items-start mt-8 lg:mt-12">
           {/* Left: Marketing / value */}
-          <div className="lg:pt-6">
+          <div className="lg:pt-4">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-[#E2E7EC] text-[11px] font-semibold text-[#14776A] tracking-wide">
               <span className="w-1.5 h-1.5 rounded-full bg-[#14776A]" />
               Plataforma Inteligente para Convocatorias y Evaluación
             </div>
-            <h1 className="mt-6 font-display font-extrabold text-4xl lg:text-[56px] leading-[1.05] tracking-tight text-[#1A1F2C] max-w-[18ch]">
+
+            <h1 className="mt-6 font-display font-extrabold text-4xl lg:text-[56px] leading-[1.05] tracking-tight text-[#1A1F2C] max-w-[20ch]">
               Convocatorias, evaluación y resultados en una sola plataforma.
             </h1>
-            <p className="mt-6 text-[#5E6878] text-base lg:text-[17px] leading-relaxed max-w-[52ch]">
-              Gestione propuestas, jurados, expedientes, evaluaciones y resultados con trazabilidad
-              completa. Diseñada para gobernaciones, alcaldías, universidades, fundaciones,
-              operadores y cámaras de comercio.
+
+            {/* Párrafo principal — propuesta de valor, no enumeración */}
+            <p className="mt-6 text-[#3F4856] text-base lg:text-[17px] leading-relaxed max-w-[54ch]">
+              <strong className="text-[#1A1F2C]">Gestione todo el ciclo del proceso</strong> — desde la apertura de la convocatoria hasta la publicación del acta firmada — con reglas configurables, jurados acreditados y trazabilidad institucional automática.
             </p>
 
-            <div className="mt-10 grid sm:grid-cols-2 gap-3 max-w-xl">
+            {/* Audiencia objetivo, compacta y elegante */}
+            <p className="mt-3 text-[#5E6878] text-[13.5px] leading-relaxed max-w-[54ch]">
+              Diseñada para <span className="text-[#1A1F2C] font-semibold">gobernaciones, alcaldías, universidades, fundaciones, operadores y cámaras de comercio</span> que necesitan procesos transparentes, auditables y a escala.
+            </p>
+
+            {/* Features grid — 4 columnas en desktop para mayor impacto visual */}
+            <div className="mt-9 grid grid-cols-2 lg:grid-cols-4 gap-3 max-w-3xl">
               {FEATURES.map((f) => (
-                <div key={f.title} className="bg-white rounded-xl p-4 border border-[#E2E7EC] shadow-card hover:border-[#14776A]/30 transition-colors">
+                <div key={f.title} className="bg-white rounded-xl p-4 border border-[#E2E7EC] shadow-card hover:border-[#14776A]/30 hover:shadow-md transition-all">
                   <f.icon className="w-5 h-5 stroke-[1.6] text-[#14776A]" />
-                  <div className="mt-2.5 font-display font-bold text-[14px] text-[#1A1F2C]">{f.title}</div>
-                  <p className="text-[12.5px] text-[#5E6878] mt-1 leading-relaxed">{f.desc}</p>
+                  <div className="mt-2.5 font-display font-bold text-[13.5px] text-[#1A1F2C] leading-tight">{f.title}</div>
+                  <p className="text-[11.5px] text-[#5E6878] mt-1.5 leading-snug">{f.desc}</p>
                 </div>
               ))}
             </div>
 
-            <div className="mt-10 pt-6 border-t border-[#E2E7EC] max-w-xl">
-              <div className="text-[10.5px] uppercase tracking-[0.15em] font-bold text-[#5E6878] mb-2">
+            {/* Casos en operación — versión compacta */}
+            <div className="mt-8 pt-6 border-t border-[#E2E7EC] max-w-3xl">
+              <div className="text-[10.5px] uppercase tracking-[0.15em] font-bold text-[#5E6878] mb-2.5">
                 Casos en operación
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1.5">
                 {["Convocatorias públicas", "Estímulos culturales", "Becas universitarias", "Procesos de selección", "Reconocimientos"].map((c) => (
-                  <span key={c} className="px-3 py-1 rounded-full bg-white border border-[#E2E7EC] text-[12px] text-[#3F4856]">{c}</span>
+                  <span key={c} className="px-2.5 py-1 rounded-full bg-white border border-[#E2E7EC] text-[11.5px] text-[#3F4856]">{c}</span>
                 ))}
               </div>
             </div>
@@ -202,9 +210,34 @@ export default function Login() {
               </form>
             </div>
 
-            <p className="text-center text-[11.5px] text-[#5E6878] mt-5 max-w-[460px] mx-auto lg:mx-0 lg:ml-auto">
-              Plataforma propiedad de <strong className="text-[#1A1F2C]">ELEA</strong>. Reutilizable y escalable para múltiples entidades y procesos.
-            </p>
+            <div className="mt-5 max-w-[460px] mx-auto lg:mx-0 lg:ml-auto space-y-3">
+              <p className="text-center text-[11.5px] text-[#5E6878]">
+                Plataforma propiedad de <strong className="text-[#1A1F2C]">ELEA</strong>. Reutilizable y escalable para múltiples entidades y procesos.
+              </p>
+
+              {/* Bloque de contacto ELEA */}
+              <div className="rounded-xl bg-white border border-[#E2E7EC] p-4 flex items-start gap-3 shadow-card">
+                <div className="w-9 h-9 rounded-lg bg-[#E8F3F0] grid place-items-center shrink-0">
+                  <Building2 className="w-4.5 h-4.5 text-[#14776A]" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[10.5px] uppercase tracking-[0.16em] font-display font-bold text-[#0F5E54]">
+                    ¿Quieres KRINOS en tu institución?
+                  </div>
+                  <div className="text-[12.5px] text-[#3F4856] mt-0.5 leading-snug">
+                    Contáctanos para una demostración o cotización institucional.
+                  </div>
+                  <a
+                    href="mailto:eleainnovacionsocial@gmail.com?subject=Información%20sobre%20KRINOS"
+                    className="mt-1.5 inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-[#14776A] hover:text-[#0F5E54] hover:underline"
+                    data-testid="contact-email-link"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    eleainnovacionsocial@gmail.com
+                  </a>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </main>
