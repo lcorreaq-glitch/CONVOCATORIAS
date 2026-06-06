@@ -464,7 +464,20 @@ async def list_actas_pendientes(convocatoria_id: str, user: dict = Depends(get_c
             or (props_map.get(e.get("propuesta_id")) or {}).get("territorio")
         })
         if not subregiones_derivadas:
-            subregiones_derivadas = j.get("subregiones") or []
+            # Fallback 1: subregiones de las ternas a las que pertenece el jurado
+            subs_de_ternas = set()
+            for t in await db.ternas.find({
+                "convocatoria_id": convocatoria_id,
+                "integrantes.jurado_id": j["id"]
+            }, {"_id": 0, "subregion": 1, "territorio": 1, "subregiones": 1}).to_list(50):
+                if t.get("subregion"): subs_de_ternas.add(t["subregion"])
+                if t.get("territorio"): subs_de_ternas.add(t["territorio"])
+                for s in (t.get("subregiones") or []): subs_de_ternas.add(s)
+            if subs_de_ternas:
+                subregiones_derivadas = sorted(s for s in subs_de_ternas if s)
+            else:
+                # Fallback 2 (último recurso): campo personal del jurado
+                subregiones_derivadas = j.get("subregiones") or []
         finalizadas = sum(1 for e in evs if e.get("estado") in ("Finalizada", "Firmada"))
         forzada = bool(((j.get("datos") or {}).get("acta_individual_forzada")))
         firma_url = ((j.get("datos") or {}).get("firma_url"))
