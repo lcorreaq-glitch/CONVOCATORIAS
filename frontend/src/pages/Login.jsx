@@ -95,14 +95,14 @@ export default function Login() {
               Convocatorias, evaluación y resultados en una sola plataforma.
             </h1>
 
-            {/* Párrafo principal — propuesta de valor, no enumeración */}
-            <p className="mt-6 text-[#3F4856] text-base lg:text-[17px] leading-relaxed max-w-[54ch]">
-              <strong className="text-[#1A1F2C]">Gestione todo el ciclo del proceso</strong> — desde la apertura de la convocatoria hasta la publicación del acta firmada — con reglas configurables, jurados acreditados y trazabilidad institucional automática.
+            {/* Párrafo principal — propuesta de valor de extremo a extremo */}
+            <p className="mt-6 text-[#3F4856] text-base lg:text-[17px] leading-relaxed max-w-[58ch]">
+              <strong className="text-[#1A1F2C]">Gestione convocatorias de principio a fin</strong> en una plataforma inteligente que integra postulación, evaluación, consolidación de resultados y generación de actas, garantizando <span className="text-[#1A1F2C] font-semibold">trazabilidad, transparencia y control</span> en cada etapa.
             </p>
 
-            {/* Audiencia objetivo, compacta y elegante */}
-            <p className="mt-3 text-[#5E6878] text-[13.5px] leading-relaxed max-w-[54ch]">
-              Diseñada para <span className="text-[#1A1F2C] font-semibold">gobernaciones, alcaldías, universidades, fundaciones, operadores y cámaras de comercio</span> que necesitan procesos transparentes, auditables y a escala.
+            {/* Segundo párrafo — orientación a resultados */}
+            <p className="mt-3 text-[#5E6878] text-[14px] lg:text-[15px] leading-relaxed max-w-[58ch]">
+              Convierta la información en <span className="text-[#1A1F2C] font-semibold">decisiones confiables</span> mediante procesos auditables, configurables y orientados a resultados.
             </p>
 
             {/* Features grid — 4 columnas en desktop para mayor impacto visual */}
