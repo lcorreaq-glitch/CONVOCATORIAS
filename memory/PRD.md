@@ -879,3 +879,49 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
   - Envío real a `eleainnovacionsocial@gmail.com` por Gmail SMTP → `last_status: ok`.
   - Manifest con conteo por colección + total documentos: 2,170.
 
+
+
+---
+
+## Iteración Feb 06, 2026 — IA Coherencia + Ranking Robustez + Subregiones (P0/P1/P2)
+
+### ✅ P0 — Subregiones en Actas (validado vía code review)
+- `routes_actas.py → list_actas_pendientes()`:
+  - Individuales (líneas 449-512): fallback estricto **propuestas → ternas.subregion/territorio/subregiones → jurado.subregiones**.
+  - Colectivas (líneas 514-554): fallback similar centrado en la(s) terna(s).
+- Resuelve el bug histórico de "Andres Lopera" que mostraba `Valle de Aburrá` (perfil personal) en lugar de `Oriente` (terna asignada) cuando las propuestas no tenían subregión explícita.
+- ⚠️ Caso "Andres Lopera" existe solo en BD de producción; en preview no se reprodujo, pero la lógica está confirmada por code review.
+
+### ✅ P1 — Detección de Inconsistencias con IA (nuevo)
+**Backend**:
+- `POST /api/ai/coherencia-evaluacion` con `{evaluacion_id, tipo: "individual"|"colectiva"}` en `routes_ai.py`.
+- Usa Emergent LLM Key + GPT-4o vía `LlmChat` (emergentintegrations).
+- Devuelve JSON estricto: `{coherente:bool, resumen:str, hallazgos:[{severidad, criterio, tipo, descripcion}]}`.
+- Detecta: puntaje alto/comentario negativo, puntaje bajo/comentario elogioso, contradicciones entre criterios, criterios con puntaje sin observación, observación final que contradice puntajes.
+- Fallback defensivo con regex `r"\{[\s\S]*\}"` por si el modelo devuelve markdown.
+- Auditado en `audit_log` con `ai_coherencia`.
+
+**Frontend**:
+- `EvaluacionIndividual.jsx`: botón `eval-coherencia-btn` (Sparkles morado) en el header (no aparece cuando evaluación bloqueada). Modal `coherencia-modal` con resumen + lista de hallazgos coloreados por severidad (rojo/ámbar/gris).
+- `EvaluacionColectiva.jsx`: equivalente con testids `eval-col-coherencia-btn` y `coherencia-col-modal`.
+- Mensaje explícito: "Esta sugerencia no reemplaza tu criterio".
+
+### ✅ P2 — Ranking más robusto (mejorado)
+- `routes_reports.py → _compute_propuesta_score()`:
+  - **Modo colectivo**: ya NO considera `estado="Abierta"`, SOLO `Cerrada`/`Firmada`. Si hay varias (terna reasignada), prioriza `Firmada` y la más reciente por `firmada_at`/`cerrada_at`/`updated_at`.
+  - **Modo individual**: mantiene `Finalizada`/`Firmada` (excluye `Reabierta`/`Borrador`).
+- `generar_ranking()` ahora añade `cobertura = {total_propuestas, con_puntaje, sin_puntaje, propuestas_sin_puntaje[<=50]}` para diagnosticar visualmente qué propuestas no tienen puntaje.
+- **Frontend** `Ranking.jsx`: nuevo panel `ranking-cobertura-panel` (banner rojo) cuando `cobertura.sin_puntaje > 0`, con `<details>` expandible que lista códigos+nombres de las propuestas sin puntaje.
+
+### Validación (testing_agent_v3_fork iteration_17.json)
+- Backend: 7/8 PASS (1 skip por listado dependent).
+- Frontend: 100% en lo solicitado (modal IA + panel cobertura confirmados visualmente).
+- Sin issues críticos.
+
+### Action items menores (no bloqueantes, postergables)
+- Aceptar `convocatoria_id` también en body JSON para `POST /api/rankings/generar` (hoy solo query param).
+- Añadir `name="username"`/`name="password"` a los inputs de Login (a11y + selectores estables).
+
+### Pendientes / Backlog
+- **P3**: Refactor de `routes_data.py` (>2000 líneas) y `Actas.jsx` (alta complejidad ciclomática).
+- **P4**: Refactor de `routes_actas.py → list_actas_pendientes` (función muy larga).
