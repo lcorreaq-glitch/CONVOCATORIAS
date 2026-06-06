@@ -924,6 +924,8 @@ def _build_pdf(tmpl: dict, ctx: dict, conv: dict, tabla_headers: list,
         el.append(Spacer(1, 8))
     if ctx.get("terna_codigo"):
         el.append(Paragraph(f"<b>TERNA:</b> {ctx['terna_codigo']}{(' · '+ctx['subregion']) if ctx.get('subregion') else ''}", st["meta"]))
+        if ctx.get("integrantes_terna"):
+            el.append(Paragraph(f"<b>INTEGRANTES:</b> {ctx['integrantes_terna']}", st["meta"]))
         el.append(Spacer(1, 8))
 
     el.append(Paragraph("CONSIDERANDO QUE:", st["h2"]))
@@ -1160,23 +1162,81 @@ async def acta_colectiva_terna(terna_id: str, user: dict = Depends(get_current_u
         ctx["subregion"] = ", ".join(subs_derivadas)
         ctx["terna_subregion"] = ctx["subregion"]
 
+    # Cargar integrantes ordenados (para mostrar puntajes individuales por jurado)
+    integrantes_ids = [i.get("jurado_id") for i in (terna.get("integrantes") or []) if i.get("jurado_id")]
+    integrantes_jurados = {}  # jurado_id -> doc
+    if integrantes_ids:
+        async for jdoc in db.jurados.find({"id": {"$in": integrantes_ids}}):
+            jdoc.pop("_id", None)
+            integrantes_jurados[jdoc["id"]] = jdoc
+    integrantes_ordenados = [integrantes_jurados.get(jid) for jid in integrantes_ids if integrantes_jurados.get(jid)]
+
+    # Pre-cargar las V2 (etapa=colectiva) por (propuesta, jurado) para trazabilidad
+    # Mapa: (propuesta_id, jurado_id) -> puntaje_total
+    v2_lookup = {}
+    if propuestas_ids and integrantes_ids:
+        async for v in db.evaluaciones_individuales.find({
+            "propuesta_id": {"$in": propuestas_ids},
+            "jurado_id": {"$in": integrantes_ids},
+            "etapa": "colectiva",
+        }, {"_id": 0, "propuesta_id": 1, "jurado_id": 1, "puntaje_total": 1, "puntajes": 1}):
+            v2_lookup[(v["propuesta_id"], v["jurado_id"])] = v
+
+    # Encabezado: nombres de los 3 integrantes para el contexto del PDF
+    ctx["integrantes_terna"] = "; ".join([j.get("nombre", "—") for j in integrantes_ordenados]) or "—"
+    ctx["integrante_1"] = integrantes_ordenados[0].get("nombre") if len(integrantes_ordenados) > 0 else "—"
+    ctx["integrante_2"] = integrantes_ordenados[1].get("nombre") if len(integrantes_ordenados) > 1 else "—"
+    ctx["integrante_3"] = integrantes_ordenados[2].get("nombre") if len(integrantes_ordenados) > 2 else "—"
+
     rows = []
     for i, e in enumerate(evs_col, 1):
         p = pmap.get(e["propuesta_id"], {})
         d = p.get("datos") or {}
-        nit = p.get("nit") or d.get("nit") or "—"
-        repr_legal = (p.get("representante_legal") or d.get("representante_legal")
-                      or d.get("nombre_representante_legal") or "—")
+        # NIT: probar todas las variantes comunes
+        nit = (p.get("nit") or d.get("nit") or d.get("NIT") or d.get("numero_documento")
+               or d.get("documento_organizacion") or d.get("identificacion") or "—")
         org_full = (p.get("organizacion") or d.get("nombre_organizacion") or "—")
+        # Puntaje de cada integrante (en el orden de la terna)
+        puntajes_jur = []
+        for jid in integrantes_ids:
+            v = v2_lookup.get((e["propuesta_id"], jid))
+            pt = v.get("puntaje_total") if v else None
+            if pt is None and v:
+                # Si V2 no tiene puntaje_total pre-calculado, sumar puntajes
+                pt = sum(float(x) for x in (v.get("puntajes") or {}).values())
+            puntajes_jur.append(f"{round(pt, 2)}" if pt is not None else "—")
+        # Asegurar 3 columnas aunque la terna tenga menos integrantes registrados
+        while len(puntajes_jur) < 3:
+            puntajes_jur.append("—")
+        # Promedio definitivo (validado contra el puntaje_final guardado)
+        promedio_calculado = None
+        vals_validos = [float(x) for x in puntajes_jur if x != "—"]
+        if vals_validos:
+            promedio_calculado = round(sum(vals_validos) / len(vals_validos), 2)
+        promedio_final = e.get("puntaje_final", 0)
+        # Si hay discrepancia notable, marcar con ⚠
+        promedio_str = f"{promedio_final}"
+        if promedio_calculado is not None and abs(float(promedio_final) - promedio_calculado) > 0.5:
+            promedio_str = f"{promedio_final} (calc: {promedio_calculado})"
         rows.append([
             str(i), p.get("codigo", "—"),
             d.get("municipio", "—"),
             org_full[:60],
             str(nit)[:18],
-            (str(repr_legal) or "—")[:35],
-            str(e.get("puntaje_final", 0)),
+            puntajes_jur[0], puntajes_jur[1], puntajes_jur[2],
+            promedio_str,
         ])
-    headers = ["Nº", "Cód.", "Municipio", "Organización", "NIT", "Representante Legal", "Puntaje Total"]
+    n1 = (integrantes_ordenados[0].get("nombre", "Jurado 1").split() if integrantes_ordenados else ["J1"])
+    n2 = (integrantes_ordenados[1].get("nombre", "Jurado 2").split() if len(integrantes_ordenados) > 1 else ["J2"])
+    n3 = (integrantes_ordenados[2].get("nombre", "Jurado 3").split() if len(integrantes_ordenados) > 2 else ["J3"])
+    # Etiquetas cortas para las 3 columnas de puntaje (apellido + primera letra del nombre)
+    def _short(parts):
+        return (parts[-1] + " " + parts[0][0] + ".") if len(parts) >= 2 else (parts[0] if parts else "—")
+    headers = [
+        "Nº", "Cód.", "Municipio", "Organización", "NIT",
+        f"Pje {_short(n1)}", f"Pje {_short(n2)}", f"Pje {_short(n3)}",
+        "Puntaje Total (promedio)",
+    ]
     firmas = (terna.get("datos") or {}).get("firmas_acta_colectiva") or {}
     firmantes = []
     for integ in terna.get("integrantes") or []:
