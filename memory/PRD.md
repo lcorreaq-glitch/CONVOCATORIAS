@@ -809,3 +809,20 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
   - 79 missing hook deps: la mayoría son omisiones intencionales para evitar loops. Aplicarlas masivamente es riesgo.
   - Nested ternaries (33): estilo, no funcional.
 
+
+**Habeas Data consent modal (Ley 1581 de 2012)** — Feb 2026:
+- ✅ **Backend** (`auth.py`):
+  - `UserOut` agrega `habeas_consent_required: bool` y `habeas_consent_version: Optional[str]`.
+  - `GET /api/auth/me`: si `role == "jurado"` y NO existe consentimiento en `habeas_data_consents`, marca `habeas_consent_required: true`.
+  - `POST /api/auth/habeas-consent`: registra `jurado_id`, `user_id`, `convocatoria_id`, `version` (v1.0-2026-02), `texto`, `ip_aceptacion`, `user_agent`, `fecha_aceptacion`. Audit log incluido.
+  - `GET /api/auth/habeas-consent/text`: devuelve el texto y versión vigentes para el modal.
+  - Solo aplica al rol `jurado` (admin/supervisor/auditor no necesitan consent).
+- ✅ **Frontend** (`components/HabeasDataConsent.jsx`):
+  - Modal blocante (no cierra con Esc ni clic afuera) que aparece automáticamente en el primer login del jurado.
+  - Texto institucional con Ley 1581 + Decreto 1377, derechos del titular, contacto a `eleainnovacionsocial@gmail.com`.
+  - Checkbox de aceptación + botón "Aceptar y continuar" / "Salir sin autorizar" (cierra sesión).
+  - Aviso de trazabilidad: "registraremos fecha, IP y versión de esta política".
+  - Montado en `Layout.jsx` después de `WelcomeOnboarding`.
+- ✅ `WelcomeOnboarding.jsx` ahora **gateé**: NO se muestra mientras `habeas_consent_required: true` (Habeas tiene precedencia legal sobre el onboarding UX).
+- ✅ **Validado e2e por curl**: jurado sin consent → `requires: true` → POST `/habeas-consent` → ok+version → `/auth/me` ahora `requires: false, version: "v1.0-2026-02"`.
+

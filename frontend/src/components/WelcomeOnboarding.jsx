@@ -63,6 +63,7 @@ export default function WelcomeOnboarding() {
 
   useEffect(() => {
     if (!user || !user.id) return;
+    if (user.habeas_consent_required) return; // primero firma Habeas, luego onboarding
     if (localStorage.getItem(storageKey)) return;  // Ya vio el onboarding
     // Cargar catálogo de módulos + info del rol del usuario
     Promise.all([
@@ -74,6 +75,8 @@ export default function WelcomeOnboarding() {
       setOpen(true);
     });
   }, [user, storageKey]);
+
+  if (user?.habeas_consent_required) return null; // Habeas modal toma precedencia
 
   const close = () => {
     if (storageKey) localStorage.setItem(storageKey, "1");

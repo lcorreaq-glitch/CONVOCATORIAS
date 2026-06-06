@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import WelcomeOnboarding from "@/components/WelcomeOnboarding";
+import HabeasDataConsent from "@/components/HabeasDataConsent";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, tid: TID.navDashboard, end: true, module: "dashboard" },
@@ -197,6 +198,7 @@ export default function Layout() {
       </main>
 
       <WelcomeOnboarding />
+      <HabeasDataConsent />
     </div>
   );
 }
