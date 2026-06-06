@@ -842,3 +842,16 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
   - Resumen post-envío: cards con candidatos/enviados/fallidos + detalle de errores.
   - Confirmación destructiva si `reset_password=true`.
 
+
+**Bug fix — Sincronización bidireccional email users↔jurados** — Feb 2026:
+- 🐛 **Causa raíz**: `PATCH /api/users/{id}` solo actualizaba `users.email`, dejando `jurados.email` desfasado (y viceversa con `PATCH /api/jurados/{id}`). Resultado: el admin cambiaba el correo en Usuarios y al abrir Jurados el correo aparecía vacío/antiguo.
+- ✅ **Fix en `routes_users.py → update_user`**: cuando cambia el email del user:
+  1. Si `username == old_email`, también se sincroniza `username` al nuevo email.
+  2. Si el user tiene `jurado_id`, propaga el email a `jurados`.
+  3. Si NO tiene `jurado_id` pero su rol es `jurado` y existe un jurado con el email viejo, auto-vincula `jurado_id` y migra el email (recuperación de huérfanos).
+- ✅ **Fix en `routes_data.py → update_jurado`**: cuando cambia el email del jurado:
+  1. Busca el user por `jurado_id` (preferente) o por `email` viejo.
+  2. Actualiza `users.email` + (si `username == old_email`) también `users.username`.
+  3. Auto-vincula `users.jurado_id` si faltaba.
+- ✅ **Validado e2e con curl**: PATCH /users → cambia los 3 campos (`users.username`, `users.email`, `jurados.email`). PATCH /jurados → cambia los 3. Auto-linking de `jurado_id` confirmado.
+

@@ -88,6 +88,29 @@ async def update_user(user_id: str, payload: UserUpdate, user: dict = Depends(re
     if payload.password: updates["password_hash"] = hash_password(payload.password)
     if payload.convocatoria_roles is not None:
         updates["convocatoria_roles"] = payload.convocatoria_roles
+
+    # Si cambia el email, propagar y mantener consistencia con username y jurado vinculado.
+    new_email = updates.get("email")
+    if new_email and new_email != (existing.get("email") or "").lower():
+        old_email = (existing.get("email") or "").lower()
+        old_username = (existing.get("username") or "").lower()
+        # 1) username se sincroniza si era igual al email (caso típico de jurados/usuarios creados con email como user)
+        if old_username == old_email:
+            updates["username"] = new_email
+        # 2) Si tiene jurado vinculado, propagar el email
+        if existing.get("jurado_id"):
+            await db.jurados.update_one(
+                {"id": existing["jurado_id"]},
+                {"$set": {"email": new_email, "updated_at": now_iso()}}
+            )
+        # 3) Si no tiene jurado_id pero su rol es jurado y existe un jurado con el email viejo, vincularlo y migrarlo
+        elif (updates.get("role") or existing.get("role")) == "jurado" and old_email:
+            jur = await db.jurados.find_one({"email": old_email}, {"_id": 0, "id": 1})
+            if jur:
+                await db.jurados.update_one({"id": jur["id"]},
+                                             {"$set": {"email": new_email, "updated_at": now_iso()}})
+                updates["jurado_id"] = jur["id"]
+
     if updates:
         await db.users.update_one({"id": user_id}, {"$set": updates})
     await audit(user, "update", "users", user_id, valor_nuevo=updates)
