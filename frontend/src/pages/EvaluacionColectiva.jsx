@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { api, formatApiError, openPdf } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { Badge, estadoTone } from "@/components/PageHeader";
@@ -24,6 +24,7 @@ const CAMPO_ICON = {
 export default function EvaluacionColectiva() {
   const { id } = useParams();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [ev, setEv] = useState(null);
   const [conv, setConv] = useState(null);
   const [propuesta, setPropuesta] = useState(null);
@@ -33,36 +34,81 @@ export default function EvaluacionColectiva() {
   const [puntajes, setPuntajes] = useState({});
   const [obs, setObs] = useState("");
   const [v2List, setV2List] = useState([]);
+  const [juradoMap, setJuradoMap] = useState({});
   const [ciego, setCiego] = useState(true);
   const [showFicha, setShowFicha] = useState(false);
   const [coherencia, setCoherencia] = useState(null);
   const [coherenciaLoading, setCoherenciaLoading] = useState(false);
   const [showCoherencia, setShowCoherencia] = useState(false);
+  const [autoRedirected, setAutoRedirected] = useState(false);
 
   const reload = async () => {
     const r = await api.get(`/evaluaciones-colectivas/${id}`);
     setEv(r.data);
     setPuntajes(r.data.puntajes || {});
     setObs(r.data.observacion_consolidada || "");
-    const [p, t, c, cv, ca] = await Promise.all([
+    const [p, t, c, cv, ca, jr] = await Promise.all([
       api.get(`/propuestas/${r.data.propuesta_id}`),
       api.get(`/ternas?convocatoria_id=${r.data.convocatoria_id}`),
       api.get(`/criterios?convocatoria_id=${r.data.convocatoria_id}`),
       api.get(`/convocatorias/${r.data.convocatoria_id}`),
       api.get(`/campos?convocatoria_id=${r.data.convocatoria_id}&aplica_a=propuesta`),
+      api.get(`/jurados?convocatoria_id=${r.data.convocatoria_id}`).catch(() => ({ data: [] })),
     ]);
     setPropuesta(p.data);
     setTerna(t.data.find((x) => x.id === r.data.terna_id));
     setCriterios(c.data);
     setConv(cv.data);
     setCampos(ca.data);
+    // mapa jurado_id → datos para poder mostrar nombre legible en la tabla v2
+    const jm = {};
+    (jr.data || []).forEach((j) => { jm[j.id] = j; });
+    setJuradoMap(jm);
     try {
       const v2r = await api.get(`/evaluaciones-colectivas/${id}/v2`);
       setV2List(v2r.data.items || []);
       setCiego(v2r.data.ciego_activo);
-    } catch { setV2List([]); }
+      return { ev: r.data, v2: v2r.data.items || [], conv: cv.data };
+    } catch { setV2List([]); return { ev: r.data, v2: [], conv: cv.data }; }
   };
-  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [id]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const ctx = await reload();
+      if (cancelled || autoRedirected) return;
+      // Flujo de un-clic: si la modalidad es "nueva_evaluacion" y el usuario es integrante,
+      // saltarse el paso intermedio y abrir directamente su evaluación v2.
+      const modalidad = ctx.conv?.modalidad_evaluacion_colectiva || "promedio_individuales";
+      if (modalidad !== "nueva_evaluacion") return;
+      const myJ = user?.jurado_id;
+      if (!myJ) return;
+      // ¿Mi v2 ya existe?
+      const mia = ctx.v2.find((v) => v.jurado_id === myJ);
+      if (mia) {
+        setAutoRedirected(true);
+        navigate(`/evaluaciones/individual/${mia.id}`, { replace: true });
+        return;
+      }
+      // ¿No hay v2 todavía? Solo crear+redirigir si el usuario es integrante de la terna
+      const isIntg = (ctx.ev.terna_id && (await api.get(`/ternas?convocatoria_id=${ctx.ev.convocatoria_id}`))
+        .data.find((x) => x.id === ctx.ev.terna_id)?.integrantes?.some((i) => i.jurado_id === myJ));
+      if (!isIntg) return;
+      if (["Cerrada", "Firmada"].includes(ctx.ev.estado)) return;
+      try {
+        const res = await api.post(`/evaluaciones-colectivas/${id}/iniciar-modalidad-nueva`);
+        // recargar v2 y redirigir
+        const v2r = await api.get(`/evaluaciones-colectivas/${id}/v2`);
+        const mia2 = (v2r.data.items || []).find((v) => v.jurado_id === myJ);
+        if (mia2 && !cancelled) {
+          setAutoRedirected(true);
+          toast.success(`Etapa colectiva iniciada (${res.data.v2_creadas} V2 precargadas). Te llevo a la tuya.`);
+          navigate(`/evaluaciones/individual/${mia2.id}`, { replace: true });
+        }
+      } catch (_) { /* dejar UI normal */ }
+    })();
+    return () => { cancelled = true; };
+    /* eslint-disable-next-line */
+  }, [id]);
 
   const camposResumen = useMemo(() => campos
     .filter((c) => (c.uso_actas || c.uso_lista) && !["nombre_organizacion", "link_expediente"].includes(c.nombre_interno))
@@ -338,19 +384,26 @@ export default function EvaluacionColectiva() {
                   <thead><tr><th>Jurado</th><th>Estado</th><th>Puntaje oficial</th><th>Finalizada</th><th></th></tr></thead>
                   <tbody>
                     {v2List.map((v) => {
-                      const jur = terna?.integrantes?.find((i) => i.jurado_id === v.jurado_id);
+                      const jurFromTerna = terna?.integrantes?.find((i) => i.jurado_id === v.jurado_id);
+                      const nombreCompleto = juradoMap[v.jurado_id]?.nombre || jurFromTerna?.nombre || `Jurado ${v.jurado_id?.slice(0, 6)}…`;
+                      const esMia = user?.jurado_id === v.jurado_id;
                       return (
-                        <tr key={v.id}>
-                          <td className="font-semibold">{jur?.nombre || v.jurado_id?.slice(0, 8)}</td>
+                        <tr key={v.id} className={esMia ? "bg-[#F0F7F5]" : ""}>
+                          <td className="font-semibold">
+                            {nombreCompleto}
+                            {esMia && <span className="ml-2 inline-block px-1.5 py-0.5 rounded text-[9.5px] font-bold bg-[#14776A] text-white">TÚ</span>}
+                          </td>
                           <td><Badge tone={estadoTone(v.estado)}>{v.estado}</Badge></td>
                           <td className="font-mono tabular-nums">
-                            {v.ciego ? <span className="text-muted-foreground inline-flex items-center gap-1"><Lock className="w-3 h-3" />Ciego</span> : (v.puntaje_total ?? "—")}
+                            {v.ciego && !esMia ? <span className="text-muted-foreground inline-flex items-center gap-1"><Lock className="w-3 h-3" />Ciego</span> : (v.puntaje_total ?? "—")}
                           </td>
                           <td className="text-xs text-muted-foreground font-mono">{v.fecha_finalizacion ? new Date(v.fecha_finalizacion).toLocaleString("es-CO") : "—"}</td>
                           <td className="text-right">
-                            <Link to={`/evaluaciones/individual/${v.id}`} data-testid={`open-v2-${v.id}`} className="text-[#14776A] hover:underline text-xs inline-flex items-center gap-1">
-                              Abrir <ArrowRight className="w-3 h-3" />
-                            </Link>
+                            {(esMia || isAdmin || !v.ciego) && (
+                              <Link to={`/evaluaciones/individual/${v.id}`} data-testid={`open-v2-${v.id}`} className="text-[#14776A] hover:underline text-xs inline-flex items-center gap-1">
+                                {esMia ? "Continuar mi evaluación" : "Abrir"} <ArrowRight className="w-3 h-3" />
+                              </Link>
+                            )}
                           </td>
                         </tr>
                       );
