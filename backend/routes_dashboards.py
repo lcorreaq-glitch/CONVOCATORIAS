@@ -178,7 +178,7 @@ async def _resolve_ds(db, ds: str, cid: str, user: dict) -> Any:
         return {"value": await db.ternas.count_documents({"convocatoria_id": cid})}
 
     if ds == "progress_eval_individuales":
-        evs = await db.evaluaciones_individuales.find({"convocatoria_id": cid}, {"_id": 0, "estado": 1}).to_list(5000)
+        evs = await db.evaluaciones_individuales.find({"convocatoria_id": cid, "etapa": {"$ne": "colectiva"}}, {"_id": 0, "estado": 1}).to_list(5000)
         total = len(evs); done = sum(1 for e in evs if e.get("estado") in ("Finalizada", "Firmada"))
         return {"total": total, "done": done, "pct": round((done / total) * 100) if total else 0}
     if ds == "progress_eval_colectivas":
@@ -193,7 +193,7 @@ async def _resolve_ds(db, ds: str, cid: str, user: dict) -> Any:
 
     if ds == "carga_jurado":
         jurados = await db.jurados.find({"convocatoria_id": cid}, {"_id": 0, "id": 1, "nombre": 1}).to_list(500)
-        evs = await db.evaluaciones_individuales.find({"convocatoria_id": cid}, {"_id": 0, "jurado_id": 1, "estado": 1}).to_list(5000)
+        evs = await db.evaluaciones_individuales.find({"convocatoria_id": cid, "etapa": {"$ne": "colectiva"}}, {"_id": 0, "jurado_id": 1, "estado": 1}).to_list(5000)
         by_jur = defaultdict(lambda: {"total": 0, "done": 0})
         for e in evs:
             by_jur[e["jurado_id"]]["total"] += 1
@@ -208,7 +208,7 @@ async def _resolve_ds(db, ds: str, cid: str, user: dict) -> Any:
 
     if ds == "ranking_avance_jurado":
         jurados = await db.jurados.find({"convocatoria_id": cid}, {"_id": 0, "id": 1, "nombre": 1}).to_list(500)
-        evs = await db.evaluaciones_individuales.find({"convocatoria_id": cid}, {"_id": 0, "jurado_id": 1, "estado": 1}).to_list(5000)
+        evs = await db.evaluaciones_individuales.find({"convocatoria_id": cid, "etapa": {"$ne": "colectiva"}}, {"_id": 0, "jurado_id": 1, "estado": 1}).to_list(5000)
         by_jur = defaultdict(lambda: {"total": 0, "done": 0})
         for e in evs:
             by_jur[e["jurado_id"]]["total"] += 1
@@ -223,7 +223,7 @@ async def _resolve_ds(db, ds: str, cid: str, user: dict) -> Any:
     if ds == "comparativo_jurados":
         jurados = await db.jurados.find({"convocatoria_id": cid}, {"_id": 0, "id": 1, "nombre": 1}).to_list(500)
         evs = await db.evaluaciones_individuales.find(
-            {"convocatoria_id": cid, "estado": {"$in": ["Finalizada", "Firmada"]}, "puntaje_total": {"$ne": None}},
+            {"convocatoria_id": cid, "estado": {"$in": ["Finalizada", "Firmada"]}, "puntaje_total": {"$ne": None}, "etapa": {"$ne": "colectiva"}},
             {"_id": 0, "jurado_id": 1, "puntaje_total": 1}).to_list(5000)
         by_jur = defaultdict(list)
         for e in evs:
@@ -368,7 +368,11 @@ async def _resolve_ds(db, ds: str, cid: str, user: dict) -> Any:
     # ---- JURADO ----
     if ds in ("mias_asignadas", "mias_pendientes", "mias_finalizadas", "mi_avance_personal", "mi_promedio_emitido"):
         if not my_jurado_id: return {"value": 0}
-        evs = await db.evaluaciones_individuales.find({"convocatoria_id": cid, "jurado_id": my_jurado_id}, {"_id": 0}).to_list(500)
+        # Excluir V2 colectiva del conteo de evaluaciones INDIVIDUALES del jurado.
+        evs = await db.evaluaciones_individuales.find({
+            "convocatoria_id": cid, "jurado_id": my_jurado_id,
+            "etapa": {"$ne": "colectiva"},
+        }, {"_id": 0}).to_list(500)
         total = len(evs); done = sum(1 for e in evs if e.get("estado") in ("Finalizada", "Firmada"))
         if ds == "mias_asignadas": return {"value": total}
         if ds == "mias_pendientes": return {"value": total - done}
