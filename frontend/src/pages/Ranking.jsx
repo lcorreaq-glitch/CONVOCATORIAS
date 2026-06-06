@@ -74,8 +74,8 @@ export default function Ranking() {
   if (!activeConvocatoriaId) return <div className="p-10 text-muted-foreground">Selecciona una convocatoria.</div>;
 
   const methodologyText = modo === "colectivo"
-    ? "El ranking se construye sobre la evaluación colectiva de cada terna (promedio de los jurados). Si una propuesta aún no tiene evaluación colectiva, cae al promedio de sus individuales finalizadas."
-    : "El ranking se construye sobre el promedio de las evaluaciones individuales finalizadas de cada propuesta.";
+    ? "El ranking se construye exclusivamente sobre la evaluación colectiva de cada terna (promedio consensuado de los jurados). Si una propuesta aún no tiene evaluación colectiva cerrada, aparecerá con puntaje 0 y fuente 'Sin evaluación'."
+    : "El ranking se construye exclusivamente sobre el promedio de las evaluaciones individuales finalizadas de cada propuesta. Si una propuesta no tiene individuales finalizadas, aparecerá con puntaje 0 y fuente 'Sin evaluación'.";
 
   return (
     <div className="flex-1 p-8 lg:p-10">

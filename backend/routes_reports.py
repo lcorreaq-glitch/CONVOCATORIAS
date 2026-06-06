@@ -29,19 +29,26 @@ DEFAULT_CUPOS_INC2026_SUBREGION = {
 
 # ==================== RANKING ====================
 async def _compute_propuesta_score(db, convocatoria_id: str, propuesta_id: str, modo: str = "colectivo"):
-    """Returns dict with puntaje_total and criterios_detalle."""
+    """Returns dict with puntaje_total and criterios_detalle.
+
+    Modo ESTRICTO: la fuente del puntaje debe coincidir exactamente con el modo seleccionado.
+    - 'colectivo'  -> SOLO evaluaciones_colectivas. Si no existe, fuente='ninguna' (sin fallback).
+    - 'individual' -> SOLO promedio de evaluaciones_individuales finalizadas. Sin fallback a colectiva.
+    """
     if modo == "colectivo":
         ev = await db.evaluaciones_colectivas.find_one({
             "propuesta_id": propuesta_id, "estado": {"$in": ["Cerrada", "Firmada", "Abierta"]}
         })
-        if ev:
-            return {
-                "puntaje_total": ev.get("puntaje_final", 0),
-                "puntaje_diferencial": ev.get("puntaje_diferencial_total", 0),
-                "criterios": ev.get("puntajes", {}),
-                "fuente": "colectiva",
-            }
-    # Fallback: promedio de individuales finalizadas
+        if not ev:
+            return {"puntaje_total": 0, "puntaje_diferencial": 0, "criterios": {}, "fuente": "ninguna"}
+        return {
+            "puntaje_total": ev.get("puntaje_final", 0),
+            "puntaje_diferencial": ev.get("puntaje_diferencial_total", 0),
+            "criterios": ev.get("puntajes", {}),
+            "fuente": "colectiva",
+        }
+
+    # modo == "individual" (o cualquier otro distinto a colectivo) -> usa SOLO individuales
     individuales = await db.evaluaciones_individuales.find({
         "propuesta_id": propuesta_id,
         "estado": {"$in": ["Finalizada", "Firmada"]},

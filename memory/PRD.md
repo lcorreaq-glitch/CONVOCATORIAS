@@ -719,3 +719,15 @@ Plataforma web parametrizable para gestionar convocatorias, concursos, estímulo
 
 **Validación e2e**: Acta individual generada → PDF 60KB con QR + texto "Código de verificación: 43C333E2531E", endpoint público devuelve `{valido:true, jurado_nombre:"Alvaro Augusto Diaz Algarin", subregiones:["Bajo Cauca"]...}`, código falso → 404, página `/verificar/:codigo` renderiza correctamente.
 
+
+
+## Cambio — Feb 2026 (fork actual)
+
+**Ranking: modo estricto sin fallback cruzado** (`routes_reports.py` → `_compute_propuesta_score`):
+- ✅ Cuando se selecciona **Modo colectivo**: la fuente del puntaje SOLO puede ser `colectiva` o `ninguna`. Ya no cae a `promedio_individuales` si falta la colectiva (eso confundía al usuario porque el botón decía colectivo pero el sistema usaba individual).
+- ✅ Cuando se selecciona **Modo individual**: la fuente SOLO puede ser `promedio_individuales` o `ninguna`. Sin fallback a colectiva.
+- ✅ Texto explicativo en `Ranking.jsx` actualizado: "El ranking se construye exclusivamente sobre..." aclarando que las propuestas sin la fuente seleccionada aparecerán con puntaje 0 y fuente "Sin evaluación".
+- ✅ Validado con curl: 514 propuestas en modo colectivo → 100% fuente `ninguna` (no hay colectivas cerradas); modo individual → 7 con `promedio_individuales`, 507 `ninguna`.
+
+**EvaluacionIndividual.jsx — confirmado**:
+- ✅ Verificado que NO existe botón "Firmar acta" por propuesta (eliminado en fork previo). El único botón "Firmar mi acta" sobreviviente está dentro del modal de celebración que solo aparece cuando el jurado termina TODAS sus evaluaciones, y redirige a `/actas` (lugar correcto para firmar el acta consolidada única). Comportamiento correcto.
